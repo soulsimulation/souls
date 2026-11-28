@@ -960,7 +960,14 @@ impl Town {
         let ids = changed(base, part);
         // A part that holds a floor, a stair or a ladder of its own, or a frame whose standing place a joint makes or
         // unmakes (racks T9, T6), changes what is ground where it is: the ground is built again from the tree, as a
-        // start builds it, never left as it was.
+        // start builds it, never left as it was. A part is in a thing (a bay, a crew) before or after the change; a
+        // building on the open ground before and after is read again where it is, as before (G3b).
+        let in_thing = |t: &Tree, id: &Id| {
+            t.handle(*id)
+                .and_then(|h| t.node(h))
+                .and_then(|n| n.parent())
+                .is_some_and(|p| p != ground)
+        };
         let holds_ways = |id: &Id| {
             base.handle(*id)
                 .and_then(|h| base.children(h))
@@ -973,7 +980,8 @@ impl Town {
                     })
                 })
         };
-        let ways = ids.iter().any(holds_ways);
+        let ways_ids: Vec<Id> = ids.iter().filter(|id| holds_ways(id)).copied().collect();
+        let mut ways = ways_ids.iter().any(|id| in_thing(base, id));
         let mut touched = BTreeSet::new();
         grounds(base, &ids, &mut touched);
         let kids = basis.index.children(base, &ids);
@@ -985,6 +993,7 @@ impl Town {
         base.apply(header, part)
             .map_err(|e| format!("{}: {}", e.name, e.detail))?;
         grounds(base, &ids, &mut touched);
+        ways = ways || ways_ids.iter().any(|id| in_thing(base, id));
         let mut versions = versions.clone();
         versions.bump(&touched);
         let (versions, base): (Versions, &Tree) = (versions, base);

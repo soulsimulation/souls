@@ -1016,6 +1016,9 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     let rows = body_rows(&k.w, walker);
     let (on, at) = *rows.last().expect("rows");
     println!("the body on {} at {at:?}", show(on));
+    for (n, p) in &rows[before.saturating_sub(2)..] {
+        println!("  row: on {} at {p:?}", show(*n));
+    }
     assert_eq!(on, perch, "the body stands on the frame's standing place");
     assert_eq!(at.y, 1_800_000, "at the beam level");
     let climb: Vec<Vec3> = rows[before..]
