@@ -755,7 +755,21 @@ impl Bay {
             4,
         )
         .unwrap();
-        town.view().stand_near(node, p, 0, None)
+        let at = town.view().stand_near(node, p, 0, None);
+        let boxes = sim::walk::town::ground_boxes(&town.buildings, self.w.ground);
+        let lies = sim::walk::town::in_passage(&town.buildings, &boxes, self.w.ground, node, p);
+        let walker = body_of(&self.w, self.w.souls[4]);
+        let from = body_on(&self.w, walker);
+        let reached = town.view().stand_reached(node, p, from);
+        println!("afresh on {}: stands {at:?}, in a passage {lies}, reached from {from:?}: {reached:?}", show(node));
+        for b in &town.buildings {
+            for l in &b.links {
+                if l.ends.iter().flatten().any(|e| e.floor == node) || l.nodes.contains(&node) {
+                    println!("  link {} {:?} nodes {:?} blocked {:?} ends {:?}", show(l.id), l.kind, l.nodes.map(show), l.blocked, l.ends);
+                }
+            }
+        }
+        at
     }
 
     fn ok(&self, got: Got, what: &str) {
