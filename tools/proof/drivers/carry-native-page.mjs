@@ -357,6 +357,12 @@ export function validateSetupApproval(ready, approval, signal, now = Date.now())
     throw Error('carry-proof.setup-review-mismatch');
   return true;
 }
+/** The setup review's window in ms: 600 s, or CARRY_SETUP_WINDOW_S seconds kept within 25 to 1800 (25 s was too short
+ * for a lane to look at setup.png and write its approval: survey-climb-a34's two runs). */
+export const setupWindowMs = (env = process.env) => {
+  const s = Number(env.CARRY_SETUP_WINDOW_S ?? 600);
+  return Math.min(1800, Math.max(25, Number.isFinite(s) ? s : 600)) * 1000;
+};
 export async function setupGate(state, page, signal) {
   const paths = state.paths, screenshot = join(paths.dir, 'setup.png');
   await page.screenshot({ path: screenshot });
@@ -365,7 +371,7 @@ export async function setupGate(state, page, signal) {
   const ready = { schema: 'carry-setup-ready/1', nonce: randomUUID(), screenshot: 'setup.png', screenshotSHA256: hash(readFileSync(screenshot)),
     source: { product: provenance.sourceHead, artifactSHA256: provenance.artifactPin.hash,
       driverSHA256: hash(readFileSync(new URL(import.meta.url))), oracleSHA256: hash(readFileSync(new URL('../../playtest/carry-contact/oracle.mjs', import.meta.url))) },
-    deadline: Date.now() + 25000 };
+    deadline: Date.now() + setupWindowMs() };
   const temporary = join(paths.dir, 'setup-ready-' + ready.nonce + '.tmp');
   const fd = openSync(temporary, 'wx', 0o600);
   try { writeFileSync(fd, JSON.stringify(ready, null, 2) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }

@@ -53,10 +53,20 @@ test('setup publishes source-bound readiness only after screenshot completion an
     const ready = JSON.parse(fs.readFileSync(join(dir, 'setup-ready.json')));
     assert.equal(ready.source.product, 'fixture-source'); assert.equal(ready.source.artifactSHA256, 'fixture-artifact');
     assert.match(ready.screenshotSHA256, /^[a-f0-9]{64}$/); assert.match(ready.source.driverSHA256, /^[a-f0-9]{64}$/);
-    assert.match(ready.source.oracleSHA256, /^[a-f0-9]{64}$/); assert.ok(ready.deadline - Date.now() <= 25000);
+    assert.match(ready.source.oracleSHA256, /^[a-f0-9]{64}$/); assert.ok(ready.deadline - Date.now() <= 600000 && ready.deadline - Date.now() > 25000);
     fs.writeFileSync(join(dir, 'setup-approval.json'), JSON.stringify({ approved: true, nonce: ready.nonce, screenshotSHA256: ready.screenshotSHA256 }));
     await run;
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+test('the setup window is 600 s by default, CARRY_SETUP_WINDOW_S seconds within 25 to 1800 when set', async () => {
+  const { setupWindowMs } = await import('./carry-native-page.mjs');
+  assert.equal(setupWindowMs({}), 600000);
+  assert.equal(setupWindowMs({ CARRY_SETUP_WINDOW_S: '120' }), 120000);
+  assert.equal(setupWindowMs({ CARRY_SETUP_WINDOW_S: '25' }), 25000);
+  assert.equal(setupWindowMs({ CARRY_SETUP_WINDOW_S: '1800' }), 1800000);
+  assert.equal(setupWindowMs({ CARRY_SETUP_WINDOW_S: '5' }), 25000);
+  assert.equal(setupWindowMs({ CARRY_SETUP_WINDOW_S: '99999' }), 1800000);
+  assert.equal(setupWindowMs({ CARRY_SETUP_WINDOW_S: 'soon' }), 600000);
 });
 test('a served file whose body never arrives is a cancelled load in bounded time, never an endless wait', async () => {
   const { readAsset } = await import('./carry-native-page.mjs');
