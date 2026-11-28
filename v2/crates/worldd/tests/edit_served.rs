@@ -7415,6 +7415,7 @@ async fn walk_two(
     let legs = frame_legs(crew_now(s.w, a.soul, b.soul), (pa, pb));
     let led = legs.len() > 1;
     for (pa, pb) in legs {
+        println!("N9DBG {:?} {what}: to {pa:?} {pb:?} from {:?}", std::time::SystemTime::now(), crew_now(s.w, a.soul, b.soul));
         // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
         // walk then closes on it.
         if led {
