@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
-import { conferenceLectureRecord, conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools, conferenceNativeLectureBinding, conferenceLecternIdentity, conferenceExecution, conferenceComponentStage, conferenceComponentJourney, conferenceRenderedArms, SLOT_POINT_COMPONENT } from './conference-native-page.mjs';
+import { conferenceGeometryModule, conferenceLectureRecord, conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools, conferenceNativeLectureBinding, conferenceLecternIdentity, conferenceExecution, conferenceComponentStage, conferenceComponentJourney, conferenceRenderedArms, SLOT_POINT_COMPONENT } from './conference-native-page.mjs';
 import { explainConference, rehearsalTemplate, performConference, performSlotPointComponent } from '../../playtest/conference/rehearse.mjs';
 import { drawnLoad, bodyGeometry } from '../../playtest/carry-contact/oracle.mjs';
 const exportedReplies = JSON.parse(readFileSync(new URL('../../playtest/conference/exported-replies.fixture.json', import.meta.url)));
@@ -15,6 +15,12 @@ function rigidFixture(geometry = new THREE.BoxGeometry(1,1,1)) {
   return {scene,root,mesh,layer:{drawn:new Map([['lectern',{obj:root}]]),instancer:{pools:new Map()}}};
 }
 const vertex = p => ({ p, mesh:'actual-skin',index:7 });
+
+test('the exact served geometry module exports the self-contained actual facing observer', async () => {
+  const module = await import('data:text/javascript;base64,' + Buffer.from(conferenceGeometryModule()).toString('base64'));
+  for (const name of ['conferenceClearanceTools', 'conferenceLecternIdentity', 'conferenceRenderedArms', 'conferenceRenderedFacing']) assert.equal(typeof module[name], 'function');
+  assert.throws(() => module.conferenceRenderedFacing(null, null, [0, 0, 0], () => new THREE.Vector3()), /root not submitted/);
+});
 
 test('public WASM snapshot consumer preserves scoped identity and rejects malformed or ambiguous records', () => {
   const bytes = Uint8Array.from(Buffer.from(exportedReplies.publicLectureSnapshotHex, 'hex'));

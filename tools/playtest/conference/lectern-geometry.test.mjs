@@ -14,6 +14,7 @@ import {chunkOf,TICK_US} from '../../../apps/web/src/v2-engine/takes.ts';
 import {TakePeople} from '../../../mars/viewer/app/engine-view/take-replay.ts';
 import {idPhase} from '../../../mars/viewer/app/engine-view/activity-poses.ts';
 import {WorldIdleLife} from '../../../apps/web/src/WorldIdleLife.ts';
+import {conferenceRenderedFacing} from '../../proof/drivers/conference-native-page.mjs';
 
 const entry=JSON.parse(await readFile(new URL('../../../content/kinds/hall/lecture.json',import.meta.url),'utf8'));
 const rigDir=process.env.HUMAN_RIG_DIR??fileURLToPath(new URL('../../../mars/viewer/public/modular/environment/',import.meta.url));
@@ -229,4 +230,55 @@ test('named point and immutable clap return clear wood on complete production sk
       assert.equal(maxInside,0,'complete named-point/clap/idle skin stays outside all wooden parts');
     }finally{people.dispose();}
   });}finally{setHumanGround(null);}
+});
+
+test('facing observer calibrates actual production skin bases and sees applied idle attention before restore', async t => {
+  const { readFile } = await import('node:fs/promises');
+  const { GLTFLoader } = await import('../../../mars/viewer/node_modules/three/examples/jsm/loaders/GLTFLoader.js');
+  const { createRig, templateFromGltf } = await import('../../../mars/viewer/app/engine-view/people.ts');
+  const { mergeRigBody } = await import('../../../mars/viewer/app/engine-view/body-merge.ts');
+  const { applyHumanFinish } = await import('../../../mars/viewer/app/engine-view/content/details/human-presets/finish.ts');
+  const { CHARACTER_WIRE, CHARACTER_CLIPS } = await import('../../../mars/viewer/app/engine-view/character-wire.ts');
+  const { WorldIdleLife } = await import('../../../apps/web/src/WorldIdleLife.ts');
+  const { createHash } = await import('node:crypto');
+  const dir = process.env.HUMAN_RIG_DIR ?? new URL('../../../mars/viewer/public/modular/environment/', import.meta.url).pathname;
+  for (const name of ['casual', 'punk', 'woman']) await t.test(name, async () => {
+    const loader = new GLTFLoader(), wire = CHARACTER_WIRE[name];
+    const load = async (file, hash) => { const b = await readFile(dir + '/' + file); assert.equal(createHash('sha256').update(b).digest('hex'), hash); return loader.parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), ''); };
+    const mesh = await load(wire.mesh, wire.meshSHA256); mesh.animations = (await load(wire.clips, CHARACTER_CLIPS[wire.clips].sha256)).animations;
+    const template = templateFromGltf(name, mesh); applyHumanFinish(name, template.gltf.scene);
+    const rig = createRig(template), body = mergeRigBody(rig);
+    assert(body, 'actual submitted merged body required');
+    const scene = new THREE.Scene(); scene.add(rig.holder); scene.updateMatrixWorld(true);
+    const observe = () => conferenceRenderedFacing(rig.holder, scene, [4, 0, 0], () => new THREE.Vector3());
+    const neutral = observe();
+    // createRig's fit() samples Idle at0.01s, not an anatomical zero pose (people.ts173).
+    const idleOffsets = { casual: [.004468196058216943, .004371577000729903], punk: [.004468196058217012, .004371577000729972], woman: [.004726129904539237, .004804500920819745] };
+    assert.equal(neutral.modelForward[2], template.forward, 'actual signed modelZ contract');
+    for (const [i, observed] of neutral.bones.entries()) {
+      assert(Math.abs(observed.angleToRoot - idleOffsets[name][i]) < 1e-9, name + ' frozen production Idle0.01 offset');
+      // Independent two-point skin mapping reference, not the observer's composed direction matrix.
+      const bone = body.skeleton.bones[observed.index], inverse = body.skeleton.boneInverses[observed.index];
+      const point = p => p.applyMatrix4(body.bindMatrix).applyMatrix4(inverse).applyMatrix4(bone.matrixWorld).applyMatrix4(body.bindMatrixInverse).applyMatrix4(body.matrixWorld);
+      const reference = point(new THREE.Vector3(0, 0, template.forward)).sub(point(new THREE.Vector3())).normalize();
+      assert(reference.distanceTo(new THREE.Vector3(...observed.forward)) < 1e-10, 'actual full skin-map direction agrees with independent point reference');
+    }
+    rig.holder.rotation.y = -.7; scene.updateMatrixWorld(true);
+    const rotated = observe(); for (const [i, b] of rotated.bones.entries()) assert(Math.abs(b.angleToRoot - idleOffsets[name][i]) < 1e-9, 'world/root rotation counted once');
+    rig.holder.rotation.y = 0; scene.updateMatrixWorld(true);
+    t.diagnostic(JSON.stringify({ name, neutralAngles: neutral.bones.map(b => ({ name: b.name, yaw: b.angleToRoot })) }));
+    const feet = ['FootL', 'FootR'].map(n => rig.holder.getObjectByName(n).matrixWorld.toArray()), root = rig.holder.matrixWorld.toArray();
+    const life = new WorldIdleLife(), self = { id: 'synthetic-listener', root: rig.holder, p: [0, 0, 0], yaw: 0, activity: 'sit', speaking: false, attention: ['synthetic-speaker'] };
+    for (let i = 0; i < 120; i++) { life.apply([self, { id: 'synthetic-speaker', root: null, p: [2, 0, 2], yaw: 0, activity: 'idle', speaking: false }], i / 60, 1 / 60); scene.updateMatrixWorld(true); if (i < 119) life.restore(); }
+    const before = JSON.stringify(body.skeleton.bones.map(b => b.matrixWorld.toArray())), applied = observe();
+    assert.equal(JSON.stringify(body.skeleton.bones.map(b => b.matrixWorld.toArray())), before, 'observer never updates transforms');
+    assert(Math.abs(applied.bones[0].angleToRoot) > .4, 'real conversation head overlay is measured');
+    assert.deepEqual(rig.holder.matrixWorld.toArray(), root); assert.deepEqual(['FootL', 'FootR'].map(n => rig.holder.getObjectByName(n).matrixWorld.toArray()), feet);
+    life.restore(); scene.updateMatrixWorld(true); assert.deepEqual(observe().bones.map(b => b.matrix), neutral.bones.map(b => b.matrix));
+    body.visible = false; assert.throws(observe, /bodyDraw missing/); body.visible = true;
+    const head = body.skeleton.bones.find(b => b.name === 'Head'), old = head.matrixWorld.elements[0]; head.matrixWorld.elements[0] = NaN; assert.throws(observe, /matrix unavailable/); head.matrixWorld.elements[0] = old;
+    const boneName = head.name; head.name = 'AbsentHead'; assert.throws(observe, /bone missing/); head.name = boneName;
+    const original = body.skeleton.bones.find(b => b.name === 'Torso').name; body.skeleton.bones.find(b => b.name === 'Torso').name = 'Head'; assert.throws(observe, /ambiguous/);
+    rig.mixer.stopAllAction();
+  });
 });

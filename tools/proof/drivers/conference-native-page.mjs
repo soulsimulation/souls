@@ -36,6 +36,53 @@ export function conferenceLectureRecord(snapshot, nativeLecture) {
     ...(fields.get(2) instanceof Uint8Array ? { def: text.decode(fields.get(2)) } : {}) };
 }
 
+// Observe only matrices already submitted by the actual draw, including the idle overlay.
+export function conferenceRenderedFacing(root, scene, presenter, vector) {
+  const need = (ok, reason) => { if (!ok) throw Error('conference facing: ' + reason); };
+  const matrix = m => m?.elements?.length === 16 && m.elements.every(Number.isFinite) && Math.abs(m.determinant()) > 1e-12;
+  const submitted = object => { for (let o = object; o; o = o.parent) { if (!o.visible) return false; if (o === scene) return true; } return false; };
+  need(submitted(root) && matrix(root.matrixWorld), 'root not submitted');
+  const inner = root.children[0];
+  need(root.children.length === 1 && inner && matrix(inner.matrix), 'production inner basis unavailable');
+  const modelForward = vector().set(1, 0, 0).transformDirection(inner.matrix.clone().invert());
+  need(Math.abs(modelForward.x) < 1e-8 && Math.abs(modelForward.y) < 1e-8 && Math.abs(Math.abs(modelForward.z) - 1) < 1e-8,
+    'unsupported production signedZ basis');
+  const meshes = []; root.traverse(mesh => { if (mesh.isSkinnedMesh && mesh.userData.bodyDraw && submitted(mesh)) meshes.push(mesh); });
+  need(meshes.length === 1, 'submitted bodyDraw missing or ambiguous');
+  const mesh = meshes[0], g = mesh.geometry, index = g.index;
+  need(index && matrix(mesh.matrixWorld) && matrix(mesh.bindMatrix) && matrix(mesh.bindMatrixInverse) &&
+    (Array.isArray(mesh.material) ? mesh.material.every(m => m.visible && m.opacity > 0) : mesh.material.visible && mesh.material.opacity > 0), 'submitted mesh unavailable');
+  need(Array.isArray(presenter) && presenter.length === 3 && presenter.every(Number.isFinite), 'presenter position unavailable');
+  const rootForward = vector().set(1, 0, 0).transformDirection(root.matrixWorld);
+  const rootAt = vector().setFromMatrixPosition(root.matrixWorld), target = vector().set(...presenter).sub(rootAt);
+  const horizontal = v => Math.atan2(v.z, v.x);
+  const delta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+  const bones = ['Head', 'Torso'].map(name => {
+    const ids = mesh.skeleton.bones.flatMap((bone, i) => bone.name === name ? [i] : []);
+    need(ids.length === 1, name + ' bone missing or ambiguous');
+    const i = ids[0], bone = mesh.skeleton.bones[i], inverse = mesh.skeleton.boneInverses[i];
+    need(matrix(bone.matrixWorld) && matrix(inverse), name + ' matrix unavailable');
+    let used = false;
+    for (let k = g.drawRange.start; k < Math.min(index.count, g.drawRange.start + g.drawRange.count) && !used; k++) {
+      const v = index.getX(k);
+      for (let j = 0; j < 4; j++) if (g.attributes.skinIndex.getComponent(v, j) === i && g.attributes.skinWeight.getComponent(v, j) > 0) used = true;
+    }
+    need(used, name + ' bone not used by submitted skin');
+    const skinMap = mesh.matrixWorld.clone().multiply(mesh.bindMatrixInverse).multiply(bone.matrixWorld).multiply(inverse).multiply(mesh.bindMatrix);
+    const forward = modelForward.clone().transformDirection(skinMap);
+    return { name, index: i, uuid: bone.uuid, matrix: bone.matrixWorld.toArray(), inverseBind: inverse.toArray(),
+      forward: forward.toArray(), angleToRoot: delta(horizontal(forward), horizontal(rootForward)),
+      angleToPresenter: target.lengthSq() > 1e-10 ? delta(horizontal(forward), horizontal(target)) : null };
+  });
+  return { basis: 'people.ts signed modelZ rotated by createRig inner to holderX; actual submitted skin map',
+    model: root.userData.bodyModel, modelForward: modelForward.toArray(), inner: inner.matrix.toArray(), root: root.matrixWorld.toArray(),
+    rootForward: rootForward.toArray(), presenter: [...presenter], mesh: mesh.uuid, meshMatrix: mesh.matrixWorld.toArray(),
+    bindMatrix: mesh.bindMatrix.toArray(), bindMatrixInverse: mesh.bindMatrixInverse.toArray(), bones };
+}
+
+export const conferenceGeometryModule = () => [conferenceClearanceTools, conferenceLecternIdentity, conferenceRenderedArms, conferenceRenderedFacing]
+  .map(fn => `export ${fn.toString()}`).join('\n');
+
 // Read only the fixture's already published public view with the same validated player as the page.
 export async function conferencePublicLecture({ paths, recipe, nativeLecture }) {
   const root = join(paths.data, 'world', 'world'), publicRoot = join(root, 'views'), inputs = [];
@@ -566,7 +613,7 @@ export async function beforeNavigation({ paths, page, base }) {
   await page.route(oracleURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: oracle }));
   state.oracleURL = oracleURL;
   const geometryURL = new URL('/__proof/conference-clearance.mjs', base).href;
-  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `export ${conferenceClearanceTools.toString()}\nexport ${conferenceLecternIdentity.toString()}\nexport ${conferenceRenderedArms.toString()}` }));
+  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: conferenceGeometryModule() }));
   state.geometryURL = geometryURL;
   const entryBytes = readFileSync(new URL('../../../content/kinds/hall/lecture.json', import.meta.url));
   state.lecternEntry = { kind: JSON.parse(entryBytes).kind, sha256: createHash('sha256').update(entryBytes).digest('hex') };
@@ -610,7 +657,7 @@ export async function runConferencePage({ page, paths, check, expectHttp, signal
   assert(identity.ok, identity.error);
   await page.evaluate(async ({ oracleURL, geometryURL, kitURL, souls, entry, binding, component }) => {
     const { observeRender, bodyGeometry, drawnLoad } = await import(oracleURL);
-    const { conferenceClearanceTools, conferenceRenderedArms } = await import(geometryURL);
+    const { conferenceClearanceTools, conferenceRenderedArms, conferenceRenderedFacing } = await import(geometryURL);
     const { TakePeople } = await import(kitURL), prototype = TakePeople.prototype;
     const world = window.__soulsEntity, original = prototype.show;
     if (!world || !original || window.__conferenceDrawObserver) throw Error('conference final-draw observer unavailable');
@@ -629,6 +676,11 @@ export async function runConferencePage({ page, paths, check, expectHttp, signal
       if (!people?.bodyObject) throw Error('conference visible body mesh interface missing');
       const frame = world.gameFrame(), diagnostics = world.contactFrame().bones;
       const lectern = geometry.lectern(world.layer, world.scene, lecternEntity);
+      const presenterMatches = frame.souls.filter(s => s.id === souls[0]);
+      if (presenterMatches.length !== 1) throw Error('conference presenter identity missing or ambiguous');
+      const presenterRoot = people.bodyObject(presenterMatches[0].entityId);
+      if (!presenterRoot) throw Error('conference presenter draw unavailable');
+      const presenter = world.camera.position.clone().setFromMatrixPosition(presenterRoot.matrixWorld).toArray();
       const bodies = souls.map(soul => {
         const matches = frame.souls.filter(s => s.id === soul);
         if (matches.length !== 1) throw Error('conference final-draw identity missing or ambiguous');
@@ -654,7 +706,7 @@ export async function runConferencePage({ page, paths, check, expectHttp, signal
           sides[distance(anchors[0]) <= distance(anchors[1]) ? 0 : 1].push(q);
         }
         const arms = component ? conferenceRenderedArms(diagnostics?.[entity]) : undefined;
-        return { ...(component ? { arms, pointAim: frame.entities[entity]?.state?.pointAim ?? null } : {}), soul, entity, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
+        return { ...(component ? { arms, pointAim: frame.entities[entity]?.state?.pointAim ?? null } : {}), soul, entity, facing: conferenceRenderedFacing(root, world.scene, presenter, () => world.camera.position.clone()), nativeYaw: frame.entities[entity]?.yaw ?? null, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
           lecternClearance: geometry.clearance(points, lectern),
           // Inferred nearest-rendered-ankle clusters; these are not native contact/rig vertex-side identities.
           footClusters: sides.map((group, index) => ({ inferred: true, nearestRenderedAnkleIndex: index, anchor: anchors[index], ...bounds(group) })),
