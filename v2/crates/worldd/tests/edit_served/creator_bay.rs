@@ -464,6 +464,17 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
                 }
             }
         }
+        let (copy, rules) = served_copy(&site.w);
+        let root = copy.tree().node(copy.tree().handle(g).unwrap()).unwrap().parent().unwrap();
+        let tree = copy.tree().frozen();
+        let header = import_eden::header(root, &rules).unwrap();
+        let next = tree.to_state().next;
+        let mut town = sim::walk::town::Town::new_on(tree, g, sim::links::Doors::new(header, rules.clone(), next), 4).unwrap();
+        let v = town.view();
+        for (k, name) in [(0usize, "frame-1"), (1, "frame-2"), (11, "s1"), (12, "s2"), (13, "stair")] {
+            println!("N14DBG reached from {name}: {:?}", v.floors_reached(part(k)).iter().map(|f| show(*f)).collect::<Vec<_>>());
+        }
+        println!("N14DBG deck {}", show(deck));
         for l in site._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
             println!("N14DBG {l}");
         }
