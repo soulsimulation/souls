@@ -2041,6 +2041,8 @@ impl Engine {
             self.activities.next = tr.next();
             for a in self.activities.release_gone(tr, c, now) {
                 self.carries.remove(&a);
+                // A raise's crew gone (review of #5264): its raise is over, never waited on.
+                self.raising.remove(&a);
                 self.unhold(a);
             }
         }
@@ -2661,10 +2663,11 @@ impl Engine {
                     show(activity)
                 );
             }
-            if self.activities.members(activity).is_none()
-                && let Some(s) = self.asm.as_mut()
-            {
-                s.ended(activity);
+            if self.activities.members(activity).is_none() {
+                self.raising.remove(&activity);
+                if let Some(s) = self.asm.as_mut() {
+                    s.ended(activity);
+                }
             }
         }
         self.activities

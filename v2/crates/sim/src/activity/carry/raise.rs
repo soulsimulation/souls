@@ -222,13 +222,12 @@ impl Raise {
 
     /// The raise a part is on, found from its crew's node alone (a world started again part way): the node at `p`
     /// turned `q` on its ground, the part riding it unturned at its foot. Where it would stand and how it would lie
-    /// are read from the turn; how far it is raised is the `r` whose tilt is nearest. None when the node only turns
-    /// about the upright: a part standing in its crew's slot, as a crew carries one, is no raise part way.
+    /// are read from the turn; how far it is raised is the `r` whose tilt is nearest (a node upright, a raise on its
+    /// last tick, is lowered toward its own front). The caller tells it from a part carried standing, whose node is
+    /// at carrying height, not at the foot (review of #5264: a node within 8 degrees of upright was left to a carry's
+    /// set-down, which lifted the part 1.2 m and dropped it).
     pub fn resume(spec: Spec, p: Vec3, q: Quat) -> R<Option<(Raise, i64)>> {
         let y = q.rotate(Vec3::new(0, M, 0)).map_err(pose_refusal)?;
-        if y.y >= M - M / 100 {
-            return Ok(None);
-        }
         let x = plan(q, Vec3::new(M, 0, 0))?;
         let stand = super::yaw_toward(x)?;
         let front = plan(stand, Vec3::new(0, 0, M))?;
@@ -460,8 +459,8 @@ mod tests {
     }
 
     /// A world started again finds a raise from its crew's node: the same foot, the same lying and standing turns, and
-    /// how far it was raised, within a few millimetres of the lifter's walk; a node that only turns about the upright
-    /// is no raise.
+    /// how far it was raised, within a few millimetres of the lifter's walk, from lying to within a few degrees of
+    /// standing (review of #5264: the last 0.27 m were left to a carry's set-down); a node upright is a raise at its end.
     #[test]
     fn a_raise_part_way_is_found_again_from_its_node() {
         let s = upright();
@@ -470,7 +469,7 @@ mod tests {
         let at = Vec3::new(5 * M, s.half_thick, -3 * M);
         let lifter = Vec3::new(5 * M + s.beside(), 0, -3 * M + s.height);
         let up = Raise::up(s, at, lie, lifter).unwrap();
-        for r in [s.height, 2_000_000, 1_500_000, 900_000, 600_000] {
+        for r in [s.height, 2_000_000, 1_500_000, 900_000, 600_000, 250_000, 100_000] {
             let (p, q) = up.node(r).unwrap();
             let (found, at_r) = Raise::resume(s, p, q).unwrap().expect("a raise");
             assert!((at_r - r).abs() <= 60_000, "raised to {at_r}, was {r}");
@@ -486,7 +485,8 @@ mod tests {
             let off = (i128::from(ta.x - tb.x).pow(2) + i128::from(ta.y - tb.y).pow(2) + i128::from(ta.z - tb.z).pow(2)).isqrt();
             assert!(off <= 40_000, "no jump as it goes on: its top {off} µm off at {r}");
         }
-        assert_eq!(Raise::resume(s, up.foot, up.stand).unwrap(), None);
+        let (found, at_r) = Raise::resume(s, up.foot, up.stand).unwrap().expect("a raise at its end");
+        assert_eq!((at_r, found.node(0).unwrap()), (0, (up.foot, up.stand)), "standing, where it stands");
     }
 
     /// A part whose length is not flat is not raised, and one not upright is not lowered, each by name.
