@@ -109,7 +109,7 @@ test('named point and immutable clap return clear wood on complete production sk
       for(const time of times){
         const skin=draw(time),local=skin.map(p=>({...p,p:[-p.p[0],p.p[1],4-p.p[2]]}));
         assert.deepEqual(views.bodyObject(id).position.toArray(),worldRoot,'the sampled native root stays exact');
-        assert.equal(sampled.yaw,-Math.PI/2,'authored standing heading stays exact');
+        assert.equal(sampled.yaw,-1.571,'the take preserves its canonical milliradian standing heading');
         const hits=local.filter(p=>entry.looks.shape.shapes.slice(1).some(s=>inside(p.p,s)));
         if(hits.length>maxInside){maxInside=hits.length;worst={time,part:hits[0].part,p:hits[0].p};}
         if(time>=CLAP_END&&time<=CLAP_END+.35)oldTopInside+=local.filter(p=>inside(p.p,priorTop)).length;
