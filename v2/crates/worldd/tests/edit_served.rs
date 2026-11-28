@@ -5320,14 +5320,27 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
     let (n1, _) = pose_of(crew);
     println!("turned: its length {len:?}, the crew's node from {n0:?} to {n1:?}");
     assert!(len.z < -990_000, "its length outward, along -z: {len:?}");
-    // Carried so its foot comes down at upright_a: the whole crew moved by the foot's way there.
-    let (dx, dz) = (ua.x - fpos.x, ua.z - fpos.z);
-    let feet: Vec<Vec3> = w.souls.iter().map(|s| body_at(&w, body_of(&w, *s))).collect();
-    both(
-        &mut hands,
-        [v3(feet[0].x + dx, 0, feet[0].z + dz), v3(feet[1].x + dx, 0, feet[1].z + dz)],
-        "to the bay",
-    );
+    // Carried so its foot comes down at upright_a: the whole crew moved by the foot's way there, led by its front, its
+    // heading kept ([`heading_walk`]: the world keeps the back in its place); again for what a walk's end leaves.
+    let mut fpos = fpos;
+    for leg in 0..3 {
+        let (dx, dz) = (ua.x - fpos.x, ua.z - fpos.z);
+        if leg > 0 && (dx.abs() + dz.abs()) <= 60_000 {
+            break;
+        }
+        let feet: Vec<Vec3> = w.souls.iter().map(|s| body_at(&w, body_of(&w, *s))).collect();
+        let (f1, b1) = (v3(feet[0].x + dx, 0, feet[0].z + dz), v3(feet[1].x + dx, 0, feet[1].z + dz));
+        hands[0].send("eden:walk", g, heading_walk(f1, b1));
+        let e = socket_end(&mut hands[0].s);
+        assert_eq!(e.kind, 1, "the front to the bay: {e:?}");
+        settled(&w, hands[1].soul, b1, "to the bay");
+        hands[1].walk_to(g, b1);
+        let e = socket_end(&mut hands[1].s);
+        assert_eq!(e.kind, 1, "the back to the bay: {e:?}");
+        std::thread::sleep(Duration::from_millis(500));
+        fpos = pose_of(frame).0;
+        println!("leg {leg}: its foot {} mm from upright_a", apart_mm(fpos, ua));
+    }
     let got = hands[0].act("carry:set-down", crew, BTreeMap::new());
     assert_eq!(got.kind, 1, "set down: {got:?}");
     std::thread::sleep(Duration::from_secs(2));
