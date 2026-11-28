@@ -209,6 +209,53 @@ pub mod io {
     }
 }
 
+/// The public stream's reading thread (#5282): each record the world hands the stream is read (`Part::read`, the
+/// most of the stream's work at 1,000 agents after its own cut) on a thread of its own, ahead of the stream's thread,
+/// which takes the records in the order handed with their parts read ([`PublicWriter::push_read`]). A record refused
+/// there is refused by the writer as if it had read it. Its own limit is that thread's core; its gauge is
+/// `stream_read` in `health.json` ([`read::totals`]): records read, those read and not yet taken, and the time spent
+/// reading. What waits for it is bounded as before: the world counts a record handed until the stream's thread takes
+/// it.
+pub mod read {
+    // The reading time is wall time for the gauge only (K7 allows it, as in `measures`).
+    #![allow(clippy::disallowed_methods)]
+    use super::{Part, R};
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    use std::sync::mpsc::{Receiver, channel};
+    /// A record handed, its bytes, and its part read there (None for a record that is not a part).
+    pub type Read = (u64, Vec<u8>, Option<R<Part>>);
+    /// Records read, records taken by the stream's thread, nanoseconds reading.
+    static COUNTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+    /// Starts the reading thread on what the world hands the stream: the records come out of the receiver returned,
+    /// in order, read. It ends when the world's sender does, and so does the receiver.
+    pub fn beside(rx: Receiver<(u64, Vec<u8>)>) -> std::io::Result<Receiver<Read>> {
+        let (tx, out) = channel();
+        std::thread::Builder::new()
+            .name("stream-read".into())
+            .spawn(move || {
+                for (record, bytes) in rx {
+                    let t = std::time::Instant::now();
+                    let part = (!sim::recorder::is_input(&bytes)).then(|| Part::read(&bytes));
+                    COUNTS[2].fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
+                    COUNTS[0].fetch_add(1, Relaxed);
+                    if tx.send((record, bytes, part)).is_err() {
+                        return;
+                    }
+                }
+            })?;
+        Ok(out)
+    }
+    /// The stream's thread took a record read here.
+    pub fn took() {
+        COUNTS[1].fetch_add(1, Relaxed);
+    }
+    /// `[read, waiting, reading ms]`: records read, those read and not yet taken, and the time spent reading.
+    pub fn totals() -> [u64; 3] {
+        let [read, taken, ns] = std::array::from_fn(|i| COUNTS[i].load(Relaxed));
+        [read, read.saturating_sub(taken), ns / 1_000_000]
+    }
+}
+
 mod prof {
     // A profile is wall time on the writer's thread, off unless asked for (K7 allows it, as in `measures`).
     #![allow(clippy::disallowed_methods)]
@@ -3484,6 +3531,10 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     fn apply_record(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        self.apply_read(record, raw, None)
+    }
+    /// [`PublicWriter::apply_record`] with the record's part already read, on the reading thread ([`Reader`]).
+    fn apply_read(&mut self, record: u64, raw: &[u8], read: Option<R<Part>>) -> R<()> {
         if let Some(e) = &self.poisoned {
             return Err(e.clone());
         }
@@ -3495,13 +3546,13 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         // A record refused once it began may leave the writer's tree part changed (0.136): the writer is poisoned and
         // refuses every later record with the same refusal, so nothing is published from it.
-        let taken = self.apply_part_record(record, raw);
+        let taken = self.apply_part_record(record, raw, read);
         if let Err(e) = &taken {
             self.poisoned = Some(e.clone());
         }
         taken
     }
-    fn apply_part_record(&mut self, record: u64, raw: &[u8]) -> R<()> {
+    fn apply_part_record(&mut self, record: u64, raw: &[u8], read: Option<R<Part>>) -> R<()> {
         // Read only by the whole-state reference (tests).
         let _ = record;
         #[cfg(test)]
@@ -3509,7 +3560,10 @@ impl<S: ObjectStore> PublicWriter<S> {
             return self.apply_record_whole_state(record, raw);
         }
         if !sim::recorder::is_input(raw) {
-            let part = Part::read(raw)?;
+            let part = match read {
+                Some(read) => read?,
+                None => Part::read(raw)?,
+            };
             // The entries that put a thing into a closed container or touch one in it (#3948): never published.
             let kept = self.kept_out(&part);
             let waiting = if self.incremental {
@@ -3849,10 +3903,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     pub fn push(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        self.push_read(record, raw, None)
+    }
+    /// [`PublicWriter::push`] of a record whose part the reading thread has already read ([`Reader`]): `read` is
+    /// `Part::read(raw)`, or None for a record that is not a part (an input) or was not read there.
+    pub fn push_read(&mut self, record: u64, raw: &[u8], read: Option<R<Part>>) -> R<()> {
         self.whole_on_disk()?;
         let window = self.window;
         let mut lap = prof::Lap::start();
-        self.apply_record(record, raw)?;
+        self.apply_read(record, raw, read)?;
         if trace::on() && !sim::recorder::is_input(raw) {
             let newest = Part::read(raw)?.effects.iter().map(|e| e.envelope.at).max();
             let wall = trace::now_ms();

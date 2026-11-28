@@ -384,6 +384,11 @@ impl Measures {
             o,
             ",\"stream_io\":{{\"parts\":{parts},\"part_syncs\":{part_syncs},\"part_waits\":{part_waits},\"syncs\":{syncs},\"waits\":{waits},\"bytes\":{bytes}}}"
         );
+        let [read, waiting, reading_ms] = crate::view_out::read::totals();
+        let _ = write!(
+            o,
+            ",\"stream_read\":{{\"records\":{read},\"waiting\":{waiting},\"reading_ms\":{reading_ms}}}"
+        );
         BACKUP.json("stream_backup", &mut o);
         CLEANUP.json(&mut o);
         SHIPPING.json("shipping", &mut o);
