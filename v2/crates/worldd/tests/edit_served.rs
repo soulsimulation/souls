@@ -5838,7 +5838,8 @@ fn hands_on_the_face_held_from(w: &Seeded, crew: Id, part: Id) {
 }
 
 /// Waits (at most 60 s) until each holder of crew `crew`'s standing `part` stands at its stance behind its post
-/// (`grips::stance`, within 1 mm on the plan: the world's walk there has ended), and fails otherwise, naming how far.
+/// (`grips::stance`, within 30 mm on the plan, where the world counts it arrived and turns it to its post), and fails
+/// otherwise, naming how far.
 fn at_stances(w: &Seeded, crew: Id, part: Id, what: &str) {
     use sim::activity::carry::grips::{GRIPS, Holds, stance};
     let end = Instant::now() + Duration::from_secs(60);
@@ -5867,7 +5868,7 @@ fn at_stances(w: &Seeded, crew: Id, part: Id, what: &str) {
                 )
             })
             .collect();
-        if offs.iter().all(|o| *o <= 1) {
+        if offs.iter().all(|o| *o <= 30) {
             return;
         }
         assert!(
