@@ -1,0 +1,1334 @@
+{
+ "format": "camera-reel-catalogue/1",
+ "about": "The test scenes of the camera reel and the definitions of its scorecard (camera tranche, C01). The runner (run.mjs) stages each scene on a local fake-mind world and films it with every camera variant at once; the page's per-frame log follows `log`, and score.mjs computes `measures` from it. README.md explains each part.",
+ "conventions": {
+  "units": "Metres in the world's frame, x east and z south, as `souls.mjs walk <x>,<z>` takes them. Seconds. Positions come from the templates in worlds/templates/.",
+  "souls": "A scene's Souls are seats a to f, paired and joined in that order (tools/playtest/arena/new-engine/seat.mjs `pairSeat`, then `join`). Fake minds only: every move is a command below.",
+  "cmd": "Each `cmd` is the argument list of the Soul client (v2/client/src/cli/souls.mjs), sent by that seat's `cli(...cmd)`. Before sending, replace `@alias` (also inside a word, as in `sit:@bench`) by the id of the thing `things[alias]` names, `$a`..`$f` by that seat's body id, and `{name}` by a value captured earlier in the scene.",
+  "things": "A thing is named by its `name` in the world's template, with `in` (the template name of the thing it was placed in) when the name alone is not unique. Resolve it once per scene from seat a's copy: `find <name> --limit 50`, keep rows whose `name` is exactly that name and whose kind is not a body, then, with `in`, the one inside that thing. None or several left: the scene failed to stage.",
+  "capture": "A setup step with `capture: {var: key}` stores, as `{var}`, the first value found under `key` anywhere in that command's JSON answer (`crew` in `carry offer`'s answer; `conversation` in the invitation `wait` returns).",
+  "setup": "Setup runs before recording, in order, each step to its end: a command with `--wait` that answers still-running is polled with `receipt <sequence>` until its phase is done. A refused setup step, or setup longer than `setup_max_s`, means the scene failed to stage; report it and go on. A setup walk refused `walk.no-ground-there` is sent once more to the nearest point the refusal names.",
+  "steps": "Steps run while recording, never blocking the clock on an answer. `t` is seconds after the recording starts. `after: \"prev\"` fires when the same Soul's previous step is done (its receipt), plus `delay_s`. The recording ends at `length_s` whatever the Souls are doing; the runner then sends `stop` to each Soul.",
+  "record": "Without `record`, recording starts when setup ends. `record.start: \"takeoff\"` is for rides: the last setup step boards (`ride:` or `sail:`), and its answer's `aboard` words say `takes off in N s`; recording starts `lead_s` seconds before that moment. If N is less than `lead_s + 3`, send `act rise`, wait 10 s and board again until it is not (a ride waits at its stop: a balloon one minute each lap, a cable car or big wheel three minutes at each station).",
+  "camera": "`mode: follow` opens each variant's page following `subject`'s Soul (`?follow=1#soul/<id>`); `mode: broadcast` leaves the page in Broadcast, its default. `group` lists the Souls that form one subject: today's Follow frames only `subject`; event follow (C19, C20) frames them all, and the scorecard reports both.",
+  "shape": {
+   "landscape": [
+    1280,
+    720
+   ],
+   "portrait": [
+    390,
+    844
+   ]
+  },
+  "light": {
+   "how": "The page's `?hour=HH:MM` sets the picture's time of day (the light only).",
+   "day": "13:00",
+   "dusk": "19:30",
+   "night": "23:30"
+  },
+  "pace": "Lengths assume a walk of about 1.3 m/s and a jog of about 2.6 m/s. A Soul that arrives early stands still until the scene ends; that is part of the scene.",
+  "fallback": "A scene's `fallback` replaces the named fields when its first staging fails. Use nothing else in its place.",
+  "setup_max_s": 300
+ },
+ "worlds": {
+  "eden-2026": {
+   "template": "worlds/templates/eden-2026.json",
+   "map": "content/worlds/eden/map.json",
+   "character": "Dense town, about 220 buildings, every ride."
+  },
+  "eden-district": {
+   "template": "worlds/templates/eden-district.json",
+   "map": "content/worlds/eden/map.json",
+   "character": "Small, mostly indoors: four cottages, a library hall, a plaza, a balloon."
+  },
+  "hello-hamlet": {
+   "template": "worlds/templates/hello-hamlet.json",
+   "map": "content/worlds/godmode-lab/map.json",
+   "character": "Almost empty: a cottage on a knoll, two small halls, a pond."
+  },
+  "littlemartians-two": {
+   "template": "worlds/templates/littlemartians-two.json",
+   "map": "content/worlds/little-martians/map.json",
+   "character": "Large, mostly outdoors: mountains, basins, a plateau, scanned exhibits."
+  },
+  "mars-camp": {
+   "template": "worlds/templates/mars-camp.json",
+   "map": "content/worlds/mars/map.json",
+   "character": "Sparse to medium: three roofless halls, a fire, a build yard, rock fields."
+  },
+  "mars-two": {
+   "template": "worlds/templates/mars-two.json",
+   "map": "content/worlds/mars/map.json",
+   "character": "Sparse and mixed: campus buildings, huts, vehicles, open desert."
+  }
+ },
+ "worlds_note": "`map` names each thing's Soul Actions entry when the template is exported to facts (v2/tools/import-eden/export/export.ts `--map`); without it rides, seats and loads may offer no acts. tools/playtest/arena/new-engine/world.mjs `mapFor` passes a map only for eden-2026, so the runner exports the facts itself (`exportFacts(template, out, map)`) and starts the world with `facts`.",
+ "held_out": {
+  "share": "one third (15 of 45)",
+  "rule": "Scenes are numbered from 1 in the order of this file. A scene whose number divides by 3 is held out; every other scene is in the tuning set.",
+  "arranged": "The order was fixed on 28 November 2026, before any camera had been run on any scene, so that the held-out set has scenes from all six worlds and all six kind groups, each named failure keeps at least two tuning scenes, and no kind the plan asks for is only in the held-out set.",
+  "frozen": "`set` is never changed afterwards. A scene added later goes at the end and takes the next number under the same rule. Held-out scenes run only at gates and are never looked at while tuning."
+ },
+ "failures": {
+  "forced-climb": {
+   "complaint": "The camera rises to an overhead view when its view is blocked.",
+   "detector": "forced-climbs"
+  },
+  "glide-round-building": {
+   "complaint": "The camera glides round a building to get its view back.",
+   "detector": "glide"
+  },
+  "zigzag": {
+   "complaint": "The camera moves from side to side, or up and down, and back.",
+   "detector": "zigzags"
+  },
+  "balloon-jutting": {
+   "complaint": "On a ride the camera juts in and out.",
+   "detector": "jutting"
+  },
+  "cropped-head": {
+   "complaint": "The head is cut off by the edge of the frame.",
+   "detector": "head-outside"
+  },
+  "wall-pass": {
+   "complaint": "The camera passes through a wall, most often going indoors.",
+   "detector": "wall-pass"
+  }
+ },
+ "log": {
+  "format": "camera-reel-log/1",
+  "about": "What the page keeps for every drawn frame with `?camera-log=1` (C03). The scorecard reads only these fields. Flat numbers; names and ids go through tables kept once per log.",
+  "frame": [
+   ["t", "ms since the log started (performance.now)"],
+   ["dt", "ms since the previous drawn frame"],
+   ["tick", "the world tick drawn, with its fraction (one tick is 50 ms)"],
+   ["ex, ey, ez", "the camera's eye, world metres (y up)"],
+   ["lx, ly, lz", "the point the camera looks at, world metres"],
+   ["fov", "vertical field of view, degrees"],
+   ["aspect", "frame width over height"],
+   ["mode", "0 manual, 1 follow, 2 broadcast"],
+   ["user", "1 while a viewer's drag, zoom or its hold owns the camera, else 0"],
+   ["shot", "index into the log's table of shot names"],
+   ["reason", "index into the log's table of reasons for the shot"],
+   ["high", "1 while the shot is a high wide chosen on purpose, else 0 (today's camera: always 0)"],
+   ["cut", "1 on the first frame after a cut the camera made on purpose, else 0 (today's camera: always 0)"],
+   ["cost", "ms the camera's own code took this frame"],
+   ["sky", "1 when sky shows near the top of the frame, 0 when not, -1 when not sampled this frame. Three rays from the eye through the frame at (-0.6, 0.9), (0, 0.9) and (0.6, 0.9) in the units of hx, hy: 1 when at least one points above the horizontal and meets nothing drawn within 500 m. May be sampled every fifth frame"],
+   ["n", "how many subjects follow in this row"]
+  ],
+  "subject": [
+   ["id", "index into the log's table of body ids; the primary subject is first"],
+   ["px, py, pz", "the body's root (its feet when standing), world metres"],
+   ["fx, fz", "its front as a unit vector on the ground plane: the way it travels when faster than 0.2 m/s, else the way it faces"],
+   ["hx, hy", "the centre of its head on screen: x right and y up, both -1 to 1 across the frame"],
+   ["hd", "the head's distance in front of the camera along the view axis, metres (0 or less: behind the camera)"],
+   ["tx, ty, td", "the centre of its torso, likewise"],
+   ["bx, by", "its root on screen, likewise"],
+   ["hh", "head hidden by something drawn: 1 yes, 0 no, -1 not sampled this frame"],
+   ["th", "torso hidden, likewise"],
+   ["riding", "1 when the body is a child of a ride or vehicle in the world's tree, else 0"],
+   ["indoors", "1 when a room is among the body's parents in the world's tree, else 0"]
+  ],
+  "optional": [
+   ["blocked", "frame field: 1 when the straight line from the previous frame's eye to this one meets something drawn (one ray, only when the eye moved more than 0.05 m), else 0. Used only by the wall-pass detector"]
+  ]
+ },
+ "derived": {
+  "about": "Quantities the scorer works out from the log. Frame i has time t_i; E is the eye, L the look point. The subject is the scene's `subject` (follow) or the row's first subject (broadcast); for a scene with `group`, group quantities use every listed Soul present in the row.",
+  "valid": "A frame counts for a subject measure when user is 0, n is at least 1, and mode is the scene's mode. Frames left out are reported per scene as `user` or `wrong-mode` time.",
+  "C": "The subject's centre: (px, py + 1.0, pz). For a group: the mean of its members' centres.",
+  "R": "E - C. dist is its length.",
+  "down": "asin((ey - Cy) / dist), degrees: how far the camera looks down at the subject (negative: up at it).",
+  "bearing": "atan2(Rx, Rz), degrees: where the camera stands round the subject.",
+  "face": "The angle on the ground plane between (fx, fz) and (Rx, Rz), 0 to 180 degrees: 0 is the camera straight in front of the subject, 180 straight behind.",
+  "size": "(hy - by) / 2: the share of the frame's height from root to head. For a group: (the highest hy - the lowest by) / 2.",
+  "head_in": "hd > 0 and |hy| + r <= 1 and |hx| + r / aspect <= 1, where r = 0.13 / (hd * tan(fov / 2)) is a 0.13 m head radius on screen.",
+  "visible": "th is 0; or th is 1 inside a run of hidden frames shorter than 1.5 s with a visible frame before and after it (passing behind a post is normal). A frame with th -1 takes the last sampled value.",
+  "cut_frame": "cut is 1; or the eye moved more than 1.5 m in the one frame and more than 8 times the median step of the 0.5 s before plus 0.5 m; or the view direction (L - E) turned more than 20 degrees in the one frame. Cut frames less than 0.2 s apart are one cut.",
+  "v": "Camera velocity, m/s: (E_i - E_(i-1)) / dt, averaged over the last 0.2 s, never across a cut. While riding is 1 use R in place of E, so a ride's own motion does not count.",
+  "side": "v along the camera's right vector (the horizontal unit vector at right angles to L - E).",
+  "rise": "The y part of v.",
+  "H": "ey - Cy: the camera's height over the subject, so that stairs, hills and rides do not count as the camera climbing."
+ },
+ "measures": [
+  {
+   "id": "overhead",
+   "name": "Overhead time",
+   "unit": "share of frames",
+   "formula": "Frames with down > 35 and high = 0, over valid frames with riding = 0.",
+   "applies": "A walking or still subject and a group, in Follow and in Broadcast. Not a rider (riding = 1), and not a high wide chosen on purpose (high = 1).",
+   "also": "The share of frames with high = 1 is printed beside it; above 10% of a Follow scene it is marked.",
+   "target": "under 2%"
+  },
+  {
+   "id": "forced-climbs",
+   "name": "Forced climbs",
+   "unit": "count, and per minute",
+   "formula": "An event at frame i when H_i minus the lowest H in the 2 s before is 2.0 m or more, with no cut in those 2 s. The climb is chosen, and not counted, only when high_i = 1 and the subject was visible for the whole 2 s before that lowest point. Events less than 2 s apart are one.",
+   "applies": "Every subject, riders too (H is relative to the subject). A cut to a high view is not a climb.",
+   "target": "none"
+  },
+  {
+   "id": "zigzags",
+   "name": "Zigzags",
+   "unit": "count, and per minute",
+   "formula": "For each of the two signals side (threshold 0.15 m/s) and rise (threshold 0.10 m/s): a lobe is a stretch where the signal keeps one sign at or above its threshold and the camera travels at least 0.10 m; stretches of the same sign parted only by frames under the threshold are one lobe. A reversal is a lobe followed by one of the other sign, timed at the start of the second. A zigzag is two reversals of one signal less than 3.0 s apart with no cut between; it is counted once and counting starts again from its last lobe.",
+   "applies": "Every subject and mode.",
+   "target": "at least 80% fewer than today's camera over the same scenes"
+  },
+  {
+   "id": "head-outside",
+   "name": "Head outside the frame",
+   "unit": "share of frames",
+   "formula": "Valid frames where head_in is false for the subject, over valid frames. For a scene with `group`, a second figure: frames where it is false for any member.",
+   "applies": "Every subject and mode, riders too.",
+   "target": "under 1% for the subject; the any-member figure has no target until the baseline is measured"
+  },
+  {
+   "id": "good-angle",
+   "name": "Good-angle time",
+   "unit": "share of frames",
+   "formula": "A valid frame is good when all five hold. (1) visible. (2) head_in. (3) Eye-level band: -10 <= down <= 25; for a rider -30 <= down <= 45; waived while high = 1. (4) Size: 0.12 to 0.80 in landscape and 0.08 to 0.60 in portrait; for a group 0.08 to 0.80 of the group's size, with head_in for at least 80% of its members; for a rider 0.02 to 0.60; each lower bound is halved while high = 1. (5) Not from behind for long: a frame is behind when face > 120; the frames of a behind run after its first 6 s fail. For a group that is not moving, the frame is behind when more than half its members are. Not applied to a rider.",
+   "applies": "Every subject and mode, with the per-type bounds above.",
+   "target": "90% or more"
+  },
+  {
+   "id": "sky",
+   "name": "Horizon or sky in frame, outdoors",
+   "unit": "share of frames",
+   "formula": "Valid frames with indoors = 0 and sky = 1, over valid frames with indoors = 0. A frame with sky -1 takes the last sampled value.",
+   "applies": "Outdoors only, every subject and mode. A balloon's slight look down still shows sky at the top of the frame.",
+   "target": "70% or more"
+  },
+  {
+   "id": "cuts",
+   "name": "Cut count and spacing",
+   "unit": "count, per minute, shortest gap in s",
+   "formula": "Cuts are the cut frames. Printed: the count, cuts per minute, the shortest gap between two cuts, the number of gaps under the limit (Follow 8 s, Broadcast 6 s), and jump cuts: cuts that keep the same subject, change bearing by less than 30 degrees and change size by a factor under 1.5. A Broadcast cut to another subject counts for spacing and is never a jump cut.",
+   "applies": "Follow and Broadcast, every subject. All frames, not only valid ones.",
+   "target": "Follow: at most 2 a minute and none closer than 8 s. Broadcast: none closer than 6 s. No jump cuts"
+  },
+  {
+   "id": "cost",
+   "name": "Camera cost per frame",
+   "unit": "ms",
+   "formula": "The mean and the 95th percentile of cost over all frames of the scene; the mean dt beside them.",
+   "applies": "Every scene and mode.",
+   "target": "mean no worse than today's camera on the same scene; aim for half"
+  }
+ ],
+ "detectors_about": "One per named failure that the eight measures do not already name: counts that show the baseline reel catches the complaint (C04). They carry no target.",
+ "detectors": [
+  {"id": "glide", "name": "Glide round something", "formula": "A stretch of 4 s or more with no cut in which bearing changes one way by 60 degrees or more, and either the subject is not visible for 30% of it or the camera's path is at least twice as long as the subject's.", "unit": "count"},
+  {"id": "jutting", "name": "In and out on a ride", "formula": "Over frames with riding = 1, the zigzag rule applied to the rate of change of dist (threshold 0.3 m/s, 0.5 m of travel for a lobe).", "unit": "count"},
+  {"id": "wall-pass", "name": "Through a wall", "formula": "Frames with blocked = 1 that are not cut frames, grouped into one event when less than 1 s apart. Without the optional field it is judged by eye on the dense strips round each entry into a building.", "unit": "count"}
+ ],
+ "scenes": [
+  {
+   "n": 1,
+   "id": "walk-open-hamlet",
+   "set": "tuning",
+   "kind": "walk.open-ground",
+   "world": "hello-hamlet",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 35,
+   "space": "outdoors",
+   "provokes": [],
+   "why": "Control: 50 m over empty grass from the orchard flag to the plaza flag. Nothing can block the view, so any climb, swing or cut here is unprovoked.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-40,-30", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:0,0"]}
+   ]
+  },
+  {
+   "n": 2,
+   "id": "walk-street-turns-eden",
+   "set": "tuning",
+   "kind": "walk.street-turns",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "day",
+   "length_s": 40,
+   "space": "outdoors",
+   "provokes": ["glide-round-building", "zigzag"],
+   "why": "Central house street east, a right-angle turn north between house 2 and the tower house, then a second turn east on the east-gate street. Two corners in 51 m.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:44,22", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:62,22"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:62,5"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:78,5"]}
+   ]
+  },
+  {
+   "n": 3,
+   "id": "walk-exhibits-lm",
+   "set": "held-out",
+   "kind": "walk.trees-posts",
+   "world": "littlemartians-two",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 35,
+   "space": "outdoors",
+   "provokes": ["zigzag", "forced-climb"],
+   "why": "Along scan crosswalk 3 (1.2 m wide) past scanned exhibits standing on both sides: tall, irregular occluders pass between camera and walker.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-4,109.5", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:40,109.5"]}
+   ]
+  },
+  {
+   "n": 4,
+   "id": "walk-lamps-district",
+   "set": "tuning",
+   "kind": "walk.trees-posts",
+   "world": "eden-district",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "dusk",
+   "length_s": 38,
+   "space": "outdoors",
+   "provokes": ["zigzag", "forced-climb"],
+   "why": "The housing street past seven lamp posts on alternating sides (z 18.2 and 24.8), houses close on both sides, into the plaza trees.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:24,21.5", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:70,21.5"]}
+   ]
+  },
+  {
+   "n": 5,
+   "id": "walk-alley-camp",
+   "set": "tuning",
+   "kind": "walk.narrow-passage",
+   "world": "mars-camp",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "day",
+   "length_s": 30,
+   "space": "outdoors",
+   "provokes": ["forced-climb", "wall-pass"],
+   "why": "The 2 m gap between the kitchen hall (x -20 to -8) and the living room (x -6 to 10), 12 m long with 2.6 m walls and no roof, then a turn behind the living room. No camera room on either side.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-7,-3", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:-7,-25"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:2,-25"]}
+   ]
+  },
+  {
+   "n": 6,
+   "id": "walk-huts-mars-two",
+   "set": "held-out",
+   "kind": "walk.trees-posts",
+   "world": "mars-two",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "night",
+   "length_s": 35,
+   "space": "outdoors",
+   "provokes": ["zigzag", "glide-round-building"],
+   "why": "Close along the row of five colab huts (x 66.5 to 70, z -8.6 to 24.9), at night.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:63,-12", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:63,27"]}
+   ]
+  },
+  {
+   "n": 7,
+   "id": "walk-u-turn-lm",
+   "set": "tuning",
+   "kind": "walk.u-turn",
+   "world": "littlemartians-two",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 36,
+   "space": "outdoors",
+   "provokes": ["zigzag", "glide-round-building"],
+   "why": "20 m east along the promenade, then straight back. The old camera turns after the Soul at 0.1 rad/s.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-12,18", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:8,18"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:-12,18"]}
+   ]
+  },
+  {
+   "n": 8,
+   "id": "walk-stop-start-mars-two",
+   "set": "tuning",
+   "kind": "walk.stop-start",
+   "world": "mars-two",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 32,
+   "space": "outdoors",
+   "provokes": ["zigzag", "cropped-head"],
+   "why": "Three walks of about 6 s with stops of 4 s between, on open desert. Tests hunting at each stop and the close-in on a still subject.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:15,-8", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:50,-8"]},
+    {"t": 6, "who": "a", "cmd": ["stop"]},
+    {"t": 10, "who": "a", "cmd": ["act", "walk:50,-8"]},
+    {"t": 16, "who": "a", "cmd": ["stop"]},
+    {"t": 20, "who": "a", "cmd": ["act", "walk:50,-8"]},
+    {"t": 27, "who": "a", "cmd": ["stop"]}
+   ]
+  },
+  {
+   "n": 9,
+   "id": "walk-round-hall-hamlet",
+   "set": "held-out",
+   "kind": "walk.round-building",
+   "world": "hello-hamlet",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "day",
+   "length_s": 36,
+   "space": "outdoors",
+   "provokes": ["glide-round-building", "wall-pass"],
+   "why": "Round three sides of the presentation hall (x 9 to 19, z -12 to -4), 2 m off its walls.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:7,-2", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:7,-14"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:21,-14"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:21,-2"]}
+   ]
+  },
+  {
+   "n": 10,
+   "id": "walk-jog-hamlet",
+   "set": "tuning",
+   "kind": "walk.jog",
+   "world": "hello-hamlet",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 30,
+   "space": "outdoors",
+   "provokes": ["forced-climb", "cropped-head"],
+   "why": "Jog from the plaza up the 4 m knoll to the cottage and back: a faster subject on rising ground.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:0,0", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:36,16", "gait=jog"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:0,0", "gait=jog"]}
+   ]
+  },
+  {
+   "n": 11,
+   "id": "walk-round-library-district",
+   "set": "tuning",
+   "kind": "walk.round-building",
+   "world": "eden-district",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 34,
+   "space": "outdoors",
+   "provokes": ["glide-round-building", "forced-climb", "wall-pass"],
+   "why": "Round three sides of the library hall (x 68.8 to 79.2, z -11.2 to -2.8). The building is between camera and walker at each corner.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:66,-2", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:66,-13"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:82,-13"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "walk:82,-1"]}
+   ]
+  },
+  {
+   "n": 12,
+   "id": "walk-bridge-eden",
+   "set": "held-out",
+   "kind": "walk.narrow-passage",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "dusk",
+   "length_s": 30,
+   "space": "outdoors",
+   "provokes": ["forced-climb", "zigzag"],
+   "why": "Over the south canal bridge (3.2 m wide, railed, arched, water on both sides). A camera beside the walker is over the canal.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:118,2", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:150,2"]}
+   ]
+  },
+  {
+   "n": 13,
+   "id": "walk-open-lm",
+   "set": "tuning",
+   "kind": "walk.open-ground",
+   "world": "littlemartians-two",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "dusk",
+   "length_s": 34,
+   "space": "outdoors",
+   "provokes": [],
+   "why": "South down the beacon walk (6 m wide) between the two north basins, mountains all round: the vista case, at dusk on a phone.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:0,-22", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:0,16"]}
+   ]
+  },
+  {
+   "n": 14,
+   "id": "house-in-out-hamlet",
+   "set": "tuning",
+   "kind": "building.house-in-out",
+   "world": "hello-hamlet",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 36,
+   "space": "mixed",
+   "provokes": ["wall-pass", "forced-climb", "cropped-head"],
+   "why": "Into the knoll cottage through its door (cottage-door-1 at 42.0, 12.4), 5 s inside, out again.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:38,20", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:44,10"]},
+    {"after": "prev", "delay_s": 5, "who": "a", "cmd": ["act", "walk:38,20"]}
+   ]
+  },
+  {
+   "n": 15,
+   "id": "house-in-out-district",
+   "set": "held-out",
+   "kind": "building.house-in-out",
+   "world": "eden-district",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "day",
+   "length_s": 36,
+   "space": "mixed",
+   "provokes": ["wall-pass", "forced-climb"],
+   "why": "From the street into house 1 (7 by 6 m, door at 35.2, 17.9), 5 s inside, out again.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:35,23", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:34,15.5"]},
+    {"after": "prev", "delay_s": 5, "who": "a", "cmd": ["act", "walk:35,23"]}
+   ]
+  },
+  {
+   "n": 16,
+   "id": "tiny-room-kitchen-district",
+   "set": "tuning",
+   "kind": "building.tiny-room",
+   "world": "eden-district",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 32,
+   "space": "indoors",
+   "provokes": ["wall-pass", "cropped-head", "forced-climb"],
+   "why": "Sits at the kitchen table of house 1, rises and waves: an activity in a room a few metres across.",
+   "things": {"chair": {"name": "kitchen-chair-1", "in": "eden-house-1"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:34,15.5", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "sit:@chair"]},
+    {"t": 18, "who": "a", "cmd": ["act", "rise"]},
+    {"t": 23, "who": "a", "cmd": ["act", "wave", "for=6s"]}
+   ]
+  },
+  {
+   "n": 17,
+   "id": "hall-class-camp",
+   "set": "tuning",
+   "kind": "building.large-hall",
+   "world": "mars-camp",
+   "souls": ["a", "b"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 36,
+   "space": "mixed",
+   "provokes": ["wall-pass", "forced-climb"],
+   "why": "Through the living room's south door (5.0, -8.1) into a 16 by 12 m hall with no roof, to a classroom seat; a second Soul already sits there.",
+   "things": {"seat": {"name": "class-seat-2"}, "seat-b": {"name": "class-seat-5"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:5,-4", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "sit:@seat-b", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:2,-14"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "sit:@seat"]}
+   ]
+  },
+  {
+   "n": 18,
+   "id": "tiny-room-yoga-eden",
+   "set": "held-out",
+   "kind": "building.tiny-room",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "night",
+   "length_s": 40,
+   "space": "mixed",
+   "provokes": ["wall-pass", "cropped-head"],
+   "why": "Into the 3.2 by 3.2 m bedroom wing of house 1 and yoga there, at night.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:30,21", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:30.1,15"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["act", "yoga", "for=20s"]}
+   ]
+  },
+  {
+   "n": 19,
+   "id": "stairs-roof-district",
+   "set": "tuning",
+   "kind": "building.stairs",
+   "world": "eden-district",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 45,
+   "space": "mixed",
+   "provokes": ["forced-climb", "wall-pass", "cropped-head"],
+   "why": "From the street through house 4's door, up its inside stairs over two floors, out onto the flat roof and onto the roof bench. The subject really gains 5.6 m; the camera must not answer with an overhead.",
+   "things": {"roof-bench": {"name": "eden-house-4-roof-bench"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:52,23", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "sit:@roof-bench"]}
+   ]
+  },
+  {
+   "n": 20,
+   "id": "hall-church-eden",
+   "set": "tuning",
+   "kind": "building.large-hall",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "dusk",
+   "length_s": 32,
+   "space": "mixed",
+   "provokes": ["wall-pass"],
+   "why": "Through the abbey church's door (-147.6, 100.0) and 18 m up a nave 14 m wide with a 5 m ceiling: a room big enough for ordinary shots.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-141,100", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:-166,100"]}
+   ]
+  },
+  {
+   "n": 21,
+   "id": "stairs-office-eden",
+   "set": "held-out",
+   "kind": "building.stairs",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 38,
+   "space": "outdoors",
+   "provokes": ["forced-climb", "glide-round-building"],
+   "why": "Up the office's outside stone stair: 9 m of rise over a 12.6 m run against a three-floor wall.",
+   "things": {"stairs": {"name": "eden-office-1-roof-stairs"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:77,19", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "go_up:@stairs"]}
+   ]
+  },
+  {
+   "n": 22,
+   "id": "stairs-tool-library-mars-two",
+   "set": "tuning",
+   "kind": "building.stairs",
+   "world": "mars-two",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 26,
+   "space": "outdoors",
+   "provokes": ["forced-climb"],
+   "why": "Up the tool library's stair at the tool camp, in a sparse world.",
+   "things": {"stairs": {"name": "tool-library-stair"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:45,-88", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "go_up:@stairs"]}
+   ]
+  },
+  {
+   "n": 23,
+   "id": "bench-town-eden",
+   "set": "tuning",
+   "kind": "still.bench",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "night",
+   "length_s": 26,
+   "space": "outdoors",
+   "provokes": ["cropped-head"],
+   "why": "Sits on a street bench (40.2, 7.4) with houses close behind, at night: the background and headroom case.",
+   "things": {"bench": {"name": "street-bench-1"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:42,5", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "sit:@bench"]}
+   ]
+  },
+  {
+   "n": 24,
+   "id": "bench-hamlet",
+   "set": "held-out",
+   "kind": "still.bench",
+   "world": "hello-hamlet",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "dusk",
+   "length_s": 26,
+   "space": "outdoors",
+   "provokes": ["cropped-head"],
+   "why": "Sits on the cottage's outdoor bench on the knoll, open country behind, at dusk.",
+   "things": {"bench": {"name": "bench", "in": "cottage"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:44,19", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "sit:@bench"]}
+   ]
+  },
+  {
+   "n": 25,
+   "id": "object-chess-eden",
+   "set": "tuning",
+   "kind": "still.object",
+   "world": "eden-2026",
+   "souls": ["a", "b"],
+   "camera": {"mode": "follow", "subject": "a", "group": ["a", "b"]},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 34,
+   "space": "outdoors",
+   "provokes": [],
+   "why": "Two sit down at the commons chess table (14, 14) and begin a game: an activity with an object, two faces and the board.",
+   "things": {"table": {"name": "commons-chess-table"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:12,12", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:16,16", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "play_white:@table"]},
+    {"t": 2, "who": "b", "cmd": ["act", "play_black:@table"]},
+    {"t": 14, "who": "a", "cmd": ["act", "begin:@table"]}
+   ]
+  },
+  {
+   "n": 26,
+   "id": "talk-two-hamlet",
+   "set": "tuning",
+   "kind": "still.two-talking",
+   "world": "hello-hamlet",
+   "souls": ["a", "b"],
+   "camera": {"mode": "follow", "subject": "a", "group": ["a", "b"]},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 30,
+   "space": "outdoors",
+   "provokes": ["cropped-head"],
+   "why": "Two stand 2 m apart on the green in one conversation and take four turns.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-1,0", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:1,0.6", "gait=run", "--wait"]},
+    {"who": "a", "cmd": ["converse", "start", "$b", "Hello."]},
+    {"who": "b", "cmd": ["wait", "15"], "capture": {"conv": "conversation"}},
+    {"who": "b", "cmd": ["converse", "accept", "{conv}"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["converse", "say", "{conv}", "Good to see you out here."]},
+    {"t": 7, "who": "b", "cmd": ["converse", "say", "{conv}", "The pond looked calm this morning."]},
+    {"t": 14, "who": "a", "cmd": ["converse", "say", "{conv}", "Shall we walk to the orchard later?"]},
+    {"t": 21, "who": "b", "cmd": ["converse", "say", "{conv}", "Yes. After the bench."]}
+   ]
+  },
+  {
+   "n": 27,
+   "id": "object-piano-district",
+   "set": "held-out",
+   "kind": "still.object",
+   "world": "eden-district",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 30,
+   "space": "indoors",
+   "provokes": ["wall-pass"],
+   "why": "Plays the piano in the library hall (10.4 by 8.4 m): the thing in use against a wall.",
+   "things": {"piano": {"name": "hall-piano"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:74,-6", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "play:@piano"]}
+   ]
+  },
+  {
+   "n": 28,
+   "id": "circle-story-lm",
+   "set": "tuning",
+   "kind": "still.circle-of-four",
+   "world": "littlemartians-two",
+   "souls": ["a", "b", "c", "d"],
+   "camera": {"mode": "follow", "subject": "a", "group": ["a", "b", "c", "d"]},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 36,
+   "space": "outdoors",
+   "provokes": [],
+   "why": "A story circle of four on the ceramic commons: a teller and three listeners in a ring of 1 m radius.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:0,25", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:1.5,26.5", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:0,28", "gait=run", "--wait"]},
+    {"who": "d", "cmd": ["act", "walk:-1.5,26.5", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["together", "offer", "oral-story-circle", "$b", "$c", "$d"]},
+    {"t": 3, "who": "b", "cmd": ["together", "accept", "oral-story-circle"]},
+    {"t": 5, "who": "c", "cmd": ["together", "accept", "oral-story-circle"]},
+    {"t": 7, "who": "d", "cmd": ["together", "accept", "oral-story-circle"]}
+   ]
+  },
+  {
+   "n": 29,
+   "id": "circle-fire-eden",
+   "set": "tuning",
+   "kind": "still.circle-of-four",
+   "world": "eden-2026",
+   "souls": ["a", "b", "c", "d"],
+   "camera": {"mode": "follow", "subject": "a", "group": ["a", "b", "c", "d"]},
+   "shape": "landscape",
+   "light": "night",
+   "length_s": 30,
+   "space": "outdoors",
+   "provokes": [],
+   "why": "Four take the four benches round the commons campfire (24, -7), at night.",
+   "things": {"n": {"name": "social-eden-fire-bench-0"}, "s": {"name": "social-eden-fire-bench-1"}, "w": {"name": "social-eden-fire-bench-2"}, "e": {"name": "social-eden-fire-bench-3"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:22,-12", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:26,-2", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:18.5,-5", "gait=run", "--wait"]},
+    {"who": "d", "cmd": ["act", "walk:29.5,-9", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "sit:@n"]},
+    {"t": 1, "who": "b", "cmd": ["act", "sit:@s"]},
+    {"t": 2, "who": "c", "cmd": ["act", "sit:@w"]},
+    {"t": 3, "who": "d", "cmd": ["act", "sit:@e"]},
+    {"t": 18, "who": "a", "cmd": ["say", "A good night for a fire."]}
+   ]
+  },
+  {
+   "n": 30,
+   "id": "talk-two-sofa-mars-two",
+   "set": "held-out",
+   "kind": "still.two-talking",
+   "world": "mars-two",
+   "souls": ["a", "b"],
+   "camera": {"mode": "follow", "subject": "a", "group": ["a", "b"]},
+   "shape": "portrait",
+   "light": "dusk",
+   "length_s": 30,
+   "space": "outdoors",
+   "provokes": ["cropped-head"],
+   "why": "One seated on the outdoor teal sofa, one standing; they talk, then the second sits beside the first.",
+   "things": {"sofa": {"name": "field-teal-sofa"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:3,-48", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "sit:@sofa", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["say", "--to", "$b", "How long have you been out here?"]},
+    {"t": 8, "who": "b", "cmd": ["say", "--to", "$a", "Since the wind dropped."]},
+    {"t": 16, "who": "a", "cmd": ["say", "--to", "$b", "Then I will stay too."]},
+    {"t": 22, "who": "a", "cmd": ["act", "sit:@sofa"]}
+   ]
+  },
+  {
+   "n": 31,
+   "id": "ride-balloon-eden",
+   "set": "tuning",
+   "kind": "ride.balloon",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 45,
+   "space": "outdoors",
+   "provokes": ["balloon-jutting", "forced-climb"],
+   "why": "Aboard the launch balloon on the commons (-20, -9): 6 s on the ground, take-off and climb over the town.",
+   "things": {"ride": {"name": "eden-balloon"}},
+   "record": {"start": "takeoff", "lead_s": 6},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-17,-6", "gait=run", "--wait"]},
+    {"who": "a", "cmd": ["act", "ride:@ride", "--wait"]}
+   ],
+   "steps": []
+  },
+  {
+   "n": 32,
+   "id": "ride-cable-car-eden",
+   "set": "tuning",
+   "kind": "ride.cable-car",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 45,
+   "space": "outdoors",
+   "provokes": ["balloon-jutting"],
+   "why": "A cabin of the alpine cable car leaving its valley station (5 m/s, air). The old camera uses balloon-sized assumptions for every carrier.",
+   "things": {"ride": {"name": "alpine-cable-car"}},
+   "record": {"start": "takeoff", "lead_s": 5},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-4,-190", "gait=run", "--wait"]},
+    {"who": "a", "cmd": ["act", "ride:@ride", "--wait"]}
+   ],
+   "steps": []
+  },
+  {
+   "n": 33,
+   "id": "ride-balloon-district",
+   "set": "held-out",
+   "kind": "ride.balloon",
+   "world": "eden-district",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "dusk",
+   "length_s": 45,
+   "space": "outdoors",
+   "provokes": ["balloon-jutting", "cropped-head", "forced-climb"],
+   "why": "Gets off the standing balloon, gets on again, then take-off. Here the balloon is an ordinary placed thing, so the old camera counts its basket and envelope as walls, and 'riding' switches off and on.",
+   "things": {"ride": {"name": "festival-balloon"}},
+   "record": {"start": "takeoff", "lead_s": 20},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-10,-9", "gait=run", "--wait"]},
+    {"who": "a", "cmd": ["act", "ride:@ride", "--wait"]}
+   ],
+   "steps": [
+    {"t": 2, "who": "a", "cmd": ["act", "rise"]},
+    {"t": 8, "who": "a", "cmd": ["act", "ride:@ride"]}
+   ]
+  },
+  {
+   "n": 34,
+   "id": "ride-big-wheel-eden",
+   "set": "tuning",
+   "kind": "ride.big-wheel",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "night",
+   "length_s": 45,
+   "space": "outdoors",
+   "provokes": ["balloon-jutting", "zigzag"],
+   "why": "A gondola of the big wheel at the resort (184, 124) as the wheel turns one step, at night.",
+   "things": {"ride": {"name": "resort-ferris-wheel"}},
+   "record": {"start": "takeoff", "lead_s": 5},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:184,118", "gait=run", "--wait"]},
+    {"who": "a", "cmd": ["act", "ride:@ride", "--wait"]}
+   ],
+   "steps": []
+  },
+  {
+   "n": 35,
+   "id": "ride-sailboat-eden",
+   "set": "tuning",
+   "kind": "ride.boat",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 45,
+   "space": "outdoors",
+   "provokes": ["balloon-jutting"],
+   "why": "A sailboat leaving marina pontoon 1 (2 m/s on deep water): a carrier on the horizon line.",
+   "things": {"ride": {"name": "marina-sailboat-5"}},
+   "record": {"start": "takeoff", "lead_s": 5},
+   "fallback": {"things": {"ride": {"name": "land-harbour-sailboat"}}, "setup": [{"who": "a", "cmd": ["act", "walk:62,165", "gait=run", "--wait"]}, {"who": "a", "cmd": ["act", "sail:@ride", "--wait"]}], "note": "if marina-sailboat-5 cannot be reached from the pontoon"},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:124,155", "gait=run", "--wait"]},
+    {"who": "a", "cmd": ["act", "sail:@ride", "--wait"]}
+   ],
+   "steps": []
+  },
+  {
+   "n": 36,
+   "id": "ride-carousel-eden",
+   "set": "held-out",
+   "kind": "ride.carousel",
+   "world": "eden-2026",
+   "souls": ["a"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "portrait",
+   "light": "day",
+   "length_s": 40,
+   "space": "outdoors",
+   "provokes": ["zigzag", "balloon-jutting"],
+   "why": "Added kind: a horse on the resort carousel (164, 134), a tight level orbit under a canopy. A camera that chases the rider swings from side to side.",
+   "things": {"ride": {"name": "resort-carousel"}},
+   "record": {"start": "takeoff", "lead_s": 5},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:164,128", "gait=run", "--wait"]},
+    {"who": "a", "cmd": ["act", "ride:@ride", "--wait"]}
+   ],
+   "steps": []
+  },
+  {
+   "n": 37,
+   "id": "group-line-six-lm",
+   "set": "tuning",
+   "kind": "group.six-in-line",
+   "world": "littlemartians-two",
+   "souls": ["a", "b", "c", "d", "e", "f"],
+   "camera": {"mode": "follow", "subject": "c", "group": ["a", "b", "c", "d", "e", "f"]},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 42,
+   "space": "outdoors",
+   "provokes": ["cropped-head", "forced-climb"],
+   "why": "Six walk in a line up the Tharsis ramp (6 m wide) onto the 7 m plateau, the third followed.",
+   "gap": "No parade command exists: staggered walks to one point, 1.5 s apart. (A chain of `together offer follow` is the alternative if the line bunches.)",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:0,31.0", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:0,29.4", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:0,27.8", "gait=run", "--wait"]},
+    {"who": "d", "cmd": ["act", "walk:0,26.2", "gait=run", "--wait"]},
+    {"who": "e", "cmd": ["act", "walk:0,24.6", "gait=run", "--wait"]},
+    {"who": "f", "cmd": ["act", "walk:0,23.0", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0.0, "who": "a", "cmd": ["act", "walk:0,66"]},
+    {"t": 1.5, "who": "b", "cmd": ["act", "walk:0,66"]},
+    {"t": 3.0, "who": "c", "cmd": ["act", "walk:0,66"]},
+    {"t": 4.5, "who": "d", "cmd": ["act", "walk:0,66"]},
+    {"t": 6.0, "who": "e", "cmd": ["act", "walk:0,66"]},
+    {"t": 7.5, "who": "f", "cmd": ["act", "walk:0,66"]}
+   ]
+  },
+  {
+   "n": 38,
+   "id": "group-tennis-eden",
+   "set": "tuning",
+   "kind": "group.field-game",
+   "world": "eden-2026",
+   "souls": ["a", "b", "c", "d"],
+   "camera": {"mode": "follow", "subject": "a", "group": ["a", "b", "c", "d"]},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 40,
+   "space": "outdoors",
+   "provokes": [],
+   "why": "Four take the four places of tennis court 1 and play doubles: the field game.",
+   "things": {"court": {"name": "sports-tennis-1"}},
+   "gap": "The football pitch offers no acts; tennis is the field game.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:91,100", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:108,100", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:91,106", "gait=run", "--wait"]},
+    {"who": "d", "cmd": ["act", "walk:108,106", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "play:@court"]},
+    {"t": 1, "who": "b", "cmd": ["act", "play:@court"]},
+    {"t": 2, "who": "c", "cmd": ["act", "play:@court"]},
+    {"t": 3, "who": "d", "cmd": ["act", "play:@court"]}
+   ]
+  },
+  {
+   "n": 39,
+   "id": "group-crossing-fire-camp",
+   "set": "held-out",
+   "kind": "group.others-crossing",
+   "world": "mars-camp",
+   "souls": ["a", "b", "c"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "night",
+   "length_s": 30,
+   "space": "outdoors",
+   "provokes": ["zigzag", "forced-climb"],
+   "why": "One sits on the south fire bench (0, 7.4) at night; two others walk past, one in front and one behind, three passes in all.",
+   "things": {"bench": {"name": "fire-bench-south"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "sit:@bench", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:-8,5.6", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:8,9.4", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 4, "who": "b", "cmd": ["act", "walk:8,5.6"]},
+    {"t": 10, "who": "c", "cmd": ["act", "walk:-8,9.4"]},
+    {"t": 18, "who": "b", "cmd": ["act", "walk:-8,5.6"]}
+   ]
+  },
+  {
+   "n": 40,
+   "id": "group-carry-camp",
+   "set": "tuning",
+   "kind": "group.carry-crew",
+   "world": "mars-camp",
+   "souls": ["a", "b"],
+   "camera": {"mode": "follow", "subject": "a", "group": ["a", "b"]},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 40,
+   "space": "outdoors",
+   "provokes": ["cropped-head"],
+   "why": "A crew of two lifts a pallet of crates (16.4, 24) and carries it 16 m west across the yard, then sets it down. The load is part of the subject.",
+   "things": {"load": {"name": "pallet-crates-1"}},
+   "setup": [
+    {"who": "a", "cmd": ["carry", "grip", "@load", "front"]},
+    {"who": "b", "cmd": ["carry", "grip", "@load", "back"]},
+    {"who": "a", "cmd": ["carry", "offer", "$b"], "capture": {"crew": "crew"}},
+    {"who": "b", "cmd": ["carry", "accept", "{crew}"]},
+    {"who": "a", "cmd": ["carry", "lift", "{crew}", "@load"]},
+    {"who": "a", "cmd": ["look"]},
+    {"who": "b", "cmd": ["look"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["carry", "to", "{crew}", "0,31"]},
+    {"after": "prev", "delay_s": 0, "who": "a", "cmd": ["carry", "set-down", "{crew}"]}
+   ]
+  },
+  {
+   "n": 41,
+   "id": "group-crossing-district",
+   "set": "tuning",
+   "kind": "group.others-crossing",
+   "world": "eden-district",
+   "souls": ["a", "b", "c", "d"],
+   "camera": {"mode": "follow", "subject": "a"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 34,
+   "space": "outdoors",
+   "provokes": ["zigzag", "forced-climb"],
+   "why": "One walks east along the housing street; one comes the other way and two cross the street in front, at 5 s and 12 s.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:30,21.5", "gait=run", "--wait"]},
+    {"who": "d", "cmd": ["act", "walk:62,21.5", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:40,26", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:50,17", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:62,21.5"]},
+    {"t": 0, "who": "d", "cmd": ["act", "walk:30,21.5"]},
+    {"t": 5, "who": "b", "cmd": ["act", "walk:40,17"]},
+    {"t": 12, "who": "c", "cmd": ["act", "walk:50,26"]}
+   ]
+  },
+  {
+   "n": 42,
+   "id": "group-line-six-camp",
+   "set": "held-out",
+   "kind": "group.six-in-line",
+   "world": "mars-camp",
+   "souls": ["a", "b", "c", "d", "e", "f"],
+   "camera": {"mode": "follow", "subject": "a", "group": ["a", "b", "c", "d", "e", "f"]},
+   "shape": "portrait",
+   "light": "dusk",
+   "length_s": 40,
+   "space": "outdoors",
+   "provokes": ["cropped-head"],
+   "why": "Six walk west in a line through the stones and tufts south of the yard, the leader followed, on a phone at dusk.",
+   "gap": "As group-line-six-lm: staggered walks stand in for a parade.",
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:18.0,34", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:19.6,34", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:21.2,34", "gait=run", "--wait"]},
+    {"who": "d", "cmd": ["act", "walk:22.8,34", "gait=run", "--wait"]},
+    {"who": "e", "cmd": ["act", "walk:24.4,34", "gait=run", "--wait"]},
+    {"who": "f", "cmd": ["act", "walk:26.0,34", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0.0, "who": "a", "cmd": ["act", "walk:-12,34"]},
+    {"t": 1.5, "who": "b", "cmd": ["act", "walk:-12,34"]},
+    {"t": 3.0, "who": "c", "cmd": ["act", "walk:-12,34"]},
+    {"t": 4.5, "who": "d", "cmd": ["act", "walk:-12,34"]},
+    {"t": 6.0, "who": "e", "cmd": ["act", "walk:-12,34"]},
+    {"t": 7.5, "who": "f", "cmd": ["act", "walk:-12,34"]}
+   ]
+  },
+  {
+   "n": 43,
+   "id": "broadcast-quiet-hamlet",
+   "set": "tuning",
+   "kind": "broadcast.quiet",
+   "world": "hello-hamlet",
+   "souls": ["a", "b"],
+   "camera": {"mode": "broadcast"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 180,
+   "space": "mixed",
+   "provokes": [],
+   "why": "Three minutes of Broadcast in an almost empty world with two Souls who mostly walk and sit. Measures how it treats walking and idle subjects where no landmark views are authored.",
+   "things": {"bench": {"name": "bench", "in": "cottage"}, "audience": {"name": "audience-bench"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:0,0", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:14,-2", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "walk:-40,-30"]},
+    {"t": 50, "who": "a", "cmd": ["act", "walk:0,0"]},
+    {"t": 95, "who": "a", "cmd": ["act", "sit:@bench"]},
+    {"t": 150, "who": "a", "cmd": ["act", "rise"]},
+    {"t": 20, "who": "b", "cmd": ["act", "sit:@audience"]},
+    {"t": 110, "who": "b", "cmd": ["act", "walk:2,30"]}
+   ]
+  },
+  {
+   "n": 44,
+   "id": "broadcast-busy-eden",
+   "set": "tuning",
+   "kind": "broadcast.busy",
+   "world": "eden-2026",
+   "souls": ["a", "b", "c", "d", "e", "f"],
+   "camera": {"mode": "broadcast"},
+   "shape": "landscape",
+   "light": "day",
+   "length_s": 180,
+   "space": "mixed",
+   "provokes": [],
+   "why": "Three minutes of Broadcast in the dense town with six Souls: a balloon ride, a chess game, a jogger, two dancing at the bandstand who then split up. Measures subject choice, cut spacing and whether it returns to idle subjects.",
+   "things": {"balloon": {"name": "eden-balloon"}, "table": {"name": "commons-chess-table"}, "bench": {"name": "street-bench-1"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-17,-6", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:12,12", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:16,16", "gait=run", "--wait"]},
+    {"who": "d", "cmd": ["act", "walk:30,5", "gait=run", "--wait"]},
+    {"who": "e", "cmd": ["act", "walk:36,-22", "gait=run", "--wait"]},
+    {"who": "f", "cmd": ["act", "walk:38,-23", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "ride:@balloon"]},
+    {"t": 0, "who": "b", "cmd": ["act", "play_white:@table"]},
+    {"t": 3, "who": "c", "cmd": ["act", "play_black:@table"]},
+    {"t": 15, "who": "b", "cmd": ["act", "begin:@table"]},
+    {"t": 0, "who": "d", "cmd": ["act", "walk:62,22", "gait=jog"]},
+    {"t": 30, "who": "d", "cmd": ["act", "walk:30,5", "gait=jog"]},
+    {"t": 60, "who": "d", "cmd": ["act", "walk:62,22", "gait=jog"]},
+    {"t": 90, "who": "d", "cmd": ["act", "sit:@bench"]},
+    {"t": 10, "who": "e", "cmd": ["together", "offer", "dance-together", "$f"]},
+    {"t": 14, "who": "f", "cmd": ["together", "accept", "dance-together"]},
+    {"t": 70, "who": "e", "cmd": ["together", "leave", "dance-together"]},
+    {"t": 75, "who": "e", "cmd": ["act", "walk:24,-4"]},
+    {"t": 80, "who": "f", "cmd": ["act", "walk:8,-24"]},
+    {"t": 120, "who": "e", "cmd": ["say", "Has anyone seen the balloon come down?"]},
+    {"t": 140, "who": "f", "cmd": ["act", "walk:24,-10"]}
+   ]
+  },
+  {
+   "n": 45,
+   "id": "broadcast-medium-camp",
+   "set": "held-out",
+   "kind": "broadcast.medium",
+   "world": "mars-camp",
+   "souls": ["a", "b", "c", "d"],
+   "camera": {"mode": "broadcast"},
+   "shape": "landscape",
+   "light": "dusk",
+   "length_s": 180,
+   "space": "mixed",
+   "provokes": [],
+   "why": "Added kind: three minutes of Broadcast in a sparse-to-medium world with four Souls, some indoors in a roofless hall, at dusk.",
+   "things": {"north": {"name": "fire-bench-north"}, "south": {"name": "fire-bench-south"}, "seat": {"name": "class-seat-1"}},
+   "setup": [
+    {"who": "a", "cmd": ["act", "walk:-2,-2", "gait=run", "--wait"]},
+    {"who": "b", "cmd": ["act", "walk:2,10", "gait=run", "--wait"]},
+    {"who": "c", "cmd": ["act", "walk:-7,-3", "gait=run", "--wait"]},
+    {"who": "d", "cmd": ["act", "walk:5,-4", "gait=run", "--wait"]}
+   ],
+   "steps": [
+    {"t": 0, "who": "a", "cmd": ["act", "sit:@north"]},
+    {"t": 5, "who": "b", "cmd": ["act", "sit:@south"]},
+    {"t": 40, "who": "a", "cmd": ["say", "Is the stew on?"]},
+    {"t": 60, "who": "b", "cmd": ["act", "rise"]},
+    {"t": 65, "who": "b", "cmd": ["act", "walk:-14,-14"]},
+    {"t": 0, "who": "c", "cmd": ["act", "walk:-7,-25"]},
+    {"t": 40, "who": "c", "cmd": ["act", "walk:24,24"]},
+    {"t": 100, "who": "c", "cmd": ["act", "walk:0,12"]},
+    {"t": 20, "who": "d", "cmd": ["act", "sit:@seat"]},
+    {"t": 120, "who": "d", "cmd": ["act", "rise"]},
+    {"t": 125, "who": "d", "cmd": ["act", "walk:2,10"]},
+    {"t": 150, "who": "a", "cmd": ["act", "dance", "for=20s"]}
+   ]
+  }
+ ]
+}
