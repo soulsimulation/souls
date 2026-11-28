@@ -620,7 +620,8 @@ async function deckWalk({ state, page, paths, signal, check, arm }) {
     await wait(3000); await shot('creator-placed-the-deck-bay');
     const part = name => placed.names[String(slots.findIndex(([n]) => n === name) + 1)];
     const ground = (await cli(state, D.walker, 'object', bay)).parent;
-    const places = async id => { const o = await cli(state, D.walker, 'object', id); return { name: o.name, places: o.places ?? [], ways_up: o.ways_up ?? null }; };
+    // the batch reaches a Soul's own copy a moment after it is accepted (rehearsal w3: inspect.unknown-id at once)
+    const places = async id => { let o; for (let i = 0; i < 20; i++) { o = await asked(state, D.walker, 'object', id); if (o.ok === true) break; await wait(1000); } if (o.ok !== true) throw Error('carry-proof.object ' + id + ' ' + (o.code ?? '')); return { name: o.name, places: o.places ?? [], ways_up: o.ways_up ?? null }; };
     out.stair = await places(part('stair')); out.sheets = [await places(part('s1')), await places(part('s2'))];
     out.moves.push(await walked(state, page, D.walker, out.sheets[0].places[0].id, 'up-the-stair-onto-sheet-1'));
     out.moves.push(await walked(state, page, D.walker, out.sheets[1].places[0].id, 'across-to-sheet-2'));
