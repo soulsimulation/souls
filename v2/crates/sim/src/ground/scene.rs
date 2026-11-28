@@ -26,6 +26,9 @@ pub const F_PLACE_OF: u64 = 20;
 pub const F_DOORWAYS: u64 = 22;
 pub const F_TILE_SIZE: u64 = 24;
 pub const F_TILES: u64 = 25;
+/// A floor that is ground only while a part joined to its thing sits at its height (racks T6: a frame's standing place,
+/// there while a beam braces the frame at that level; [`braced`]). Import-eden's `F_WHILE_JOINED`.
+pub const F_WHILE_JOINED: u64 = 104;
 
 pub const GROUND: &str = "eden:ground";
 pub const FLOOR: &str = "eden:floor";
@@ -97,6 +100,124 @@ pub struct Scene {
     /// The open ground's terrain (N1b), on the open ground, or under a floor's thing that stands on it: what a
     /// footprint, a doorway or a step to the ground is measured from (#3227).
     pub terrain: Option<Terrain>,
+    /// On a floor: the stretches of its edges that lie on another thing's floor's edge at the same height, within
+    /// [`SEAM`] (racks T9: two deck sheets side by side), each `(y, [a, b])` in the floor's frame. Its cut does not
+    /// take them back from the edge (`super::cut_floor`), so the two floors meet there as one floor.
+    pub seams: Vec<(i64, [Xz; 2])>,
+}
+
+/// How near, µm, another thing's floor edge lies to one of a floor's own, in height and across, to be a seam.
+pub const SEAM: i64 = 5_000;
+
+/// The seams of floor `floor` ([`Scene::seams`]): its surfaces' edges against those of the floors of the other things
+/// in its thing's parent (not the open ground), read in that parent's frame and given back in the floor's.
+fn seams_of(tree: &Tree, floor: Handle) -> Vec<(i64, [Xz; 2])> {
+    let mut out = Vec::new();
+    let Some(thing) = tree
+        .node(floor)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+    else {
+        return out;
+    };
+    let Some(parent) = tree
+        .node(thing)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+    else {
+        return out;
+    };
+    // Things in a thing (parts in a bay), not every building on the open ground: a town's floors are not read
+    // against each other.
+    if kind_of(tree, parent) == GROUND {
+        return out;
+    }
+    let Ok(here) = xform_to(tree, thing, parent) else {
+        return out;
+    };
+    let Ok(mine) = surfaces_of(tree, floor, &here) else {
+        return out;
+    };
+    let [w, x, y, z] = here.rot.parts();
+    let Some(back) = Quat::new(w, -x, -y, -z)
+        .or_else(|_| Quat::new(-w, x, y, z))
+        .ok()
+    else {
+        return out;
+    };
+    let local = |p: Xz, y: i64| {
+        back.rotate(Vec3::new(
+            p[0] - here.pos.x,
+            y - here.pos.y,
+            p[1] - here.pos.z,
+        ))
+        .ok()
+        .map(|v| [v.x, v.z])
+    };
+    let mut theirs: Vec<Surface> = Vec::new();
+    for &sib in tree.children(parent).unwrap_or(&[]) {
+        if sib == thing {
+            continue;
+        }
+        let Ok(x) = xform_to(tree, sib, parent) else {
+            continue;
+        };
+        for &f in tree.children(sib).unwrap_or(&[]) {
+            if kind_of(tree, f) == FLOOR
+                && let Ok(ss) = surfaces_of(tree, f, &x)
+            {
+                theirs.extend(ss);
+            }
+        }
+    }
+    let edges =
+        |r: &[Xz]| -> Vec<[Xz; 2]> { (0..r.len()).map(|k| [r[k], r[(k + 1) % r.len()]]).collect() };
+    let middle = |r: &[Xz]| {
+        let n = r.len().max(1) as i64;
+        let (x, z) = r
+            .iter()
+            .fold((0, 0), |(x, z), p| (x + p[0] / n, z + p[1] / n));
+        [x, z]
+    };
+    for m in &mine {
+        for o in theirs.iter().filter(|o| (o.y - m.y).abs() <= SEAM) {
+            let (cm, co) = (middle(&m.ring), middle(&o.ring));
+            for [a, b] in edges(&m.ring) {
+                let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+                let l2 = ex * ex + ez * ez;
+                if l2 == 0 {
+                    continue;
+                }
+                // Beside it, not over it: the other floor lies on the far side of the edge from this one (a landing
+                // laid over a deck's edge is no seam).
+                let side =
+                    |p: Xz| (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])).signum();
+                if side(cm) == side(co) {
+                    continue;
+                }
+                let l = l2.isqrt();
+                for [c, d] in edges(&o.ring) {
+                    let off = |p: Xz| {
+                        (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])).abs() / l
+                    };
+                    if off(c) > i128::from(SEAM) || off(d) > i128::from(SEAM) {
+                        continue;
+                    }
+                    let t = |p: Xz| ex * i128::from(p[0] - a[0]) + ez * i128::from(p[1] - a[1]);
+                    let (t0, t1) = (t(c).min(t(d)).max(0), t(c).max(t(d)).min(l2));
+                    if t1 <= t0 {
+                        continue;
+                    }
+                    let at = |t: i128| [a[0] + (ex * t / l2) as i64, a[1] + (ez * t / l2) as i64];
+                    // Each seam runs with this floor on its left and the other on its right, as an outline step does.
+                    if let (Some(p), Some(q)) = (local(at(t0), m.y), local(at(t1), m.y)) {
+                        out.push((m.y - here.pos.y, if side(co) > 0 { [q, p] } else { [p, q] }));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The open ground's terrain (N1b, #3197), read from its node's `F_TILE_SIZE` and `F_TILES` (N1's import, byte for
@@ -594,8 +715,179 @@ fn under_slots(tree: &Tree, h: Handle, legs: &[([Xz; 4], i64)]) -> Option<([i64;
     Some((bb, y0, top))
 }
 
-/// A floor's surfaces (N1's `F_SURFACES`, in the frame of the floor's thing), moved by `x`.
+/// Whether floor `floor` is ground now: every floor is, but one marked [`F_WHILE_JOINED`] only while a part linked
+/// to its thing, beside it in the same parent (a beam beside a frame in its bay, joined to it), sits at the floor's
+/// height in the thing's frame, within half that part's own height (its walk boxes', none: exactly), and while
+/// nothing else in that parent lies over it within a standing body's height ([`BODY_HIGH`]): a box of another part,
+/// or another part's floor (a sheet's top). A frame's standing place is there while a beam braces the frame at that
+/// level, and gone once the beam comes out; one on a frame's inner face, under a deck, is never there.
+pub fn braced(tree: &Tree, floor: Handle) -> bool {
+    let marked = tree
+        .node(floor)
+        .is_some_and(|n| n.fields().contains_key(&F_WHILE_JOINED));
+    if !marked {
+        return true;
+    }
+    joined_at(tree, floor) && headroom(tree, floor)
+}
+
+/// A floor's rectangle in the frame of its thing's parent: [x0, z0, x1, z1] and its height, µm (none for a floor with
+/// no surfaces).
+fn plan_in_parent(tree: &Tree, floor: Handle, frame: Handle) -> Option<([i64; 4], i64)> {
+    let n = tree.node(floor)?;
+    let thing = tree.handle(n.parent()?)?;
+    let x = xform_to(tree, thing, frame).ok()?;
+    let rows = n.fields().get(&F_SURFACES)?;
+    let mut bb = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
+    let mut top = None;
+    for sfc in row(rows) {
+        let [y, ring] = row(sfc) else { continue };
+        let y = um(y)?;
+        for p in ring_mm(ring).ok()? {
+            let q = on_plane(&x, p, y).ok()?;
+            bb = [
+                bb[0].min(q.x),
+                bb[1].min(q.z),
+                bb[2].max(q.x),
+                bb[3].max(q.z),
+            ];
+            top = Some(top.map_or(q.y, |t: i64| t.max(q.y)));
+        }
+    }
+    Some((bb, top?))
+}
+
+/// Whether nothing in the parent of floor `floor`'s thing, other than the thing, lies over the floor within a standing
+/// body's height (see [`braced`]).
+fn headroom(tree: &Tree, floor: Handle) -> bool {
+    let Some(thing) = tree
+        .node(floor)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+    else {
+        return false;
+    };
+    let Some(parent) = tree
+        .node(thing)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+    else {
+        return true;
+    };
+    let Some((bb, y)) = plan_in_parent(tree, floor, parent) else {
+        return false;
+    };
+    let over = |r: [i64; 4], y0: i64| {
+        y0 > y
+            && y0 < y + BODY_HIGH * 1000
+            && r[0] < bb[2]
+            && r[2] > bb[0]
+            && r[1] < bb[3]
+            && r[3] > bb[1]
+    };
+    for &sib in tree.children(parent).unwrap_or(&[]) {
+        if sib == thing {
+            continue;
+        }
+        if let Ok(boxes) = solids_under(tree, sib, parent)
+            && boxes.iter().any(|b| {
+                let xs = b.ring.iter().map(|p| p[0]);
+                let zs = b.ring.iter().map(|p| p[1]);
+                let r = [
+                    xs.clone().min().unwrap_or(0),
+                    zs.clone().min().unwrap_or(0),
+                    xs.max().unwrap_or(0),
+                    zs.max().unwrap_or(0),
+                ];
+                over(r, b.y0)
+            })
+        {
+            return false;
+        }
+        for &c in tree.children(sib).unwrap_or(&[]) {
+            if kind_of(tree, c) == FLOOR
+                && let Some((r, top)) = plan_in_parent(tree, c, parent)
+                && over(r, top)
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Whether floor `floor` is not marked [`F_WHILE_JOINED`], or a part joined to its thing sits at its height (see
+/// [`braced`]).
+fn joined_at(tree: &Tree, floor: Handle) -> bool {
+    let Some(n) = tree.node(floor) else {
+        return false;
+    };
+    if !n.fields().contains_key(&F_WHILE_JOINED) {
+        return true;
+    }
+    let Some(y) = n
+        .fields()
+        .get(&F_SURFACES)
+        .and_then(|v| row(v).first())
+        .and_then(|s| row(s).first())
+        .and_then(um)
+    else {
+        return false;
+    };
+    let Some((thing, th)) = n.parent().and_then(|p| Some((p, tree.handle(p)?))) else {
+        return false;
+    };
+    let parent = tree.node(th).and_then(|t| t.parent());
+    tree.links_at(thing).iter().any(|e| {
+        let Some((_, ends, ..)) = tree.link(e.link) else {
+            return false;
+        };
+        let other = if ends[0] == thing { ends[1] } else { ends[0] };
+        let Some(oh) = tree.handle(other) else {
+            return false;
+        };
+        let Some(o) = tree.node(oh) else {
+            return false;
+        };
+        let Some(ph) = parent.filter(|p| o.parent() == Some(*p) && o.slot().is_some()) else {
+            return false;
+        };
+        let Some(ph) = tree.handle(ph) else {
+            return false;
+        };
+        // Both read in the parent's frame: the part's place, and the floor's height on its thing.
+        let (Ok(at), Ok(on)) = (xform_to(tree, oh, ph), xform_to(tree, th, ph)) else {
+            return false;
+        };
+        let Ok(level) = on.point(Vec3::new(0, y, 0)) else {
+            return false;
+        };
+        // Half the part's own height, from its walk boxes ([cx, cz, hx, hz, yaw, y0, y1, ...] mm).
+        let half = o
+            .fields()
+            .get(&F_SOLIDS)
+            .map(|v| {
+                row(v)
+                    .iter()
+                    .filter_map(|b| match row(b) {
+                        [_, _, _, _, _, y0, y1, ..] => Some(um(y1)? - um(y0)?),
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0)
+                    / 2
+            })
+            .unwrap_or(0);
+        (at.pos.y - level.y).abs() <= half
+    })
+}
+
+/// A floor's surfaces (N1's `F_SURFACES`, in the frame of the floor's thing), moved by `x`: none while it is not
+/// [`braced`].
 fn surfaces_of(tree: &Tree, floor: Handle, x: &Xform) -> Result<Vec<Surface>, String> {
+    if !braced(tree, floor) {
+        return Ok(Vec::new());
+    }
     let Some(v) = tree
         .node(floor)
         .and_then(|n| n.fields().get(&F_SURFACES).cloned())
@@ -729,8 +1021,9 @@ fn things_below_on(
 }
 
 /// Whether node `h` rides a slot its parent gives no point for (N19, #3341): a body's hands, a crew's carry. It is
-/// carried, so neither it nor what it holds is fixed geometry; a part seated in a bay's slot (a point) is.
-fn carried(tree: &Tree, h: Handle) -> bool {
+/// carried, so neither it nor what it holds is fixed geometry; a part seated in a bay's slot (a point) is. Nor is a
+/// floor it holds a floor to walk (racks T9): a sheet with a floor of its own is one only where it lies or is seated.
+pub fn carried(tree: &Tree, h: Handle) -> bool {
     let Some(n) = tree.node(h) else {
         return false;
     };
@@ -781,6 +1074,24 @@ pub fn stands_in(
     radius: i64,
     body: &dyn Fn(&str) -> bool,
 ) -> Result<Option<Id>, String> {
+    stands_in_but(tree, ground, part, to, place, turn, radius, body, &[])
+}
+
+/// [`stands_in`], leaving out the bodies `but` (#5067: a crew's carriers who walk beside its part as it is set in
+/// will not stand where they stand now when it is seated; the seating is checked again, with them, when its track
+/// ends).
+#[allow(clippy::too_many_arguments)]
+pub fn stands_in_but(
+    tree: &Tree,
+    ground: Id,
+    part: Id,
+    to: Frame,
+    place: Vec3,
+    turn: Quat,
+    radius: i64,
+    body: &dyn Fn(&str) -> bool,
+    but: &[Id],
+) -> Result<Option<Id>, String> {
     let g = tree.handle(ground).ok_or("no such ground")?;
     let th = tree.handle(to.node).ok_or("no such frame")?;
     let ph = tree.handle(part).ok_or("no such part")?;
@@ -803,7 +1114,7 @@ pub fn stands_in(
                 .iter()
                 .copied(),
         );
-        if h == g || !body(n.kind().as_str()) {
+        if h == g || !body(n.kind().as_str()) || but.contains(&n.id()) {
             continue;
         }
         let Ok(w) = xform_to(tree, h, g) else {
@@ -990,6 +1301,34 @@ fn steps_of(
     Ok(out)
 }
 
+/// Where a seam's step's link counters start ([`seam_steps`]), above any inner step's.
+const SEAMS: u64 = 1 << 41;
+
+/// The steps across a floor's seams ([`Scene::seams`]): a doorway of no depth on each, at its height, whose link
+/// [`crate::links::floor_joins`] carries onto the other thing's floor beside it, as an outline step's onto a floor it
+/// lies over (racks T9: two deck sheets side by side are walked as one floor).
+fn seam_steps(floor: Id, seams: &[(i64, [Xz; 2])]) -> Vec<Doorway> {
+    let mut out = Vec::new();
+    for (k, (y, [a, b])) in seams.iter().enumerate() {
+        let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+        let len = (ex * ex + ez * ez).isqrt();
+        if len < 10_000 {
+            continue;
+        }
+        let unit = |v: i128| (v * 1_000_000 / len) as i64;
+        out.push(Doorway {
+            link: step_id(floor, SEAMS + k as u64),
+            at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
+            along: [unit(ex), unit(ez)],
+            across: [unit(ez), -unit(ex)],
+            width: len as i64,
+            y: *y,
+            step: true,
+        });
+    }
+    out
+}
+
 /// Where an inner step's link counters start ([`inner_steps_of`]), above any outline edge's number.
 const INNER: u64 = 1 << 40;
 
@@ -1161,6 +1500,8 @@ impl Scene {
                 if s.surfaces.is_empty() {
                     return Err("a floor with no surfaces".into());
                 }
+                s.seams = seams_of(tree, h);
+                s.doorways.extend(seam_steps(id, &s.seams));
                 things_below(tree, thing, thing, false, &mut s, None)?;
                 let mut ends = vec![h];
                 ends.extend(tree.children(h).ok_or("a floor")?.iter().copied());

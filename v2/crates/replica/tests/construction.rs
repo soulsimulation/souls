@@ -243,7 +243,7 @@ fn a2_a_joint_is_accepted_beam_end_to_upright_seat_and_refused_by_name_otherwise
         ),
         (
             "a grip to a seat",
-            check(end(beam, Some("grip_mid")), end(up, Some("seat_front_l_0"))),
+            check(end(beam, Some("grip_l1")), end(up, Some("seat_front_l_0"))),
             "connector-unknown",
         ),
         (

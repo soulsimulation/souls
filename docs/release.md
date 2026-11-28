@@ -72,6 +72,10 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
    the open world page, arriving, your Souls, follow; then a `#soul/<id>` link and a reload); after the deploy, the
    `first-day` skill on soul.game with a naive agent. Any failed step stops the release.
 7. **cdn-walk.** `tools/cdn/cdn-walk.mjs` proves the live pages load mapped assets from the CDN.
+7a. **First-load mirror.** `tools/cdn/mirror-first-load.mjs https://soul.game/w/eden/ --apply` copies the release's own
+   script and style files and the replica from the live origin to the CDN; the launcher names the copies to new pages
+   within a minute ([first load](operations/cdn.md#a-new-viewers-first-load)). Until it has run, pages load them from
+   the host as before, so a release never waits on it.
 8. **Feed.** Once the activation and healthz pass, a real ship posts one `release` item to the site feed through the operator
    route on the host (`/__sim/op/feed-post`, loopback only): the client version, the changelog link
    (`<origin>/changelog#v<version>`) and `minClient` when `SOUL_CLIENT_MIN` was raised since the last release. The link
