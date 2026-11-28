@@ -422,3 +422,25 @@ test('#5067: part raise and part lower send their intents; carry grip top|foot s
   assert.equal(carryIntents({ kind: 'part', do: 'raise', crew: id(8) }, c).code, 'part-usage');
 });
 
+
+test('#5067 item 4: a put refused out of reach with where it is admitted carries the crew there and asks once more', async () => {
+  const { admittedAt, putFromAdmitted, PUT_MOVED, ADMITTED_AT } = await import('./carry.mjs');
+  const detail = `s_1 is 1047 mm from its hold; ${ADMITTED_AT} x=12350 z=-4800 mm`;
+  assert.deepEqual(admittedAt(detail), [12.35, -4.8]);
+  assert.equal(admittedAt('s_1 is 1047 mm from its hold'), null);
+  const req = { op: 'carry', kind: 'part', do: 'put', crew: 'c', into: 'b', slot: '5' };
+  const refused = { ok: false, code: 'part.grip-out-of-reach', detail };
+  const asked = [];
+  const ok = await putFromAdmitted(refused, req, async (r) => { asked.push(r); return { ok: true }; });
+  assert.deepEqual(asked, [{ op: 'carry', do: 'to', crew: 'c', where: '12.35,-4.8' }, req]);
+  assert.equal(ok.moved, PUT_MOVED);
+  // refused again: that refusal is shown; no place named, or another refusal: nothing is asked.
+  const again = { ok: false, code: 'part.grip-out-of-reach', detail: 'still' };
+  assert.equal(await putFromAdmitted(refused, req, async (r) => (r.do === 'to' ? { ok: true } : again)), again);
+  let n = 0;
+  const unnamed = { ok: false, code: 'part.grip-out-of-reach', detail: 'x' };
+  assert.equal(await putFromAdmitted(unnamed, req, async () => { n++; }), unnamed);
+  const other = { ok: false, code: 'slot.occupied', detail };
+  assert.equal(await putFromAdmitted(other, req, async () => { n++; }), other);
+  assert.equal(n, 0);
+});

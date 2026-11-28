@@ -170,7 +170,7 @@ type Taking = (
     (Vec3, replica::pose::Quat),
     (Vec3, replica::pose::Quat),
     bool,
-    /// An unseat (`part:unseat`): its way out of the slot goes at a set-in's pace (#5067).
+    // An unseat (`part:unseat`): its way out of the slot goes at a set-in's pace (#5067).
     bool,
 );
 

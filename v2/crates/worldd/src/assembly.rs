@@ -367,6 +367,48 @@ pub fn ways(
     Ok(walks)
 }
 
+/// The words a put's `part.grip-out-of-reach` ends with, then `x=<mm> z=<mm> mm`, when the put would be admitted with
+/// the crew's node there on its ground (#5067): a contract, read by the client's `part put`.
+pub const ADMITTED_AT: &str = "admitted with the crew's node at";
+/// The step and the extent of [`admitted_from`]'s search about where the part goes, µm.
+const ADMIT_STEP: i64 = 50_000;
+
+/// Where, nearest `from` on the plan, crew `carriers` (ends `ends`) whose node goes from there to `to` on a set-in
+/// would be admitted (#5067): the whole crew moved together, each carrier the same way as its node, and [`ways`] asked
+/// of it there, within [`PUT_REACH`] of `to`. None when nowhere within it is.
+pub fn admitted_from(
+    carriers: &[Carrier],
+    ends: [Id; 2],
+    from: (Vec3, Quat),
+    to: Vec3,
+    walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
+) -> Option<Vec3> {
+    let n = PUT_REACH / ADMIT_STEP;
+    let mut spots: Vec<(i128, i64, i64)> = (-n..=n)
+        .flat_map(|i| (-n..=n).map(move |k| (i * ADMIT_STEP, k * ADMIT_STEP)))
+        .filter(|(dx, dz)| i128::from(*dx).pow(2) + i128::from(*dz).pow(2) <= i128::from(PUT_REACH).pow(2))
+        .map(|(dx, dz)| {
+            let (x, z) = (to.x + dx, to.z + dz);
+            (i128::from(x - from.0.x).pow(2) + i128::from(z - from.0.z).pow(2), x, z)
+        })
+        .collect();
+    spots.sort_unstable();
+    spots.into_iter().find_map(|(_, x, z)| {
+        let d = (x - from.0.x, z - from.0.z);
+        let moved: Vec<Carrier> = carriers
+            .iter()
+            .map(|c| Carrier {
+                feet: Vec3::new(c.feet.x + d.0, c.feet.y, c.feet.z + d.1),
+                ..*c
+            })
+            .collect();
+        let at = Vec3::new(x, from.0.y, z);
+        ways(&moved, ends, at, to, from.1, walkable)
+            .ok()
+            .map(|_| at)
+    })
+}
+
 /// A take, written (#5067): the crew's node's pose where the part was taken (`from`: the part did not move), its pose
 /// between its carriers at carrying height (`to`: where its carry's track takes it), where the part lay on the crew's
 /// ground (`lay`), and each carrier with its hold in the node's frame.
@@ -907,7 +949,18 @@ impl Assembly {
             Some([f, b, ..]) => [f.body, b.body],
             _ => return Err(refusal("crew.size", show(activity))),
         };
-        let mut walks = ways(carriers, ends, from.0, end.0, from.1, walkable)?;
+        let mut walks = match ways(carriers, ends, from.0, end.0, from.1, walkable) {
+            Ok(w) => w,
+            // #5067: refused, it says where the crew's node would be admitted from, nearest where it is: the same
+            // admission (`ways`) with the whole crew there, so a client carries it there and asks again.
+            Err(mut r) if r.name == "part.grip-out-of-reach" => {
+                if let Some(p) = admitted_from(carriers, ends, from, end.0, walkable) {
+                    r.detail = format!("{}; {ADMITTED_AT} x={} z={} mm", r.detail, p.x / 1000, p.z / 1000);
+                }
+                return Err(r);
+            }
+            Err(r) => return Err(r),
+        };
         // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
         // (its rails), which it rests on.
         let rests = s.rests(pk.as_str());
@@ -1398,6 +1451,14 @@ mod tests {
         assert_eq!(who(&w), [id(1), id(2), id(3), id(4)]);
         let r = ways(&crew, ends, from, far, turn, &walled).expect_err("out of reach");
         assert!(r.detail.contains(&show(id(1))), "{}", r.detail);
+        // #5067 item 4: refused, the nearest place the crew's node would be admitted from, the same `ways` with the
+        // whole crew there: with nobody able to walk, where every carrier stands within reach where the set-in ends.
+        let at = admitted_from(&crew, ends, (from, turn), far, &walled).expect("a place");
+        assert!(ways(&crew.map(|c| Carrier { feet: Vec3::new(c.feet.x + at.x, 0, c.feet.z + at.z), ..c }), ends, at, far, turn, &walled).is_ok());
+        assert!(at.x > 0 && at.x < far.x && at.z == 0 && at.y == from.y, "toward where it goes: {at:?}");
+        // Nowhere within a metre of where it goes, a crew none of whose carriers reaches its hold at the start.
+        let off = [c(1, 0, 3_000_000, 0, 1_097_000), crew[1]];
+        assert_eq!(admitted_from(&off, ends, (from, turn), far, &walled), None);
         // Out of reach where the track would start: refused whoever could walk.
         let mut off = crew;
         off[1].feet.z -= 400_000;

@@ -151,7 +151,7 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount, soulProfile } from '../account/account.mjs';
 import { feedDue, mention } from '../home/news.mjs';
 import { clientUpdate } from '../upgrade/served.mjs';
-import { goTime, nextStep } from '../carry/carry.mjs';
+import { goTime, nextStep, putFromAdmitted } from '../carry/carry.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = [
@@ -854,7 +854,9 @@ if (isMain(import.meta.url)) {
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
       if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
-      const answer = asked.wait ? await actEnd(ask, await ask(req, ms), { ms: actWaitMs(req) }) : await ask(req, ms);
+      let answer = asked.wait ? await actEnd(ask, await ask(req, ms), { ms: actWaitMs(req) }) : await ask(req, ms);
+      // #5067: a put refused out of reach that names where it would be admitted carries the crew there and asks again.
+      if (asked.wait && req.op === 'carry') answer = await putFromAdmitted(answer, req, async (r) => actEnd(ask, await ask(r, ms), { ms: actWaitMs(r) }));
       // 0.135 C: an offered crew is named once its node is in the copy, for the steps that follow.
       if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
       if (req.op === 'carry') await nextOf(ask, req, answer);

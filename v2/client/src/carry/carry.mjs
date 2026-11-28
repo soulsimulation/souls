@@ -421,6 +421,35 @@ export function carryIntents(req, ctx) {
   }
 }
 
+/** worldd's words, ending a `part.grip-out-of-reach` put, for where the put would be admitted (#5067, the engine's
+ *  `assembly::ADMITTED_AT`): then `x=<mm> z=<mm> mm`, the crew's node on its ground. */
+export const ADMITTED_AT = "admitted with the crew's node at";
+
+/** Where a refused put's detail says it would be admitted from: [x, z] metres on the crew's ground, or null. */
+export function admittedAt(detail) {
+  const m = new RegExp(`${ADMITTED_AT} x=(-?\\d+) z=(-?\\d+) mm`).exec(String(detail ?? ''));
+  return m ? [Number(m[1]) / 1000, Number(m[2]) / 1000] : null;
+}
+
+/** The receipt's words when a put was asked again from where the slot can be reached. */
+export const PUT_MOVED = 'moved to where the slot can be reached';
+
+/**
+ * `part put` refused `part.grip-out-of-reach` with where it would be admitted from (#5067 item 4): the crew is carried
+ * there (`carry to <crew> x,z`, the front's walk takes the whole crew) and the put asked once more. `ask(req)` sends a
+ * request and waits for its end, as the command does. The refusal is shown only when the second ask is refused too;
+ * a put admitted the second time says so (`moved`).
+ */
+export async function putFromAdmitted(answer, req, ask) {
+  if (req?.kind !== 'part' || req.do !== 'put' || answer?.code !== 'part.grip-out-of-reach') return answer;
+  const at = admittedAt(answer.detail);
+  if (!at) return answer;
+  const walked = await ask({ op: 'carry', do: 'to', crew: req.crew, where: `${at[0]},${at[1]}` });
+  if (walked?.ok !== true) return answer;
+  const again = await ask(req);
+  return again?.ok === true ? { ...again, moved: PUT_MOVED, from: at } : again;
+}
+
 /** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
 export const HEIGHT = 1_050_000;
 /** sim::activity::carry::STAND_LIFT: how high above its carriers' feet the foot of a load held standing is, µm. */
