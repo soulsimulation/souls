@@ -529,8 +529,6 @@ fn body_rows(w: &Seeded, body: Id) -> Vec<(Id, Vec3)> {
 const JOISTS_Z: [i64; 3] = [-572, -2, 578];
 /// Where each sheet sits, mm from the bay's middle along z: `s1`, `s2`.
 const SHEETS_Z: [i64; 2] = [-612, 607];
-/// Where the sheets lie before they are carried in, mm east of the bay's middle: clear of the 2x4s under the bay.
-const SHEETS_X: i64 = 3_000;
 /// How far west of its slot the flight stands before it is set, mm: clear of the 1.8 m beams lying 1 m outside.
 const FLIGHT_OFF: i64 = 800;
 /// The stair slot's place in the bay, mm: its top at the sheets' west edge (x = -914), over `s1`, on `j2`'s line.
@@ -539,8 +537,7 @@ const STAIR_AT: [i64; 2] = [-2_164, -572];
 /// N2's test world with a deck bay's parts at the site, in the test kinds `test_deck_*` (`#5258`'s sizes, with a
 /// `stair` slot and a flight that hooks onto a 2x4): the bay at the site's centre, its two 12 ft frames standing loose
 /// on their slots' places, its four beams lying outside their columns (the low ones 0.5 m out, the high ones 1 m),
-/// the three 2x4s lying under their slots, the sheets lying 3 m east (each on its own slot's line), and the flight
-/// standing 0.8 m west of its slot.
+/// the three 2x4s and the two sheets lying under their slots, and the flight standing 0.8 m west of its slot.
 /// What each part is walked on and up is its kind's (`geometry.floors`, `stairs`, `ladders`): a sheet's top, the
 /// flight's stair from the ground to the deck's top, each frame's standing places and ladders. Returns the facts and
 /// the bay's slot numbers, by name.
@@ -619,7 +616,7 @@ fn bay_world(d: &Path) -> (String, BTreeMap<String, u64>) {
         things.push((format!("joist-{}", k + 2), 3, [x, 0, z + jz, 0]));
     }
     for (k, sz) in SHEETS_Z.iter().enumerate() {
-        things.push((format!("sheet-{}", k + 1), 4, [x + SHEETS_X, 0, z + sz, 0]));
+        things.push((format!("sheet-{}", k + 1), 4, [x, 0, z + sz, 0]));
     }
     for (k, v) in top.iter_mut() {
         match (k.as_str(), v) {
@@ -839,8 +836,8 @@ impl Bay {
         self.leave(3, c);
     }
 
-    /// The deck: each 2x4 seated across the two 1.8 m beams by Souls 3 and 4 from where it lies, then each sheet carried
-    /// in from where it lies by Souls 1 and 2 and seated on its two 2x4s (`s1` on `j2` and `j3`, `s2` on `j3` and `j4`).
+    /// The deck: each 2x4 seated across the two 1.8 m beams by Souls 3 and 4 from where it lies, then each sheet by
+    /// Souls 1 and 2 from where it lies, on its two 2x4s (`s1` on `j2` and `j3`, `s2` on `j3` and `j4`).
     fn deck(&mut self) {
         let high = self.high;
         for (k, (j, slot)) in self.joists.into_iter().zip(["j2", "j3", "j4"]).enumerate() {
@@ -857,16 +854,12 @@ impl Bay {
         for (k, (slot, on)) in [("s1", [j2, j3]), ("s2", [j3, j4])].into_iter().enumerate() {
             let sz = SHEETS_Z[k];
             self.walk(
-                &[(0, Bay::at(SHEETS_X - 1_264, sz)), (1, Bay::at(SHEETS_X + 1_264, sz))],
+                &[(0, Bay::at(-1_264, sz)), (1, Bay::at(1_264, sz))],
                 "Souls 1 and 2 to a sheet's ends",
             );
             let c = self.crew(0, &[1]);
             let got = self.act(0, "part:take", c, self.sheets[k]);
             self.ok(got, "a sheet taken");
-            self.walk(
-                &[(0, Bay::at(-1_264, sz)), (1, Bay::at(1_264, sz))],
-                "the sheet carried in over its slot",
-            );
             let got = self.put(0, c, slot, Some(&on));
             self.ok(got, slot);
             assert_eq!(joints_at(&self.w, self.sheets[k]), 2, "{slot}: its two joints");
@@ -957,7 +950,7 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
 /// Racks T6, the brief's task 4, in a served world by Souls' intents: a Soul climbs a frame to its 1.8 m standing place.
 ///
 /// - the bay's frames stand on four beams. Each frame's kind declares, on each face, a ladder from the ground to each
-///   beam level and a standing place there, 0.7 m deep and as wide as the frame, that exists only while a part joined
+///   beam level and a standing place there, 0.9 m deep and as wide as the frame, that exists only while a part joined
 ///   to the frame sits at its level (a beam braces it) and nothing lies over it within a body's height;
 /// - a fifth Soul walks to frame 1's outer standing place at 1.8 m: its way is the ladder, climbed as a track (its
 ///   body's rows rise from the ground, none a jump), and it stands on the place at its height;
@@ -974,11 +967,11 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     // face is its outer one (it stands at the bay's -z end).
     let perch = k.places[0][1];
     let walker = {
-        k.walk(&[(4, Bay::at(286, -3_000))], "Soul 5 to the ladder's foot");
+        k.walk(&[(4, Bay::at(150, -3_200))], "Soul 5 to the ladder's foot");
         body_of(&k.w, k.w.souls[4])
     };
     let before = body_rows(&k.w, walker).len();
-    let to = BTreeMap::from([(1, Value::Array(vec![int(286_000), int(1_800_000), int(-388_000)]))]);
+    let to = BTreeMap::from([(1, Value::Array(vec![int(150_000), int(1_800_000), int(-488_000)]))]);
     k.hands[4].send("eden:walk", perch, to);
     let got = socket_end(&mut k.hands[4].s);
     println!("Soul 5 climbs to the 1.8 m standing place: {got:?}");
@@ -1010,8 +1003,8 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     assert!(high > 1_500_000, "up the ladder: {high}");
     assert!(most <= 300_000, "no jump on the way: {most}");
 
-    // A second step, off the place's outer edge (0.7 m from the face), is refused.
-    let off = BTreeMap::from([(1, Value::Array(vec![int(286_000), int(1_800_000), int(-1_000_000)]))]);
+    // A second step, off the place's outer edge (0.9 m from the face), is refused.
+    let off = BTreeMap::from([(1, Value::Array(vec![int(150_000), int(1_800_000), int(-1_300_000)]))]);
     k.hands[4].send("eden:walk", perch, off);
     let got = socket_end(&mut k.hands[4].s);
     println!("Soul 5 steps off the edge: {got:?}");
@@ -1032,7 +1025,7 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     k.leave(1, c);
 
     // Down again.
-    let down = Bay::at(286, -3_500);
+    let down = Bay::at(150, -3_500);
     let to = BTreeMap::from([(1, Value::Array(vec![int(down.x), int(0), int(down.z)]))]);
     k.hands[4].send("eden:walk", g, to);
     let got = socket_end(&mut k.hands[4].s);

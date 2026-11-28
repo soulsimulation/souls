@@ -77,7 +77,7 @@ pub const F_TILE_SIZE: u64 = 24; // the open ground: a terrain tile's side, mm (
 pub const F_TILES: u64 = 25;
 pub const F_ASSET: u64 = 26; // X6: [SHA-256 …] of the world's uploads the thing names (a mesh's, a picture's)
 pub const F_ENTRY: u64 = 27; // X6: the Soul Actions entry of the thing's kind (SA-E11's map), when it has one
-pub const F_WHILE_JOINED: u64 = 28; // a floor: ground only while a part joined to its thing sits at its height (racks T6)
+pub const F_WHILE_JOINED: u64 = 104; // a floor: ground only while a part joined to its thing sits at its height (racks T6)
 /// The defs the world defines itself (a template's `define`, not the core library's), on the open ground, once each:
 /// `[[ref, def] …]`, each def today's stored def as JSON text (bytes), so a page drawing from the stream alone draws
 /// them as today's page does (a hall's roof). On the ground, never on a thing of the def, so removing any thing keeps

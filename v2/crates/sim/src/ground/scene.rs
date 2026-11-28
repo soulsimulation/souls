@@ -28,7 +28,7 @@ pub const F_TILE_SIZE: u64 = 24;
 pub const F_TILES: u64 = 25;
 /// A floor that is ground only while a part joined to its thing sits at its height (racks T6: a frame's standing place,
 /// there while a beam braces the frame at that level; [`braced`]). Import-eden's `F_WHILE_JOINED`.
-pub const F_WHILE_JOINED: u64 = 28;
+pub const F_WHILE_JOINED: u64 = 104;
 
 pub const GROUND: &str = "eden:ground";
 pub const FLOOR: &str = "eden:floor";
