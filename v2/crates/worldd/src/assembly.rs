@@ -631,7 +631,6 @@ impl Assembly {
         let inside = conj(turn)?
             .then(at.rot)
             .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
-        let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
         // A part that lies (a frame laid flat, whose origin is its foot) is held by its middle between its carriers, as a
         // lift holds it: its origin at their middle would put both its grips on one side of them, out of one's reach.
         // One that stands, or whose origin is over its middle already (a beam), is held where its origin is.
@@ -642,6 +641,13 @@ impl Assembly {
             }
             _ => Vec3::ZERO,
         };
+        // #5067: the carry's own height: a part that stands as it is held is lifted clear of the ground, any other
+        // carried where a standing body holds it (`Load::held_at`).
+        let height = match crew {
+            Some(c) => c.load.held_at(slot, inside)?.carried,
+            None => HEIGHT,
+        };
+        let frame = Vec3::new(middle.x, middle.y + height, middle.z);
         // #5067: every carrier reaches the hold the carry's rule gives it, as the crew will hold the part (the node
         // between its front and its back, the part in its slot turned as it is).
         let carriers = match crew {
@@ -1294,7 +1300,7 @@ mod tests {
                 back,
                 sides: &[],
             };
-            let node = (Vec3::new(0, HEIGHT, 0), turn);
+            let node = (Vec3::new(0, sim::activity::carry::STAND_LIFT, 0), turn);
             out_of_reach(&crew.carriers((Vec3::ZERO, conj(turn)?))?, node)
         };
         assert_eq!(

@@ -214,6 +214,9 @@ pub struct Engine {
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
     taking: BTreeMap<Id, Taking>,
+    /// The crews whose take is on its track into their hands (#5067): their holds are said in the phase `souls:lift`
+    /// until the track ends (`souls:lifted`), then `souls:carry`, the part in their hands.
+    take_lifting: BTreeSet<Id>,
     /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
     joining: Option<Json>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -369,6 +372,28 @@ fn regrip(
     h.phase = phase.to_owned();
     h.since = by.0;
     h.until = until;
+    activities.next = tree.next();
+    activities.carry_grips(tree, activity, &h, by)
+}
+
+/// `activity`'s crew goes on holding its standing part (#5067): its holds said [`grips::HELD`], each holder's hands on
+/// its post's outer face at a standing body's height ([`grips::standing`]), `half_width` being the part's (µm).
+fn hold_standing(
+    activities: &mut Activities,
+    tree: &mut Tree,
+    activity: Id,
+    half_width: Option<i64>,
+    by: (Micros, Actor, Cause),
+) -> R<()> {
+    let Some(mut h) = holds_on(tree, activity) else {
+        return Ok(());
+    };
+    if let Some(w) = half_width {
+        h.holds = grips::standing(&h.holds, w);
+    }
+    h.phase = grips::HELD.to_owned();
+    h.since = by.0;
+    h.until = None;
     activities.next = tree.next();
     activities.carry_grips(tree, activity, &h, by)
 }
@@ -752,6 +777,7 @@ impl Engine {
             raise_specs: BTreeMap::new(),
             raising: BTreeMap::new(),
             taking: BTreeMap::new(),
+            take_lifting: BTreeSet::new(),
             joining: None,
             library: crate::moves::library().unwrap_or_else(|r| {
                 eprintln!("worldd: no moves for activities: {r}");
@@ -1635,7 +1661,7 @@ impl Engine {
                         by,
                     )?;
                     // #5067: who holds which grip, said with the lift; and each carrier turns to face its hold.
-                    self.grip(&mut tree, activity, board, &carry.sides, by);
+                    self.grip(&mut tree, activity, board, &carry.sides, grips::CARRY, by);
                     if let Some((holding, node)) = &facing {
                         face_holds(c, holding, *node);
                     }
@@ -1833,6 +1859,7 @@ impl Engine {
         activity: Id,
         load: Id,
         sides: &[(Id, [i64; 2])],
+        phase: &str,
         by: (Micros, Actor, Cause),
     ) {
         let holds = (|| -> R<Holds> {
@@ -1856,7 +1883,7 @@ impl Engine {
             };
             Ok(Holds {
                 load,
-                phase: grips::CARRY.to_owned(),
+                phase: phase.to_owned(),
                 since: by.0,
                 until: None,
                 holds,
@@ -2090,13 +2117,15 @@ impl Engine {
                 continue;
             };
             // 0.135 C4: set down the way it is held, as its entry states it.
-            if let Some((l, held)) = tr.handle(load).and_then(|h| tr.node(h)).and_then(|n| {
+            if let Some((l, at, held)) = tr.handle(load).and_then(|h| tr.node(h)).and_then(|n| {
+                let p = n.place()?;
                 Some((
                     self.loads.get(plain(n.kind().as_str()))?,
-                    n.place()?.orientation,
+                    p.position,
+                    p.orientation,
                 ))
             }) {
-                carry.load = l.held_turned(held).unwrap_or(Load { turn: held, ..*l });
+                carry.load = l.held_at(at, held).unwrap_or(Load { turn: held, ..*l });
             }
             // #5067: from where the node is, down a set-down's track to rest on its carriers' floor (a lift cut off
             // by the restart left the node between the floor and carrying height).
@@ -2264,6 +2293,13 @@ impl Engine {
                         w,
                     ) {
                         eprintln!("worldd: a lift's end was not said: {r}");
+                    }
+                    // #5067: a take's holds are carried now, the part in its carriers' hands.
+                    if self.take_lifting.remove(&activity)
+                        && let Err(r) =
+                            regrip(&mut self.activities, tr, activity, grips::CARRY, None, w)
+                    {
+                        eprintln!("worldd: the grips of {} were not said: {r}", show(activity));
                     }
                     self.unhold(activity);
                 }
@@ -3522,13 +3558,19 @@ impl Engine {
         }
     }
 
+    /// Half the width of `part` in its own frame, µm (its entry's bounds' x): where its posts' outer faces are.
+    fn half_width(&self, tree: &Tree, part: Id) -> Option<i64> {
+        let n = tree.handle(part).and_then(|h| tree.node(h))?;
+        Some(self.loads.get(plain(n.kind().as_str()))?.half.x)
+    }
+
     /// The load `part` is as its kind's entry states it, turned as it is held in its crew's slot (0.135 C4's
     /// `Load`), so a carry that breaks off sets it down the way it is held.
     fn held_load(&self, tree: &Tree, part: Id) -> Option<Load> {
         let n = tree.handle(part).and_then(|h| tree.node(h))?;
         let l = self.loads.get(plain(n.kind().as_str()))?;
-        let turn = n.place()?.orientation;
-        Some(l.held_turned(turn).unwrap_or(Load { turn, ..*l }))
+        let (at, turn) = n.place().map(|p| (p.position, p.orientation))?;
+        Some(l.held_at(at, turn).unwrap_or(Load { turn, ..*l }))
     }
 
     /// The takes and seatings to commit through the walkers' maps (0.135 A2, `crate::answers`), and the seatings
@@ -3600,19 +3642,22 @@ impl Engine {
                     .handle(r.activity)
                     .and_then(|h| tree.node(h))
                     .and_then(|n| n.parent());
-                let phase = if holds.is_some() && under == holds {
-                    grips::HELD
-                } else {
-                    grips::RELEASED
+                // A frame held in its bay: its holders' hands on its posts at a standing body's height (#5067).
+                let said = match holds.filter(|_| under == holds) {
+                    Some(part) => {
+                        let w = self.half_width(&tree, part);
+                        hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
+                    }
+                    None => regrip(
+                        &mut self.activities,
+                        &mut tree,
+                        r.activity,
+                        grips::RELEASED,
+                        None,
+                        word,
+                    ),
                 };
-                if let Err(e) = regrip(
-                    &mut self.activities,
-                    &mut tree,
-                    r.activity,
-                    phase,
-                    None,
-                    word,
-                ) {
+                if let Err(e) = said {
                     eprintln!(
                         "worldd: the grips of {} were not let go: {e}",
                         show(r.activity)
@@ -3670,8 +3715,13 @@ impl Engine {
                 let word = (now, Actor::Soul(r.soul), Cause::Intent(r.intent));
                 // #5067: the take is a track from where the part was into its carriers' hands, said as a lift's is; its
                 // carriers' span at the take is kept (a carry they let drift apart breaks off, 0.135 C3).
+                // Who holds which grip is said as it is true (#5067): `souls:lift` while the part is on its way into
+                // their hands, `souls:carry` once it is there (`souls:lifted`, or at once with no track).
+                let mut phase = grips::CARRY;
                 match carry.take_up(now, from, (at, turn), span, (ground, lay.0, lay.1)) {
                     Ok(times) => {
+                        phase = grips::LIFT;
+                        self.take_lifting.insert(r.activity);
                         self.activities.next = tree.next();
                         if let Err(e) = self.activities.carry_track(
                             &mut tree,
@@ -3691,8 +3741,7 @@ impl Engine {
                         carry.span = span;
                     }
                 }
-                // Who holds which grip, said once the take is committed.
-                self.grip(&mut tree, r.activity, part, &sides, word);
+                self.grip(&mut tree, r.activity, part, &sides, phase, word);
                 carry.sides = sides;
                 self.carries.insert(r.activity, carry);
                 self.collect(Some((r.intent, r.soul)));
@@ -3909,7 +3958,7 @@ impl Engine {
                 carry.ground,
                 ends,
                 plan.half_width,
-                c1.y - sim::activity::carry::HEIGHT,
+                c1.y - carry.load.carried,
                 velocity,
                 carriers,
             ));

@@ -50,7 +50,7 @@ export const REACH = 350_000;
 export const SIDE_REACH = 450_000;
 /** How far beyond the edge it holds each of the two carriers of a part that stands upright (no long axis on the plan)
  * stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part at its edges on the line its
- * carriers stand on (a rack frame's posts, a timber bent's), its hands 1.05 m and 1.35 m above the ground, and refuses a
+ * carriers stand on (a rack frame's posts, a timber bent's), lifted 0.15 m, its hands 1.05 m and 1.35 m above the ground, and refuses a
  * carrier more than 0.7 m from its hold (`part.grip-out-of-reach`). 0.35 m is where a standing body holds both
  * without squatting: 0.96 m from the middle of a 1.22 m rack frame, 10 mm clear of the ground the frame's own columns
  * take in a bay (0.95 m). A frame stand's walk box (1.05 m) is further out: there the walk ends as near as it can.
@@ -423,6 +423,8 @@ export function carryIntents(req, ctx) {
 
 /** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
 export const HEIGHT = 1_050_000;
+/** sim::activity::carry::STAND_LIFT: how high above its carriers' feet the foot of a load held standing is, µm. */
+export const STAND_LIFT = 150_000;
 /** The furthest ahead a `--go` moment may be, ms: a command waits for it within its daemon's patience (30 s). */
 export const GO_MOST_MS = 20_000;
 
@@ -448,7 +450,9 @@ function heldExtent(ctx, crew) {
   const hb = b.map((v) => v * 500);
   const corners = [-1, 1].flatMap((a) => [-1, 1].flatMap((c) => [-1, 1].map((e) => turn(hp.rot ?? [ONE, 0, 0, 0], [a * hb[0], c * hb[1], e * hb[2]]))));
   const ext = [0, 1, 2].map((k) => Math.max(...corners.map((v) => Math.abs(v[k]))));
-  return { id, ext, band: [HEIGHT - ext[1], HEIGHT + ext[1]], long: Math.max(ext[0], ext[2]), across: Math.min(ext[0], ext[2]) };
+  // held standing (taller than it is long on the plan), it is lifted by its foot; else carried by its middle
+  const band = ext[1] > Math.max(ext[0], ext[2]) ? [STAND_LIFT, STAND_LIFT + 2 * ext[1]] : [HEIGHT - ext[1], HEIGHT + ext[1]];
+  return { id, ext, band, long: Math.max(ext[0], ext[2]), across: Math.min(ext[0], ext[2]) };
 }
 
 /**

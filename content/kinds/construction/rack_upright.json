@@ -7,7 +7,7 @@
    "n": 28,
    "type": "int",
    "unit": "count",
-   "default": 1,
+   "default": 2,
    "audience": {
     "rule": "everyone"
    }

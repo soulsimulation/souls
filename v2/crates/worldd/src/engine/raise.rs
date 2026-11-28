@@ -37,8 +37,8 @@ use sim::ground::scene::xform_to;
 use sim::slots::Slots;
 
 use super::{
-    Act, Engine, R, Verb, apart, face_holds, param_id, param_point, refusal, regrip, stands,
-    way_is_ground,
+    Act, Engine, R, Verb, apart, face_holds, hold_standing, param_id, param_point, refusal, regrip,
+    stands, way_is_ground,
 };
 use crate::assembly::{Carrier, Ready, Step, out_of_reach};
 
@@ -370,15 +370,11 @@ impl Engine {
                 ) {
                     eprintln!("worldd: a raise's end was not said: {e}");
                 }
-                // Standing, its crew holds it on.
-                if let Err(e) = regrip(
-                    &mut self.activities,
-                    &mut tree,
-                    r.activity,
-                    grips::HELD,
-                    None,
-                    word,
-                ) {
+                // Standing, its crew holds it on: each holder's hands on its post at a standing body's height (#5067).
+                let w = self.half_width(&tree, ra.part);
+                if let Err(e) =
+                    hold_standing(&mut self.activities, &mut tree, r.activity, w, word)
+                {
                     eprintln!("worldd: a raise's holds were not said at its end: {e}");
                 }
                 self.collect(Some((r.intent, r.soul)));

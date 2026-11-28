@@ -937,7 +937,12 @@ mod from_entry {
         let load = Load::of(&entry("rack_upright.json")).unwrap();
         let c = Vec3::new(5 * M, 0, -3 * M);
         let facing = Quat::from_yaw_mdeg(-90_000).unwrap();
-        let standing = load.held_turned(Quat::IDENTITY).unwrap();
+        let standing = load.held_at(Vec3::ZERO, Quat::IDENTITY).unwrap();
+        // #5067: lifted 0.15 m, not carried a metre up; its middle half its height above its node (its foot).
+        assert_eq!(
+            (standing.carried, standing.above),
+            (super::super::STAND_LIFT, load.half.y)
+        );
         let (p, o) = standing.resting(c, facing).unwrap();
         assert_eq!(
             p.y,
@@ -946,7 +951,8 @@ mod from_entry {
             c.y - p.y
         );
         assert_eq!(o.rotate(Vec3::new(0, M, 0)).unwrap().y, M, "still standing");
-        let flat = load.held_turned(load.turn).unwrap();
+        let flat = load.held_at(load.held().unwrap().0, load.turn).unwrap();
+        assert_eq!((flat.carried, flat.above), (super::super::HEIGHT, 0));
         assert_eq!(
             flat.rest, load.rest,
             "laid flat as its entry turns it: rest unchanged"
@@ -1494,6 +1500,62 @@ mod each_step {
         assert_eq!((h.rest.0, h.rest.1.y), (ground, frame().rest), "to rest on the ground");
         assert_eq!(h.to.0.y, frame().rest);
     }
+
+    /// #5067: a frame held standing has its own carry height. Its node (its foot) is 0.15 m above its carriers' feet,
+    /// not at the 1.05 m a load is carried by its middle; it spans 0.15 m to 2.59 m; and a carry broken off lowers the
+    /// node those 0.15 m to the floor, where the frame is then put. Before, the set-down measured from its middle: the
+    /// node rose half the frame's height and the frame jumped down at the track's end.
+    #[test]
+    fn a_frame_held_standing_is_lifted_15_cm_and_goes_straight_down_to_its_feet() {
+        use replica::pose::{Quat, Vec3};
+        use replica::world_model::Audience;
+
+        use super::super::{Carry, HEIGHT, STAND_LIFT};
+        let standing = upright().held_at(Vec3::ZERO, Quat::IDENTITY).unwrap();
+        assert_eq!(standing.carried, STAND_LIFT);
+        assert_eq!(
+            standing.as_held().unwrap().1,
+            [STAND_LIFT, STAND_LIFT + 2_438_000]
+        );
+        let (front, back) = (Vec3::new(960_000, 0, 0), Vec3::new(-960_000, 0, 0));
+        let node = Carry::pose_at(front, back, standing.carried).unwrap();
+        assert_eq!(node.0, Vec3::new(0, STAND_LIFT, 0));
+        assert_eq!(Carry::pose(front, back).unwrap().0.y, HEIGHT);
+        let w = testworld::generate(1, 40).unwrap();
+        let im = import_eden::load(&w.text).unwrap();
+        let (tree, ground) = (&im.tree, im.nodes["ground"]);
+        let load = replica::ids::Id::new(im.nodes["world"].scope(), 999_999).unwrap();
+        let mut carry = Carry::new(
+            im.nodes["world"],
+            load,
+            ground,
+            Audience::Everyone,
+            super::header(im.nodes["world"]),
+            im.rules.clone(),
+        );
+        carry.load = standing;
+        // 60 m off the world's things, on open ground.
+        let at = Vec3::new(-60 * M, STAND_LIFT, 60 * M);
+        carry.track.push((0, at, Quat::IDENTITY));
+        let under = Vec3::new(at.x, 0, at.z);
+        assert_eq!(carry.rests_on(tree, ground, under, Quat::IDENTITY).unwrap(), 0);
+        carry.release(tree, 50_000, ground, None, "souls:test").unwrap();
+        let h = carry.hoist.expect("a set-down's track");
+        assert_eq!(h.from.0.y, STAND_LIFT, "from where it is held");
+        assert_eq!(h.to.0.y, 0, "its foot straight down to the floor");
+        assert_eq!(h.rest.1, Vec3::new(at.x, 0, at.z), "put where the track ends");
+        // A beam taken where its origin is (its underside, 51 mm under its middle) comes down the same way.
+        let beam = super::turning::beam();
+        let taken = beam.held_at(Vec3::ZERO, beam.turn).unwrap();
+        assert_eq!(taken.carried, HEIGHT);
+        assert!((taken.above - 51_000).abs() <= 2, "{}", taken.above);
+        carry.load = taken;
+        carry.hoist = None;
+        carry.track.push((60_000, Vec3::new(at.x, HEIGHT, at.z), Quat::IDENTITY));
+        carry.release(tree, 100_000, ground, None, "souls:test").unwrap();
+        let end = carry.hoist.expect("a track").to.0.y;
+        assert!(end.abs() <= 2, "its underside on the floor: {end}");
+    }
 }
 
 /// 0.135 R2 (#2814): a long load turned through a door narrower than it is long, by the search over its poses; every
@@ -1506,7 +1568,7 @@ mod turning {
 
     const M: i64 = 1_000_000;
 
-    fn beam() -> Load {
+    pub(super) fn beam() -> Load {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../content/kinds/construction");
         let e = std::fs::read_to_string(root.join("rack_beam.json")).expect("the entry");
