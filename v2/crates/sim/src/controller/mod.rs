@@ -346,6 +346,17 @@ pub struct Track {
     pub hold: bool,
 }
 
+/// How long a line is from `from` through each of `line`'s points, µm.
+fn line_len(from: Vec3, line: &[Vec3]) -> i64 {
+    let mut at = from;
+    let mut len = 0i128;
+    for &p in line {
+        len += dist2(at, p).isqrt();
+        at = p;
+    }
+    i64::try_from(len).unwrap_or(i64::MAX)
+}
+
 fn dist2(a: Vec3, b: Vec3) -> i128 {
     let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
     d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)
@@ -419,6 +430,9 @@ struct Slot {
     /// Whether the input may differ from the one logged: set by every change, so an unchanged body costs no compare.
     touched: bool,
     track: Option<Track>,
+    /// How long its track's line was, µm, from where the body stood when it began (FOR-FABLE 8): how far along a link
+    /// it is ([`Controller::crossing`]).
+    track_len: i64,
     /// Ticks its carry has stood at the last point of its track, held while another body stands where it lands (#4215).
     landing: u32,
     voice: Voice,
@@ -668,6 +682,7 @@ impl Controller {
                 logged: None,
                 touched: true,
                 track: None,
+                track_len: 0,
                 landing: 0,
                 voice: Voice::default(),
                 ground: Ground::Dry,
@@ -988,6 +1003,7 @@ impl Controller {
         s.input.velocity = Vec3::ZERO;
         s.touched = true;
         let across = track.link.is_some();
+        s.track_len = line_len(s.moved.pose.position, &track.line);
         s.track = Some(track);
         if across {
             self.near.remove_body(body);
@@ -1006,6 +1022,7 @@ impl Controller {
         s.input.velocity = Vec3::ZERO;
         s.touched = true;
         s.landing = 0;
+        s.track_len = line_len(s.moved.pose.position, &track.line);
         s.track = Some(track);
         Ok(())
     }
@@ -1080,6 +1097,18 @@ impl Controller {
             .filter(|(_, s)| s.ground != Ground::Dry)
             .map(|(id, s)| (*id, s.ground))
             .collect()
+    }
+
+    /// The link `body` is being carried across and how far along it it is, in millionths of its track's line from
+    /// where it began (FOR-FABLE 8): what its row in the tick's record says while it is on a stair or a ladder.
+    pub fn crossing(&self, body: Id) -> Option<(Id, u32)> {
+        let s = self.bodies.get(&body)?;
+        let t = s.track.as_ref()?;
+        let link = t.link?;
+        let left = i128::from(line_len(s.moved.pose.position, &t.line));
+        let all = i128::from(s.track_len.max(1));
+        let along = ((all - left).clamp(0, all) * 1_000_000 / all) as u32;
+        Some((link, along))
     }
 
     /// The link `body` is being carried across, if any.
