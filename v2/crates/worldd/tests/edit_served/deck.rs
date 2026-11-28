@@ -1111,21 +1111,27 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     println!("the body on {} at {at:?}", show(on));
     assert_eq!(on, perch, "the body stands on the frame's standing place");
     assert_eq!(at.y, 1_800_000, "at the beam level");
-    // The climb is a track the controller follows a sample a tick; a body on a track writes no body row (the page
-    // lane's gap, #5256), so the rows show it last at the ladder's foot and next on the place. No jump: the time
-    // between is at least the rise at the walk's speed (1.4 m/s), in 50 ms ticks, counted from the later of its last
-    // row on the ground and the walk being sent (a body standing still writes no row either).
+    // The climb is a track the controller follows a sample a tick, and the body writes its row on the ladder every
+    // tick it moves (FOR-FABLE 8), so its rows rise from the ground to the place, none a jump: the time from its last
+    // row on the ground (or the walk being sent) to its first on the place is at least the rise at the walk's speed
+    // (1.4 m/s), in 50 ms ticks, and no two rows on the way are more than a tick's walk apart in height.
     let first = rows[before..]
         .iter()
         .position(|r| r.1 == perch)
         .map(|i| before + i)
         .expect("a row on the standing place");
-    let (t0, n0, foot) = rows[first - 1];
+    let ground_rows = rows[before..first]
+        .iter()
+        .rposition(|r| r.1 == g && r.2.y == 0)
+        .map(|i| before + i)
+        .expect("a row on the ground before the climb");
+    let (t0, n0, foot) = rows[ground_rows];
     let t0 = t0.max(sent);
     let (t1, ..) = rows[first];
     println!(
-        "the climb: last on {} at {foot:?} at tick {t0}, first on the place at tick {t1}",
-        show(n0)
+        "the climb: last on {} at {foot:?} at tick {t0}, first on the place at tick {t1}, {} rows on the ladder",
+        show(n0),
+        first - ground_rows - 1
     );
     assert_eq!((n0, foot.y), (g, 0), "it leaves from the ground");
     assert!(
@@ -1133,6 +1139,14 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
         "no jump: {} ticks for a 1.8 m rise",
         t1 - t0
     );
+    let up = &rows[ground_rows..=first];
+    assert!(up.len() > 10, "rows on the ladder: {}", up.len() - 2);
+    for w in up[..up.len() - 1].windows(2) {
+        assert!(
+            (w[1].2.y - w[0].2.y).abs() <= 70_000,
+            "no jump between rows on the ladder: {w:?}"
+        );
+    }
 
     // A second step, off the place's outer edge (0.9 m from the face), is refused.
     let off = BTreeMap::from([(
@@ -1289,4 +1303,153 @@ fn deck_bay_a_soul_on_a_frames_standing_place_walks_to_a_point_on_the_ground_2_m
     let got = socket_end(&mut k.hands[4].s);
     k.ok(got, "Soul 5 walks to the point named");
     assert_eq!(body_on(&k.w, walker).0, g, "on the open ground there");
+
+/// Every motion sample written on body `body`'s node, in order: when, the node its frame is, its place there, its
+/// velocity and its support.
+fn samples_of(w: &Seeded, body: Id) -> Vec<(i64, Id, Vec3, Vec3, replica::pose::Support)> {
+    use replica::effects::{Body, Change};
+    let mut out = Vec::new();
+    for p in logged(w) {
+        for e in &p.effects {
+            if let Body::Changes(cs) = &e.body {
+                for c in cs {
+                    if let Change::Motion(h) = &c.change
+                        && h.node == body
+                    {
+                        out.push((
+                            h.at,
+                            h.pose.frame.node,
+                            h.pose.position,
+                            h.linear,
+                            h.pose.support,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// FOR-FABLE 8: a body walking up the stair flight (a track across its link) writes its place as it goes, as a walk
+/// does: a body row every tick it moves on the track, with the link it is on and how far along it, and motion samples
+/// on its node all the way up, so the page draws it moving up the flight.
+#[test]
+fn deck_bay_a_soul_walking_up_the_stair_writes_its_place_every_tick_on_the_flight() {
+    let mut k = Bay::serve("deck-rows", 5);
+    k.frame();
+    k.deck();
+    let (flight, decks) = (k.flight, k.decks);
+    let (fx, fz) = (STAIR_AT[0] - FLIGHT_OFF, STAIR_AT[1]);
+    k.walk(
+        &[(0, Bay::at(fx - 1_350, fz)), (1, Bay::at(fx + 1_350, fz))],
+        "Souls 1 and 2 to the flight's ends",
+    );
+    let c = k.crew(0, &[1]);
+    let got = k.act(0, "part:take", c, flight);
+    k.ok(got, "Souls 1 and 2 take the flight");
+    let got = k.put(0, c, "stair", Some(&[k.joists[0]]));
+    k.ok(got, "the flight in the stair slot, hooked onto j2");
+    k.leave(0, c);
+    k.leave(1, c);
+    k.walk(
+        &[(0, Bay::at(-5_000, -3_500)), (1, Bay::at(-6_000, -3_500))],
+        "Souls 1 and 2 step away",
+    );
+    k.walk(
+        &[(4, Bay::at(-4_500, STAIR_AT[1]))],
+        "Soul 5 to the flight's foot",
+    );
+    let walker = body_of(&k.w, k.w.souls[4]);
+    let (rows0, samples0) = (
+        body_ticks(&k.w, walker).len(),
+        samples_of(&k.w, walker).len(),
+    );
+    let to = BTreeMap::from([(1, Value::Array(vec![int(400_000), int(19_000), int(0)]))]);
+    k.hands[4].send("eden:walk", decks[0], to);
+    let got = socket_end(&mut k.hands[4].s);
+    k.ok(got, "Soul 5 up onto the first sheet");
+    let rows = body_ticks(&k.w, walker);
+    let samples = samples_of(&k.w, walker);
+    println!("the walk's body rows (tick, node, place):");
+    for r in &rows[rows0..] {
+        println!("  {} {} {:?}", r.0, show(r.1), r.2);
+    }
+    println!("the walk's motion samples (µs, node, place, velocity, support):");
+    for s in &samples[samples0..] {
+        println!("  {} {} {:?} {:?} {:?}", s.0, show(s.1), s.2, s.3, s.4);
+    }
+    // On the flight: its rows on the link, each with the tick, its place, the link and how far along it.
+    let mut on: Vec<(u64, Vec3, Id, u32)> = Vec::new();
+    // Every part, those with no effect too (a tick where only the climber moved writes rows alone).
+    for r in sim::log::recover(&std::fs::read(k.w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+    {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let p = replica::effects::Part::read(&r).unwrap();
+        let Some(Value::Uint(t)) = p.rest.get(&answers::TICK) else {
+            continue;
+        };
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for r in rows {
+                if let (Some((b, pose, _)), Some((l, along))) =
+                    (worldd::bodies::read_row(r), worldd::bodies::read_link(r))
+                    && b == walker
+                {
+                    on.push((*t, pose.position, l, along));
+                }
+            }
+        }
+    }
+    println!(
+        "{} rows on the link, along {:?} .. {:?}",
+        on.len(),
+        on.first().map(|r| r.3),
+        on.last().map(|r| r.3)
+    );
+    assert!(
+        on.len() >= 20,
+        "a row every tick on the flight: {}",
+        on.len()
+    );
+    assert!(on.iter().all(|r| r.2 == on[0].2), "one link");
+    for w in on.windows(2) {
+        assert_eq!(w[1].0, w[0].0 + 1, "one a tick: {w:?}");
+        assert!(w[1].1.y >= w[0].1.y, "rising: {w:?}");
+        assert!(
+            w[1].1.y - w[0].1.y <= 70_000,
+            "no jump between ticks: {w:?}"
+        );
+        assert!(w[1].3 >= w[0].3, "on along it: {w:?}");
+    }
+    assert!(
+        on.last().unwrap().3 >= 950_000,
+        "to its end: {:?}",
+        on.last()
+    );
+    assert!(
+        on.last().unwrap().1.y >= 1_900_000,
+        "up to the deck: {:?}",
+        on.last()
+    );
+    // Then off the link, on the deck.
+    let last = on.last().unwrap().0;
+    assert!(
+        rows[rows0..].iter().any(|r| r.0 > last && r.1 == decks[0]),
+        "its next row on the deck"
+    );
+    // The node's motion samples on the flight rise with it, as a walk's do, at least one every 200 ms.
+    let up: Vec<_> = samples[samples0..]
+        .iter()
+        .filter(|s| s.1 == k.w.ground && s.2.y > 0)
+        .collect();
+    assert!(up.len() >= 8, "motion samples up the flight: {}", up.len());
+    assert!(
+        up.windows(2)
+            .all(|w| w[1].2.y >= w[0].2.y && w[1].0 - w[0].0 <= 200_000),
+        "rising, one every 200 ms"
+    );
 }
