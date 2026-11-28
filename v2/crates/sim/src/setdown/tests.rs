@@ -402,6 +402,8 @@ impl Eden {
     }
 
     /// Plans a set-down, judges it by G2's rule for the bodies as they stand, and commits it.
+    // The way-out check's time (E16 A5) is real time.
+    #[allow(clippy::disallowed_methods)]
     fn set_down(
         &mut self,
         body: Id,
