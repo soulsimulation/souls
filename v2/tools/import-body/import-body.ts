@@ -276,6 +276,11 @@ export function imported(bytes: Buffer, v: Report, m: Measure): Imported {
   return { kind, text, size, radiusMm, heightMm, hoverMm, resources: res, actions, clips: m.clips, assetId: v.admitted.assetId, profile, full, simple: low };
 }
 
+/** Additive companion metadata comes from the same admitted body as its native kind; model and diag bytes stay exact. */
+export function bodyCompanion(b: Imported, full: string, simple: string) {
+  return { kind: b.kind, kindHash: sha(b.text), resources: b.resources.map(r => [...r]), full, simple, clips: b.clips, format: b.full.format ?? 'gltf', rigid: b.profile === 'rigid' };
+}
+
 /** Writes the kind, the crowd's entry and both models under `out`; returns the summary. */
 export function write(b: Imported, out: string) {
   const name = b.kind.slice(b.kind.indexOf(':') + 1), models = join(out, 'models');
@@ -284,7 +289,7 @@ export function write(b: Imported, out: string) {
   writeFileSync(join(out, fullFile), b.full.bytes);
   writeFileSync(join(out, simpleFile), b.simple.bytes);
   writeFileSync(join(out, `${name}.diag`), b.text);
-  const crowd = { kind: b.kind, full: fullFile, simple: simpleFile, clips: b.clips, format: b.full.format ?? 'gltf', rigid: b.profile === 'rigid' };
+  const crowd = bodyCompanion(b, fullFile, simpleFile);
   writeFileSync(join(out, `${name}.json`), JSON.stringify(crowd, null, 1) + '\n');
   return {
     kind: b.kind, file: `${name}.diag`, assetId: b.assetId, profile: b.profile, size: b.size, radiusMm: b.radiusMm, heightMm: b.heightMm, hoverMm: b.hoverMm,

@@ -47,8 +47,9 @@ export class WorldIdleLife{
    const looking={...s,yaw:s.yaw+bodyNext};
    // Weight shift while standing/sitting: slow hips roll about the facing axis.
    const hipsBone=b.hips??b.abdomen;if(hipsBone&&!/sit/.test(s.activity)){this.keep(hipsBone);this.axis.set(Math.cos(s.yaw),0,Math.sin(s.yaw));turn(hipsBone,this.axis,.035*amp*Math.sin(seconds*2*Math.PI/(9+ph*4)+ph*3.1));}
-   // Head: ease toward the nearest Soul; small idle glances otherwise; nods while speaking.
-   if(b.head){this.keep(b.head);const want=lookTarget(looking,souls)+(.12*Math.sin(seconds*.37+ph*9)),cur=this.look.get(s.id)??0,next=cur+(want-cur)*k;this.look.set(s.id,next);
+   // Seated bodies keep their assigned forward unless real conversation attention selects a peer.
+   // Other bodies keep nearest-neighbour attention; all retain small glances and speaking nods.
+   if(b.head){this.keep(b.head);const want=(s.activity==='sit'&&!s.attention?.length?0:lookTarget(looking,souls))+(.12*Math.sin(seconds*.37+ph*9)),cur=this.look.get(s.id)??0,next=cur+(want-cur)*k;this.look.set(s.id,next);
     turn(b.head,UP,-next*.8);if(b.torso){turn(b.torso,UP,-next*.2);}
     if(s.speaking){this.axis.set(-Math.sin(s.yaw),0,Math.cos(s.yaw));turn(b.head,this.axis,.07*amp*Math.sin(seconds*5.3+ph*4));if(b.torso)turn(b.torso,UP,.05*amp*Math.sin(seconds*1.7+ph));}}
   }

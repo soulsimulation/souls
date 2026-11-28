@@ -5,7 +5,7 @@ import { recordedTakeChunkSchema } from '@souls/protocol';
 import { TakePeople } from '../../../../mars/viewer/app/engine-view/take-replay.ts';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { chunkEnd, chunkOf, motionAt, positionAt, TICKS, TICK_US, type Body } from './takes.ts';
+import { chunkEnd, chunkOf, motionAt, positionAt, facingHandoffs, TICKS, TICK_US, type Body } from './takes.ts';
 
 const FROM = 1000; // a chunk's first tick (aligned to TICKS)
 const t0 = FROM * TICK_US;
@@ -74,4 +74,42 @@ test('standing retargets begin at the previous drawn heading, including immediat
   for (const i of [4, 1, 3, 0, 2]) assert.equal(at([1, 1.1, 1.2, 1.4, 2][i]), chronological[i], 'seeks do not depend on previous draws');
   assert.equal(motionAt([{ at: t0, p: [0, 0, 0] }, { at: t0 + 3e6, p: [3000, 0, 0] }], t0 + 2e6, 0, turns).heading, 0, 'ordinary walking owns its heading');
   assert.equal(motionAt([{ at: t0, p: [0, 0, 0], seat: { height: 1, lie: false, heading: .7 } }], t0 + 2e6, 0, turns).heading, .7, 'a seat owns its heading');
+});
+
+
+test('an unfinished turn keeps its origin through movement, retargets at the stop and samples without mutable history', () => {
+  const samples = [{ at: t0, p: [0, 0, 0] as [number, number, number] },
+    { at: t0 + 950_000, p: [0, 0, 0] as [number, number, number] },
+    { at: t0 + 1_450_000, p: [70, 0, 0] as [number, number, number] }];
+  const turns = [{ at: t0 + 950_000, from: Math.PI, to: 0 }, { at: t0 + 1_450_000, from: 0, to: Math.PI / 2 }];
+  const at = facingHandoffs(samples, Math.PI, turns);
+  const angle = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  assert.equal(at(t0 + 950_000), Math.PI, 'the new segment starts from the prior drawn facing');
+  assert(angle(at(t0 + 1_450_000 - 1)!, at(t0 + 1_450_000 + 1)!) < .001, 'the final native turn starts at the attained moving heading');
+  assert(angle(at(t0 + 2_000_000)!, Math.PI / 2) < .001, 'the final native facing is not hidden by the earlier handoff');
+  const expected = [900_000, 950_000, 1_000_000, 1_450_000, 2_000_000].map(t => at(t0 + t));
+  const cold = facingHandoffs(structuredClone(samples), Math.PI, structuredClone(turns));
+  for (const i of [4, 1, 3, 0, 2]) assert.equal(cold(t0 + [900_000, 950_000, 1_000_000, 1_450_000, 2_000_000][i]), expected[i]);
+});
+
+
+test('walking starts from the actual slot owner even when an older completed turn has the same travel target', () => {
+  const samples = [{ at: t0, p: [0, 0, 0] as [number, number, number] },
+    { at: t0 + 1_000_000, p: [0, 0, 0] as [number, number, number] },
+    { at: t0 + 1_500_000, p: [70, 0, 0] as [number, number, number] }];
+  const at = facingHandoffs(samples, 0, [{ at: t0, from: 0, to: 0 }], [{ at: t0 + 500_000, heading: Math.PI / 2, from: Math.PI / 2 }]);
+  assert.equal(at(t0 + 1_000_000), Math.PI / 2);
+  assert.ok(at(t0 + 1_000_001)! > Math.PI / 2 - .001);
+  assert.ok(Math.abs(at(t0 + 1_500_000)!) < .001);
+});
+
+
+test('a seat takes ownership at its recorded arrival without cancelling the preceding turn early', () => {
+  const samples = [{ at: t0, p: [0, 0, 0] as [number, number, number] },
+    { at: t0 + 950_000, p: [0, 0, 0] as [number, number, number] },
+    { at: t0 + 1_450_000, p: [70, 0, 0] as [number, number, number], seat: { height: 450, lie: false, heading: .7 } }];
+  const at = facingHandoffs(samples, Math.PI, [{ at: t0 + 950_000, from: Math.PI, to: 0 }]);
+  assert.ok(at(t0 + 1_000_000)! > 3 && at(t0 + 1_000_000)! < Math.PI, 'the preceding free turn remains in flight');
+  assert.equal(at(t0 + 1_450_000), null, 'the seat starts owning its recorded instant');
+  assert.equal(motionAt(samples, t0 + 1_450_000, Math.PI).heading, .7);
 });

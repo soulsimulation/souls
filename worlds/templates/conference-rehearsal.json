@@ -1,0 +1,422 @@
+{
+  "schema": "genesis/1",
+  "name": "Presentation rehearsal",
+  "description": "A lectern and four audience seats.",
+  "constants": {
+    "extent": 50,
+    "ground": "land"
+  },
+  "batches": [
+    {
+      "group": "conference-rehearsal",
+      "ops": [
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-conference_question",
+            "version": 1,
+            "description": "Post a question, mark it answered, then withdraw your request.",
+            "tags": [
+              "furniture",
+              "conference"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.03,
+                      0
+                    ],
+                    "size": [
+                      0.6,
+                      0.06,
+                      0.6
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.45,
+                      -0.035
+                    ],
+                    "size": [
+                      0.08,
+                      0.84,
+                      0.08
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.92,
+                      0
+                    ],
+                    "size": [
+                      0.6,
+                      0.36,
+                      0.1
+                    ],
+                    "tint": "frame"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.92,
+                      0.055
+                    ],
+                    "size": [
+                      0.52,
+                      0.28,
+                      0.01
+                    ],
+                    "tint": "paper"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.81,
+                      0.065
+                    ],
+                    "size": [
+                      0.18,
+                      0.06,
+                      0.02
+                    ],
+                    "tint": "blue",
+                    "role": "light"
+                  }
+                ],
+                "looks_table": [
+                  {
+                    "part": "light",
+                    "field": "pending",
+                    "do": "tint",
+                    "at": {
+                      "false": "#5b91c4",
+                      "true": "#e5ac3e"
+                    }
+                  },
+                  {
+                    "part": "light",
+                    "field": "answered",
+                    "do": "tint",
+                    "at": {
+                      "true": "#76ad73"
+                    }
+                  }
+                ],
+                "looks_units": {}
+              }
+            },
+            "params": {},
+            "palette": {
+              "frame": "#43505a",
+              "paper": "#f5ead1",
+              "amber": "#e5ac3e",
+              "blue": "#5b91c4",
+              "green": "#76ad73",
+              "red": "#bc5955"
+            },
+            "state": {
+              "pending": {
+                "type": "bool",
+                "default": false
+              },
+              "answered": {
+                "type": "bool",
+                "default": false
+              }
+            },
+            "size": {
+              "box": [
+                0.6,
+                1.1,
+                0.6
+              ]
+            }
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-hall_lecture",
+            "version": 1,
+            "description": "A lecture: one Soul speaks at the lectern, others sit in the seats near it.",
+            "tags": [
+              "hall",
+              "lectern",
+              "lecture"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "round": 0.006,
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.05,
+                      0
+                    ],
+                    "size": [
+                      1.6,
+                      0.1,
+                      1.2
+                    ],
+                    "round": 0.01,
+                    "tint": "dais"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.13,
+                      0.1
+                    ],
+                    "size": [
+                      0.56,
+                      0.06,
+                      0.42
+                    ],
+                    "round": 0.01,
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.64,
+                      0.1
+                    ],
+                    "size": [
+                      0.38,
+                      0.98,
+                      0.3
+                    ],
+                    "round": 0.012,
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      1.16,
+                      0.06
+                    ],
+                    "size": [
+                      0.7,
+                      0.05,
+                      0.5
+                    ],
+                    "round": 0.008,
+                    "pitch": -0.3490658503988659,
+                    "tint": "top"
+                  }
+                ]
+              }
+            },
+            "params": {},
+            "palette": {
+              "dais": "#6b5a4a",
+              "wood": "#9a6b3f",
+              "top": "#b98a57"
+            },
+            "state": {
+              "phase": {
+                "type": "enum",
+                "values": [
+                  "announced",
+                  "speaking"
+                ],
+                "default": "announced"
+              },
+              "left_us": {
+                "type": "number",
+                "default": 3600000000
+              }
+            },
+            "size": {
+              "box": [
+                1.6,
+                1.3,
+                1.2
+              ]
+            }
+          }
+        },
+        {
+          "op": "define",
+          "def": {
+            "schema": "def/1",
+            "name": "core-hall_lecture",
+            "version": 2,
+            "description": "A lecture: one Soul speaks at the lectern, others sit in the seats near it.",
+            "tags": [
+              "hall",
+              "lectern",
+              "lecture"
+            ],
+            "form": "point",
+            "make": {
+              "kind": "gen",
+              "gen": "kit/2",
+              "args": {
+                "round": 0.006,
+                "shapes": [
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.05,
+                      0
+                    ],
+                    "size": [
+                      1.6,
+                      0.1,
+                      1.6
+                    ],
+                    "round": 0.01,
+                    "tint": "dais"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.13,
+                      0.1
+                    ],
+                    "size": [
+                      0.56,
+                      0.06,
+                      0.42
+                    ],
+                    "round": 0.01,
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      0.64,
+                      0.1
+                    ],
+                    "size": [
+                      0.38,
+                      0.98,
+                      0.3
+                    ],
+                    "round": 0.012,
+                    "tint": "wood"
+                  },
+                  {
+                    "kind": "box",
+                    "at": [
+                      0,
+                      1.16,
+                      0.18
+                    ],
+                    "size": [
+                      0.7,
+                      0.05,
+                      0.5
+                    ],
+                    "round": 0.008,
+                    "pitch": -0.3490658503988659,
+                    "tint": "top"
+                  }
+                ]
+              }
+            },
+            "params": {},
+            "palette": {
+              "dais": "#6b5a4a",
+              "wood": "#9a6b3f",
+              "top": "#b98a57"
+            },
+            "state": {
+              "phase": {
+                "type": "enum",
+                "values": [
+                  "announced",
+                  "speaking"
+                ],
+                "default": "announced"
+              },
+              "left_us": {
+                "type": "number",
+                "default": 3600000000
+              }
+            },
+            "size": {
+              "box": [
+                1.6,
+                1.3,
+                1.6
+              ]
+            }
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/hall_lecture@2",
+          "name": "presentation-lectern",
+          "p": [
+            0,
+            0,
+            4
+          ],
+          "r": 3.141592653589793
+        },
+        {
+          "op": "place",
+          "def": "core/conference_question@1",
+          "name": "question-stand",
+          "p": [
+            3,
+            0,
+            3
+          ]
+        },
+        {
+          "op": "place",
+          "def": "core/bench@1",
+          "name": "audience-left",
+          "p": [
+            -1.4,
+            0,
+            0
+          ],
+          "r": 0
+        },
+        {
+          "op": "place",
+          "def": "core/bench@1",
+          "name": "audience-right",
+          "p": [
+            1.4,
+            0,
+            0
+          ],
+          "r": 0
+        }
+      ]
+    }
+  ]
+}

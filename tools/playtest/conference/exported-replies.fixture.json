@@ -1,0 +1,70 @@
+{
+  "qualification": "Selected ordinary exported reply fields; synthetic IDs. Consumer checks, not a live client projection or page acceptance.",
+  "look": {
+    "clear": {
+      "ok": true,
+      "room": {
+        "name": "ground 1",
+        "kind": "eden:ground",
+        "in": "place 0"
+      },
+      "doing": "standing"
+    },
+    "active": {
+      "ok": true,
+      "room": {
+        "name": "ground 1",
+        "kind": "eden:ground",
+        "in": "place 0"
+      },
+      "doing": "standing",
+      "in": [
+        "you are in speaker-introduction with Presenter (started); leave: together leave 11111111111111111111111111111111-8"
+      ]
+    }
+  },
+  "creator": {
+    "ok": true,
+    "id": "returned-id",
+    "kind": "eden:conference_question",
+    "card": "Post a question, mark it answered, then withdraw your request.",
+    "in": [
+      {
+        "id": "actual-ground",
+        "kind": "eden:ground",
+        "text": [
+          "souls:grass"
+        ]
+      },
+      {
+        "id": "actual-place",
+        "kind": "souls:place",
+        "text": [
+          "souls:night",
+          "souls:clear",
+          "souls:clear-day"
+        ]
+      }
+    ],
+    "at": [
+      12,
+      0,
+      12
+    ],
+    "fields": {
+      "12": [
+        [
+          0,
+          0,
+          300,
+          300,
+          0,
+          0,
+          1100
+        ]
+      ]
+    },
+    "holds": []
+  },
+  "publicLectureSnapshotHex": "81a301825011111111111111111111111111111111110278566564656e3a68616c6c5f6c65637475726540313232303136353861303961323761643034393364663763633038636164343036353634343235646561643831343434373736383738633262613533376431383362316306a2014a655f31313131313131310253636f72652d68616c6c5f6c6563747572654032"
+}

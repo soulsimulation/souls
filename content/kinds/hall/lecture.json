@@ -11,12 +11,12 @@
     "listener": { "n": 2, "from": "body", "most": 120, "audience": { "rule": "everyone" } }
   },
   "points": {
-    "behind_the_lectern": { "role": "stand", "at_mm": [0, 100, -350] }
+    "behind_the_lectern": { "role": "stand", "at_mm": [0, 100, -520] }
   },
   "slots": {
-    "lectern": { "admits": "body", "most": 1, "at_mm": [0, 100, -350], "stand": "behind_the_lectern" }
+    "lectern": { "admits": "body", "most": 1, "at_mm": [0, 100, -520], "stand": "behind_the_lectern" }
   },
-  "geometry": { "bounds_mm": [1600, 1300, 1200] },
+  "geometry": { "bounds_mm": [1600, 1300, 1600] },
   "roles": {
     "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
     "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } },
@@ -97,10 +97,10 @@
     "shape": {
       "round": 6,
       "shapes": [
-        { "kind": "box", "at": [0, 50, 0], "size": [1600, 100, 1200], "round": 10, "tint": "dais" },
+        { "kind": "box", "at": [0, 50, 0], "size": [1600, 100, 1600], "round": 10, "tint": "dais" },
         { "kind": "box", "at": [0, 130, 100], "size": [560, 60, 420], "round": 10, "tint": "wood" },
         { "kind": "box", "at": [0, 640, 100], "size": [380, 980, 300], "round": 12, "tint": "wood" },
-        { "kind": "box", "at": [0, 1160, 60], "size": [700, 50, 500], "round": 8, "pitch": -20000, "tint": "top" }
+        { "kind": "box", "at": [0, 1160, 180], "size": [700, 50, 500], "round": 8, "pitch": -20000, "tint": "top" }
       ],
       "palette": { "dais": "#6b5a4a", "wood": "#9a6b3f", "top": "#b98a57" },
       "tags": ["hall", "lectern", "lecture"]

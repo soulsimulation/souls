@@ -1,0 +1,284 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {HumanViews,setHumanGround} from '../../../mars/viewer/app/engine-view/humans.ts';
+import {templateFromGltf} from '../../../mars/viewer/app/engine-view/people.ts';
+import {CHARACTER_WIRE,CHARACTER_CLIPS} from '../../../mars/viewer/app/engine-view/character-wire.ts';
+import {hashKinds} from '../../entry/format.mjs';
+import {provenCases} from '../../entry/prove.mjs';
+import {chunkOf,TICK_US} from '../../../apps/web/src/v2-engine/takes.ts';
+import {TakePeople} from '../../../mars/viewer/app/engine-view/take-replay.ts';
+import {idPhase} from '../../../mars/viewer/app/engine-view/activity-poses.ts';
+import {WorldIdleLife} from '../../../apps/web/src/WorldIdleLife.ts';
+import {conferenceRenderedFacing} from '../../proof/drivers/conference-native-page.mjs';
+
+const entry=JSON.parse(await readFile(new URL('../../../content/kinds/hall/lecture.json',import.meta.url),'utf8'));
+const rigDir=process.env.HUMAN_RIG_DIR??fileURLToPath(new URL('../../../mars/viewer/public/modular/environment/',import.meta.url));
+const metre=(v)=>v.map(n=>n/1000);
+const old=structuredClone(entry);
+old.points.behind_the_lectern.at_mm=[0,100,-350];old.slots.lectern.at_mm=[0,100,-350];
+old.geometry.bounds_mm=[1600,1300,1200];old.looks.shape.shapes[0].size=[1600,100,1200];
+
+test('the current entry advances its content reference without editing an immutable library revision',()=>{
+  assert.notEqual(hashKinds([entry]).get(entry.kind).ref,hashKinds([old]).get(old.kind).ref);
+  assert.notEqual(hashKinds([entry]).get(entry.kind).beside,hashKinds([old]).get(old.kind).beside);
+  assert.deepEqual(entry.slots.lectern.at_mm,entry.points.behind_the_lectern.at_mm);
+  assert.deepEqual(entry.geometry.bounds_mm,entry.looks.shape.shapes[0].size.map((n,i)=>i===1?1300:n));
+  const cases=provenCases([entry]);assert.equal(cases.ok,true,JSON.stringify(cases.findings));
+  const shapes=entry.looks.shape.shapes,top=shapes[3],column=shapes[2],q=new THREE.Quaternion().setFromEuler(new THREE.Euler(top.pitch*Math.PI/180000,0,0));
+  const corners=[];for(const x of [-1,1])for(const y of [-1,1])for(const z of [-1,1])corners.push(new THREE.Vector3(x*top.size[0]/2000,y*top.size[1]/2000,z*top.size[2]/2000).applyQuaternion(q).add(new THREE.Vector3(...metre(top.at))));
+  for(const p of corners)assert(Math.abs(p.x)<=entry.geometry.bounds_mm[0]/2000&&p.y>=0&&p.y<=entry.geometry.bounds_mm[1]/1000&&Math.abs(p.z)<=entry.geometry.bounds_mm[2]/2000,'the complete tilted top stays inside declared bounds');
+  const rear=Math.min(...corners.map(p=>p.z)),front=Math.max(...corners.map(p=>p.z));
+  assert(rear<=column.at[2]/1000-column.size[2]/2000-.01&&front>=column.at[2]/1000+column.size[2]/2000+.01,'the top overhangs both sides of its supporting column by at least10mm');
+  for(const x of [-1,1])assert(inside([x*column.size[0]/2000,(column.at[1]+column.size[1]/2)/1000,column.at[2]/1000],top),'both sides of the upper column centerline meet the tilted wooden top instead of floating below it');
+});
+
+async function template(name){
+  const wire=CHARACTER_WIRE[name],loader=new GLTFLoader();
+  const load=async(file,sha)=>{const bytes=await readFile(rigDir+'/'+file);assert.equal(createHash('sha256').update(bytes).digest('hex'),sha,'production asset must match CHARACTER_WIRE');return loader.parseAsync(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),'');};
+  const mesh=await load(wire.mesh,wire.meshSHA256),clips=await load(wire.clips,CHARACTER_CLIPS[wire.clips].sha256);mesh.animations=clips.animations;return templateFromGltf(name,mesh);
+}
+
+// OBB interior excludes a 1mm surface band. The upper tilted top is checked in its own authored frame.
+function inside(p,shape){
+  const at=metre(shape.at),half=metre(shape.size).map(n=>n/2),v=new THREE.Vector3(...p).sub(new THREE.Vector3(...at));
+  const r=new THREE.Euler((shape.pitch??0)*Math.PI/180000,(shape.yaw??0)*Math.PI/180000,(shape.roll??0)*Math.PI/180000);
+  v.applyQuaternion(new THREE.Quaternion().setFromEuler(r).invert());
+  return v.toArray().every((n,i)=>Math.abs(n)<half[i]-.001);
+}
+
+test('representative production shoes clear the lectern base and stay over the authored dais',async t=>{
+  setHumanGround(()=>0);
+  try{for(const name of ['casual','punk','woman'])await t.test(name,async()=>{
+    const views=new HumanViews();views.setTemplates([await template(name)]);
+    let oldInside=0,newInside=0,minRear=Infinity,minSide=Infinity,maxBodyInside=0,footCount=0;
+    try{for(const activity of ['idle','tell-story'])for(const age of [0,.25,.6,1,2.5]){
+      const root=metre(entry.slots.lectern.at_mm);
+      views.setFrame([{id:'lectern-clearance-'+name,p:root,yaw:Math.PI/2,walk:0,walkDist:0,activity,activityAge:age}],age);
+      views.render(1);assert.deepEqual(views.bodyObject('lectern-clearance-'+name).position.toArray(),root,'renderer does not move the authored root');
+      const skin=views.meshPoints('lectern-clearance-'+name,1),feet=skin.filter(p=>p.part==='foot');
+      assert(feet.length>100,'both production shoes must contribute actual skin');footCount=feet.length;
+      const anchors=views.bones()['lectern-clearance-'+name].feet,clusters=anchors.map(()=>[]);
+      for(const point of feet){const distances=anchors.map(a=>Math.hypot(...a.map((n,i)=>n-point.p[i])));clusters[distances.indexOf(Math.min(...distances))].push(point);}
+      for(const cluster of clusters){assert(cluster.length>100,'each inferred shoe cluster has actual skin');const sole=Math.min(...cluster.map(p=>p.p[1]));assert(sole>=.099&&sole<=.104,'both shoe soles reach the100mm support within4mm');}
+
+      const dais=entry.looks.shape.shapes[0],half=metre(dais.size).map(n=>n/2);
+      for(const p of feet){
+        minRear=Math.min(minRear,p.p[2]+half[2]);minSide=Math.min(minSide,half[0]-Math.abs(p.p[0]));
+        assert(p.p[2]>-half[2]+.01&&p.p[2]<half[2]-.01&&Math.abs(p.p[0])<half[0]-.01,'every shoe vertex stays above the platform footprint with10mm edge margin');
+        assert(p.p[1]>=.1-.001,'shoes do not penetrate the100mm support top');
+        newInside+=+inside(p.p,entry.looks.shape.shapes[1]);
+        oldInside+=+inside([p.p[0],p.p[1],p.p[2]+(old.slots.lectern.at_mm[2]-entry.slots.lectern.at_mm[2])/1000],old.looks.shape.shapes[1]);
+      }
+      const hits=skin.filter(p=>entry.looks.shape.shapes.slice(1).some((s)=>inside(p.p,s)));maxBodyInside=Math.max(maxBodyInside,hits.length);
+
+    }
+    assert.equal(newInside,0,'no actual shoe vertex is inside the wooden base');
+    assert(oldInside>0,'the independent old-standing-location counterfactual must reproduce overlap');
+    assert.equal(maxBodyInside,0,'standing/story skin clears all authored wooden parts');
+    t.diagnostic(JSON.stringify({name,footCount,oldInside,newInside,minRear,minSide,maxBodyInside}));
+    }finally{views.clear();}
+  });}finally{setHumanGround(null);}
+});
+
+// A completed ordinary tell_story lasts4s. Keep its observed return phase explicit while the
+// public fixture uses synthetic identities; no recorded Soul/body identifier belongs in a test.
+// The production casual fit supplies its normal .9549596 scale; no model/pose override is used.
+const STORY_END=4.8,STORY_END_PHASE=.07647228240966797;
+function storyReturnTake(id,fromTick=1000*1e6/TICK_US,ticks=120){
+  const epoch=1000,at=s=>(epoch+s)*1e6,root=metre(entry.slots.lectern.at_mm),p=[-root[0]*1000,root[1]*1000,(4-root[2])*1000];
+  return chunkOf([{entity:id,soul:'synthetic-story-presenter',name:'Presenter',heading:-Math.PI/2,
+    standing:[{at:at(0),heading:-Math.PI/2,from:-Math.PI/2}],samples:[{at:at(0),p},{at:at(6),p}],
+    gestures:[{start:at(.8),end:at(STORY_END),activity:'tell-story'}]}],fromTick,{rulesVersion:'story-return/1',datetime:null},ticks).take;
+}
+function submittedSkin(views,id){
+  const rows=[],root=views.bodyObject(id);root.updateMatrixWorld(true);
+  let draws=0;
+  root.traverse(mesh=>{
+    if(!mesh.isSkinnedMesh||!mesh.userData.bodyDraw)return;
+    assert(mesh.visible,'the measured production body is submitted');draws++;
+    // A merged production body has one material; groups cannot silently hide a mixed-weight witness.
+    assert(!Array.isArray(mesh.material)&&mesh.material.visible&&mesh.material.opacity>0&&mesh.material.colorWrite,'the full merged draw has one visible material');
+    const geometry=mesh.geometry,index=geometry.index,si=geometry.attributes.skinIndex,sw=geometry.attributes.skinWeight;
+    assert(index&&si&&sw,'production draw has indexed, attributed skin');
+    const refs=new Set();for(let n=geometry.drawRange.start;n<Math.min(index.count,geometry.drawRange.start+geometry.drawRange.count);n++)refs.add(index.getX(n));
+    for(const i of refs){
+      let k=0;for(let n=1;n<4;n++)if(sw.getComponent(i,n)>sw.getComponent(i,k))k=n;
+      const bone=mesh.skeleton.bones[si.getComponent(i,k)].name;
+      rows.push({index:i,bone,p:mesh.getVertexPosition(i,new THREE.Vector3()).applyMatrix4(mesh.matrixWorld).toArray()});
+    }
+  });
+  assert.equal(draws,1,'measure the actual merged production bodyDraw');
+  for(const side of ['L','R'])assert(rows.filter(p=>/^(LowerArm|Wrist|Index|Middle|Ring|Pinky|Thumb)/.test(p.bone)&&p.bone.endsWith(side)).length>100,'both full hands/forearms have nonempty submitted skin');
+  return rows;
+}
+
+test('immutable story return keeps all submitted body skin outside the unchanged top',async t=>{
+  setHumanGround(()=>0);
+  try{for(const name of ['casual','punk','woman'])await t.test(name,async()=>{
+    const id='synthetic-story-return-'+name,source=await template(name),take=storyReturnTake(id),people=new TakePeople(take);people.setTemplates([source]);
+    // activityFrame's .23Hz three-phrase clock; an explicit phase, not a searched pose amplitude.
+    const clockEnd=300/23*100+STORY_END_PHASE/.23-idPhase(id)*7;
+    let sampled;const set=people.humans.setFrame.bind(people.humans);people.humans.setFrame=(samples,...args)=>{sampled=samples[0];return set(samples,...args);};
+    let maxInside=0,worst=null,lengths;
+    const skinAt=(player,age,offset=0)=>{player.show(STORY_END+age-offset,clockEnd+age);return submittedSkin(player.humans,id);};
+    try{for(const age of [0,...Array.from({length:18},(_,i)=>(i+1)*.02),.35]){
+      people.show(STORY_END+age,clockEnd+age);
+      assert.equal(sampled.activity,'idle');assert.equal(sampled.prevActivity,'tell-story');
+      assert(Math.abs(sampled.activityAge-age)<1e-5,'native return age is preserved');
+      assert.deepEqual(sampled.p,[0,.1,4.52],'the authored native root is unchanged');
+      const root=people.humans.bodyObject(id);assert.deepEqual(root.position.toArray(),sampled.p,'palm IK does not move the native holder');
+      const segments=['L','R'].flatMap(side=>{
+        const points=['UpperArm','LowerArm','Wrist'].map(name=>root.getObjectByName(name+side).getWorldPosition(new THREE.Vector3()));
+        return [points[0].distanceTo(points[1]),points[1].distanceTo(points[2])];
+      });
+      // Translation tracks are Float32;1micrometre covers accumulated roundoff, not anatomical stretching.
+      if(!lengths)lengths=segments;else segments.forEach((length,i)=>assert(Math.abs(length-lengths[i])<1e-6,'fixed anatomical upper/forearm lengths are preserved '+JSON.stringify({age,i,length,before:lengths[i],delta:length-lengths[i]} )));
+      const skin=submittedSkin(people.humans,id),hits=skin.filter(v=>inside([-v.p[0],v.p[1],4-v.p[2]],entry.looks.shape.shapes[3]));
+      if(hits.length>maxInside){maxInside=hits.length;worst={age,point:hits[0]};}
+    }
+    for(const age of [.12,.18,.2,.34]){
+      const warm=skinAt(people,age),cold=new TakePeople(take);cold.setTemplates([source]);
+      try{assert(separation(warm,skinAt(cold,age))<1e-8,'cold/backward seeks preserve the same complete hand skin');}finally{cold.dispose();}
+    }
+    const chunks=[storyReturnTake(id,20000,95),storyReturnTake(id,20095,25)],adjacent=new TakePeople(chunks[0]);adjacent.setTemplates([source]);adjacent.setWaterHistory(chunks);
+    try{adjacent.show(4.7,clockEnd-.1);adjacent.setTake(chunks[1]);adjacent.setWaterHistory(chunks);assert(separation(skinAt(people,.2),skinAt(adjacent,.2,4.75))<1e-8,'adjacent chunks retain the same immutable palm origin');}finally{adjacent.dispose();}
+    const idle=new WorldIdleLife();let overlayMaxInside=0,overlayWorst=null;
+    // The real page applies this separate accumulated clock after posing. Warm it from29s in20ms
+    // steps (one second before the boundary), then inspect the complete return before restore.
+    const peers=[[-1.8,0,.02],[-1,0,.02],[1,0,.02],[1.8,0,.02]].map((p,i)=>({id:'synthetic-audience-'+i,p,yaw:Math.PI/2,activity:'sit',speaking:false,root:null}));
+    for(let n=-50;n<=18;n++){
+      const age=n*.02;people.show(STORY_END+age,clockEnd+age);
+      const root=people.humans.bodyObject(id),before=submittedSkin(people.humans,id);
+      idle.apply([{id:'synthetic-story-presenter',root,p:sampled.p,yaw:sampled.yaw,activity:sampled.activity,speaking:false,attention:[]},...peers],30+age,.02,false);
+      try{if(age>=0){
+        assert.deepEqual(root.position.toArray(),sampled.p,'the final page overlay preserves the native root');
+        const skin=submittedSkin(people.humans,id),hits=skin.filter(v=>inside([-v.p[0],v.p[1],4-v.p[2]],entry.looks.shape.shapes[3]));
+        if(hits.length>overlayMaxInside){overlayMaxInside=hits.length;overlayWorst={age,point:hits[0]};}
+        for(const p of skin.filter(v=>/^(Foot|Toe)/.test(v.bone)))assert(p.p[1]>=.099,'the complete final shoe skin stays above its100mm support');
+      }}finally{idle.restore();}
+      assert(separation(before,submittedSkin(people.humans,id))<1e-8,'the actual overlay restore preserves all submitted skin');
+    }
+    t.diagnostic(JSON.stringify({name,maxInside,worst,overlayMaxInside,overlayWorst}));assert.equal(maxInside,0,'every story-return body draw clears the unchanged tabletop');assert.equal(overlayMaxInside,0,'the final draw after idle life also clears the unchanged tabletop');
+    }finally{people.dispose();}
+  });}finally{setHumanGround(null);}
+});
+
+
+// The retained native clap for=1 spans1.8s; its idle tail folds the immutable outgoing pose for350ms.
+// Public world coordinates preserve the actual lectern's pi parent turn, not a generic point stand-in.
+const EPOCH=1795837089,CLAP_START=1.75,CLAP_END=3.55;
+function returnTake(name,fromTick=EPOCH*1e6/TICK_US,ticks=100){
+  const at=s=>(EPOCH+s)*1e6,root=metre(entry.slots.lectern.at_mm),p=[-root[0]*1000,root[1]*1000,(4-root[2])*1000];
+  const body={entity:'lectern-return-'+name,soul:'lectern-source-'+name,name:'Presenter',heading:-Math.PI/2,standing:[{at:at(0),heading:-Math.PI/2,from:-Math.PI/2}],
+    samples:[{at:at(0),p},{at:at(5),p}],gestures:[
+      {start:at(.1),end:at(CLAP_START),activity:'point',target:'question',toward:[3000,3000],run:'point-before-clap',point:{hand:'left',ends:[at(.4),at(CLAP_START)]}},
+      {start:at(CLAP_START),end:at(CLAP_END),activity:'clap'}]};
+  return chunkOf([body],fromTick,{rulesVersion:'lectern-return/1',datetime:null},ticks).take;
+}
+const separation=(a,b)=>Math.max(...a.map((p,i)=>Math.hypot(...p.p.map((n,j)=>n-b[i].p[j]))));
+
+test('named point and immutable clap return clear wood on complete production skin',async t=>{
+  setHumanGround(()=>0);
+  try{for(const name of ['casual','punk','woman'])await t.test(name,async()=>{
+    const source=await template(name),take=returnTake(name),people=new TakePeople(take),id='lectern-return-'+name;
+    people.setTemplates([source]);const views=people.humans,root=metre(entry.slots.lectern.at_mm),worldRoot=[root[0]===0?0:-root[0],root[1],4-root[2]];
+    let sampled;const set=views.setFrame.bind(views);views.setFrame=(samples,...args)=>{sampled=samples[0];return set(samples,...args);};
+    const draw=(time,player=people)=>{player.show(time,EPOCH+time);return player.humans.meshPoints(id,1);};
+    const priorTop=structuredClone(entry.looks.shape.shapes[3]);priorTop.at[2]=60;
+    let oldTopInside=0,maxInside=0,minRear=Infinity,minSide=Infinity,minSole=Infinity,maxSole=-Infinity,worst=null;
+    try{
+      draw(1.1);assert.equal(sampled.pointAim.target,'question');assert.equal(sampled.pointAim.hand,'left');
+      const arm=views.bones(id)[id].arms.find(a=>a.side==='left');
+      const expected=new THREE.Vector2(3-arm.shoulder[0],3-arm.shoulder[2]).normalize(),actual=new THREE.Vector2(arm.palm[0]-arm.shoulder[0],arm.palm[2]-arm.shoulder[2]).normalize();
+      assert(expected.dot(actual)>.999,'the real named point reaches toward the question');
+      const top=entry.looks.shape.shapes[3],nearEdge=new THREE.Vector3(0,top.size[1]/2000,-top.size[2]/2000).applyAxisAngle(new THREE.Vector3(1,0,0),top.pitch*Math.PI/180000).add(new THREE.Vector3(...metre(top.at)));
+      const worldEdge=new THREE.Vector3(-nearEdge.x,nearEdge.y,4-nearEdge.z);
+      for(const a of views.bones(id)[id].arms)assert(new THREE.Vector3(...a.shoulder).distanceTo(worldEdge)<a.len*.98,'the near tabletop remains within unextended anatomical reach; this does not invent a contact');
+      const times=[...Array.from({length:205},(_,i)=>i*.02),CLAP_START-1e-5,CLAP_START+1e-5,CLAP_END-1e-5,CLAP_END+1e-5,CLAP_END+.11427115,CLAP_END+.2908577,CLAP_END+.35].sort((a,b)=>a-b);
+      for(const time of times){
+        const skin=draw(time),local=skin.map(p=>({...p,p:[-p.p[0],p.p[1],4-p.p[2]]}));
+        assert.deepEqual(views.bodyObject(id).position.toArray(),worldRoot,'the sampled native root stays exact');
+        assert.equal(sampled.yaw,-1.571,'the take preserves its canonical milliradian standing heading');
+        const hits=local.filter(p=>entry.looks.shape.shapes.slice(1).some(s=>inside(p.p,s)));
+        if(hits.length>maxInside){maxInside=hits.length;worst={time,part:hits[0].part,p:hits[0].p};}
+        if(time>=CLAP_END&&time<=CLAP_END+.35)oldTopInside+=local.filter(p=>inside(p.p,priorTop)).length;
+        const feet=local.filter(p=>p.part==='foot'),anchors=views.bones(id)[id].feet,clusters=anchors.map(()=>[]);
+        assert(feet.length>100,'actual visible shoe skin is present');
+        for(const p of feet){
+          const world=[-p.p[0],p.p[1],4-p.p[2]],distance=anchors.map(a=>Math.hypot(...a.map((n,i)=>n-world[i])));clusters[distance.indexOf(Math.min(...distance))].push(p);
+          const half=metre(entry.looks.shape.shapes[0].size).map(n=>n/2);minRear=Math.min(minRear,p.p[2]+half[2]);minSide=Math.min(minSide,half[0]-Math.abs(p.p[0]));
+          assert(p.p[2]>-half[2]+.01&&p.p[2]<half[2]-.01&&Math.abs(p.p[0])<half[0]-.01,'every shoe vertex retains10mm platform edge clearance');
+          assert(p.p[1]>=.099,'shoe skin does not enter the support');
+        }
+        for(const cluster of clusters){assert(cluster.length>100);const sole=Math.min(...cluster.map(p=>p.p[1]));minSole=Math.min(minSole,sole);maxSole=Math.max(maxSole,sole);assert(sole>=.099&&sole<=.104,'both soles stay on their100mm platform');}
+      }
+      for(const time of [CLAP_START,CLAP_END])assert(separation(draw(time-1e-5),draw(time+1e-5))<.001,'the real entry/return stays continuous');
+      for(const time of [CLAP_END+.11427115,CLAP_END+.2908577,1.1]){
+        const warm=draw(time),cold=new TakePeople(take);cold.setTemplates([source]);
+        try{assert(separation(warm,draw(time,cold))<1e-5,'cold/backward seek reconstructs the same immutable skin');}finally{cold.dispose();}
+      }
+      const chunks=[returnTake(name,Math.round(EPOCH*1e6/TICK_US),70),returnTake(name,Math.round(EPOCH*1e6/TICK_US)+70,30)];
+      const adjacent=new TakePeople(chunks[0]);adjacent.setTemplates([source]);adjacent.setWaterHistory(chunks);
+      try{adjacent.show(3.45,EPOCH+3.45);adjacent.setTake(chunks[1]);adjacent.setWaterHistory(chunks);const time=CLAP_END+.11427115;adjacent.show(time-3.5,EPOCH+time);assert(separation(draw(time),adjacent.humans.meshPoints(id,1))<1e-5,'adjacent take preserves the outgoing clap origin');}finally{adjacent.dispose();}
+      t.diagnostic(JSON.stringify({name,oldTopInside,maxInside,worst,minRear,minSide,minSole,maxSole}));
+      assert(oldTopInside>0,'the independent original top must reproduce the clap return penetration');
+      assert.equal(maxInside,0,'complete named-point/clap/idle skin stays outside all wooden parts');
+    }finally{people.dispose();}
+  });}finally{setHumanGround(null);}
+});
+
+test('facing observer calibrates actual production skin bases and sees applied idle attention before restore', async t => {
+  const { readFile } = await import('node:fs/promises');
+  const { GLTFLoader } = await import('../../../mars/viewer/node_modules/three/examples/jsm/loaders/GLTFLoader.js');
+  const { createRig, templateFromGltf } = await import('../../../mars/viewer/app/engine-view/people.ts');
+  const { mergeRigBody } = await import('../../../mars/viewer/app/engine-view/body-merge.ts');
+  const { applyHumanFinish } = await import('../../../mars/viewer/app/engine-view/content/details/human-presets/finish.ts');
+  const { CHARACTER_WIRE, CHARACTER_CLIPS } = await import('../../../mars/viewer/app/engine-view/character-wire.ts');
+  const { WorldIdleLife } = await import('../../../apps/web/src/WorldIdleLife.ts');
+  const { createHash } = await import('node:crypto');
+  const dir = process.env.HUMAN_RIG_DIR ?? new URL('../../../mars/viewer/public/modular/environment/', import.meta.url).pathname;
+  for (const name of ['casual', 'punk', 'woman']) await t.test(name, async () => {
+    const loader = new GLTFLoader(), wire = CHARACTER_WIRE[name];
+    const load = async (file, hash) => { const b = await readFile(dir + '/' + file); assert.equal(createHash('sha256').update(b).digest('hex'), hash); return loader.parseAsync(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), ''); };
+    const mesh = await load(wire.mesh, wire.meshSHA256); mesh.animations = (await load(wire.clips, CHARACTER_CLIPS[wire.clips].sha256)).animations;
+    const template = templateFromGltf(name, mesh); applyHumanFinish(name, template.gltf.scene);
+    const rig = createRig(template), body = mergeRigBody(rig);
+    assert(body, 'actual submitted merged body required');
+    const scene = new THREE.Scene(); scene.add(rig.holder); scene.updateMatrixWorld(true);
+    const observe = () => conferenceRenderedFacing(rig.holder, scene, [4, 0, 0], () => new THREE.Vector3());
+    const neutral = observe();
+    // createRig's fit() samples Idle at0.01s, not an anatomical zero pose (people.ts173).
+    const idleOffsets = { casual: [.004468196058216943, .004371577000729903], punk: [.004468196058217012, .004371577000729972], woman: [.004726129904539237, .004804500920819745] };
+    assert.equal(neutral.modelForward[2], template.forward, 'actual signed modelZ contract');
+    for (const [i, observed] of neutral.bones.entries()) {
+      assert(Math.abs(observed.angleToRoot - idleOffsets[name][i]) < 1e-9, name + ' frozen production Idle0.01 offset');
+      // Independent two-point skin mapping reference, not the observer's composed direction matrix.
+      const bone = body.skeleton.bones[observed.index], inverse = body.skeleton.boneInverses[observed.index];
+      const point = p => p.applyMatrix4(body.bindMatrix).applyMatrix4(inverse).applyMatrix4(bone.matrixWorld).applyMatrix4(body.bindMatrixInverse).applyMatrix4(body.matrixWorld);
+      const reference = point(new THREE.Vector3(0, 0, template.forward)).sub(point(new THREE.Vector3())).normalize();
+      assert(reference.distanceTo(new THREE.Vector3(...observed.forward)) < 1e-10, 'actual full skin-map direction agrees with independent point reference');
+    }
+    rig.holder.rotation.y = -.7; scene.updateMatrixWorld(true);
+    const rotated = observe(); for (const [i, b] of rotated.bones.entries()) assert(Math.abs(b.angleToRoot - idleOffsets[name][i]) < 1e-9, 'world/root rotation counted once');
+    rig.holder.rotation.y = 0; scene.updateMatrixWorld(true);
+    t.diagnostic(JSON.stringify({ name, neutralAngles: neutral.bones.map(b => ({ name: b.name, yaw: b.angleToRoot })) }));
+    const feet = ['FootL', 'FootR'].map(n => rig.holder.getObjectByName(n).matrixWorld.toArray()), root = rig.holder.matrixWorld.toArray();
+    const life = new WorldIdleLife(), self = { id: 'synthetic-listener', root: rig.holder, p: [0, 0, 0], yaw: 0, activity: 'sit', speaking: false, attention: ['synthetic-speaker'] };
+    for (let i = 0; i < 120; i++) { life.apply([self, { id: 'synthetic-speaker', root: null, p: [2, 0, 2], yaw: 0, activity: 'idle', speaking: false }], i / 60, 1 / 60); scene.updateMatrixWorld(true); if (i < 119) life.restore(); }
+    const before = JSON.stringify(body.skeleton.bones.map(b => b.matrixWorld.toArray())), applied = observe();
+    assert.equal(JSON.stringify(body.skeleton.bones.map(b => b.matrixWorld.toArray())), before, 'observer never updates transforms');
+    assert(Math.abs(applied.bones[0].angleToRoot) > .4, 'real conversation head overlay is measured');
+    assert.deepEqual(rig.holder.matrixWorld.toArray(), root); assert.deepEqual(['FootL', 'FootR'].map(n => rig.holder.getObjectByName(n).matrixWorld.toArray()), feet);
+    life.restore(); scene.updateMatrixWorld(true); assert.deepEqual(observe().bones.map(b => b.matrix), neutral.bones.map(b => b.matrix));
+    body.visible = false; assert.throws(observe, /bodyDraw missing/); body.visible = true;
+    const head = body.skeleton.bones.find(b => b.name === 'Head'), old = head.matrixWorld.elements[0]; head.matrixWorld.elements[0] = NaN; assert.throws(observe, /matrix unavailable/); head.matrixWorld.elements[0] = old;
+    const boneName = head.name; head.name = 'AbsentHead'; assert.throws(observe, /bone missing/); head.name = boneName;
+    const original = body.skeleton.bones.find(b => b.name === 'Torso').name; body.skeleton.bones.find(b => b.name === 'Torso').name = 'Head'; assert.throws(observe, /ambiguous/);
+    rig.mixer.stopAllAction();
+  });
+});
