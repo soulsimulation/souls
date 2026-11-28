@@ -94,6 +94,15 @@ const SCENES = {
       teardown: { beams: [['deck-beam-4', ['-22.978,17', '-26.95,17', '-26.95,20.5']], ['deck-beam-3', ['-25.022,17', '-27.3,17', '-27.3,20.5']],
         ['deck-beam-2', ['-22.978,17', '-27.65,17', '-27.65,20.5']], ['deck-beam-1', ['-25.022,17', '-28,17', '-28,20.5']]],
         frames: [['to -26,17', 'turn 90', 'to -31.829,19'], ['to -26,30', 'turn -90', 'to -31.829,21.5']] } } },
+  // Crews of four and six (N5; CARRY_SCENE=crews): four carry the camp's generator, one at each of its grips (front,
+  // back, a side carrier at each grip between: `carry grip <load> right 1`, `left 2`), lifted, walked south then east,
+  // set down; then six carry the timber bundle (sides right 1, left 2, right 3, left 4) south then west and set it
+  // down. The one who offers is the crew's front (rehearsal h1: with the offerer at the back, the side grips are
+  // counted from the other end and the lift is refused carry-grip-out-of-reach).
+  crews: { who: ['ada', 'bo', 'cy', 'di', 'ed', 'fi'], kind: 'mars:generator', entry: 'content/kinds/construction/generator.json',
+    view: 'post=0&hour=12:00&eye=13,6.5,37&at=13,.6,27',
+    crews: [{ load: 'generator', front: 'ada', back: 'bo', sides: [['cy', 'right', 1], ['di', 'left', 2]], legs: [['14,29', 8000], ['17,29', 8000]] },
+      { load: 'timber-bundle', front: 'ada', back: 'bo', sides: [['cy', 'right', 1], ['di', 'left', 2], ['ed', 'right', 3], ['fi', 'left', 4]], legs: [['11.6,29', 8000], ['8,29', 8000]] }] },
   // The deck walk (B5, attempt 24; CARRY_SCENE=deckwalk; #5284's creator-placed ways): the world's creator places the
   // finished deck bay in one `souls-god.mjs batch`, a part of each slot's kind into each of deck_bay's slots in the
   // entry's order (frames, four beams, five joists, two sheets, the stair); then Ada walks up the stair onto the first
@@ -215,7 +224,7 @@ export async function prepare({ paths, recipe, signal }) {
   // the way it last walked, and the world does not turn a carrier to its load (attempt 8: Ada lifted with her back to it).
   if (SCENE.build) state.frames = standFrames(state).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
   if (SCENE.deckwalk) state.god = await creatorOf(state);
-  state.grips = SCENE.build || SCENE.raise || SCENE.third || SCENE.carry ? Promise.resolve({ ok: true }) : Promise.all([['ada', 'front'], ['bo', 'back']].map(async ([who, end]) => { await cli(state, who, 'carry', 'grip', SCENE.load, end, '--from', '2.2'); await cli(state, who, 'carry', 'grip', SCENE.load, end); })).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
+  state.grips = !SCENE.load ? Promise.resolve({ ok: true }) : Promise.all([['ada', 'front'], ['bo', 'back']].map(async ([who, end]) => { await cli(state, who, 'carry', 'grip', SCENE.load, end, '--from', '2.2'); await cli(state, who, 'carry', 'grip', SCENE.load, end); })).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
   return { dir: paths.dir };
 }
 async function offer(state) {
@@ -696,6 +705,20 @@ async function deckWalk({ state, page, paths, signal, check, arm }) {
     save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: [] });
   }
 }
+/** Crews of four and six (N5): each crew's carry, every command accepted (a refusal for a moment asked again), no page
+ *  error. */
+async function crewsSurvey({ state, page, paths, signal, check, arm }) {
+  const wait = ms => delay(ms, signal), shot = async step => { await page.screenshot({ path: join(paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
+  check('candidate-arm', arm === 'candidate'); await verifyAssets(state, check);
+  for (const C of SCENE.crews) await find(state, C.load);
+  await setupGate(state, page, signal);
+  check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  const out = [];
+  try {
+    for (const C of SCENE.crews) out.push(await crewCarry(state, page, C, `crew-of-${2 + C.sides.length}`, { wait, shot }));
+    check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  } finally { save(state, 'survey-measurement.json', { note: 'Crews of four and six: each carry\'s crew and load.', crews: out, shortWalks: state.shortWalks ?? [] }); save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: [] }); }
+}
 /** A load carried by two as a survey: taken, walked its legs, set down. Its checks: every command accepted, no page error;
  *  the contact oracle on its crew is a measurement. */
 async function carrySurvey({ state, page, paths, signal, check, arm, root }) {
@@ -717,6 +740,21 @@ async function carrySurvey({ state, page, paths, signal, check, arm, root }) {
     const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; });
     save(state, 'survey-measurement.json', { note: 'The contact oracle on the crew: a measurement, not a check of this scene.', observer, watch: state.watch ?? null });
   } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
+}
+/** A crew of any size (N5): each to its place (the front and the back at the load's ends, each side carrier beside its
+ *  grip), the front offers the rest, who accept in order; lifted (a loose load) or taken (a part), its legs, set down. */
+async function crewCarry(state, page, C, tag, { wait, shot }) {
+  const load = await find(state, C.load), out = { load: C.load, size: 2 + (C.sides?.length ?? 0) };
+  await Promise.all([gripAt(state, C.front, load.id, 'front'), gripAt(state, C.back, load.id, 'back'),
+    ...(C.sides ?? []).map(([w, side, n]) => retried(state, w, 'carry', 'grip', load.id, side, String(n)))]);
+  const others = [C.back, ...(C.sides ?? []).map(s => s[0])];
+  const crew = (await cli(state, C.front, 'carry', 'offer', ...others.map(w => state.bodies[w]))).crew;
+  for (const w of others) await cli(state, w, 'carry', 'accept', crew);
+  await retried(state, C.front, ...(C.take ? ['part', 'take', crew, load.id] : ['carry', 'lift', crew, load.id])); await wait(2500); await shot(`${tag}-lifted`);
+  for (const [i, [to, ms]] of C.legs.entries()) { await retried(state, C.front, 'carry', 'to', crew, to); await wait(ms); await shot(`${tag}-leg-${i + 1}`); }
+  await retried(state, C.front, 'carry', 'set-down', crew); await wait(3000); await shot(`${tag}-set-down`);
+  for (const w of [C.front, ...others]) await asked(state, w, 'carry', 'leave', crew);
+  return { ...out, crew };
 }
 /** The contact observer on the beam's crew, as the beam scene installs it. A survey measures: failing to install is recorded, not thrown. */
 async function watchBeam({ state, page, check, beam, manifest, root, carriers = SCENE.build?.carriers }) {
@@ -749,6 +787,7 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   if (SCENE.third) return firstThird({ state, page, paths, signal, check, arm, root });
   if (SCENE.carry) return carrySurvey({ state, page, paths, signal, check, arm, root });
   if (SCENE.deckwalk) return deckWalk({ state, page, paths, signal, check, arm });
+  if (SCENE.crews) return crewsSurvey({ state, page, paths, signal, check, arm });
   await offer(state);
   if (arm === 'baseline') {
     const manifest = await verifyAssets(state, check);
