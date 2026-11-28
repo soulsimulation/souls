@@ -5837,12 +5837,14 @@ fn hands_on_the_face_held_from(w: &Seeded, crew: Id, part: Id) {
     }
 }
 
-/// Waits (at most 60 s) until each holder of crew `crew`'s standing `part` stands at its stance behind its post
-/// (`grips::stance`, within 30 mm on the plan, where the world counts it arrived and turns it to its post), and fails
+/// Waits (at most 60 s) until each holder of crew `crew`'s standing `part` has come to its stance behind its post
+/// (`grips::stance`): within 100 mm of it on the plan (a holder's hands sit on its post, a little off the stance's
+/// own line on a frame not centred on its slot), and standing still there across two reads of the world. Fails
 /// otherwise, naming how far.
 fn at_stances(w: &Seeded, crew: Id, part: Id, what: &str) {
     use sim::activity::carry::grips::{GRIPS, Holds, stance};
     let end = Instant::now() + Duration::from_secs(60);
+    let mut last: Option<Vec<Vec3>> = None;
     loop {
         let (copy, _) = served_copy(w);
         let t = copy.tree();
@@ -5858,24 +5860,22 @@ fn at_stances(w: &Seeded, crew: Id, part: Id, what: &str) {
             .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
             .next_back()
             .expect("its holds");
+        let feet: Vec<Vec3> = h.holds.iter().map(|hold| body_at(w, hold.body)).collect();
         let offs: Vec<i64> = h
             .holds
             .iter()
-            .map(|hold| {
-                apart_mm(
-                    body_at(w, hold.body),
-                    x.point(stance(hold, Vec3::ZERO).0).unwrap(),
-                )
-            })
+            .zip(&feet)
+            .map(|(hold, f)| apart_mm(*f, x.point(stance(hold, Vec3::ZERO).0).unwrap()))
             .collect();
-        if offs.iter().all(|o| *o <= 30) {
+        if offs.iter().all(|o| *o <= 100) && last.as_ref() == Some(&feet) {
             return;
         }
         assert!(
             Instant::now() < end,
             "{what}: the holders not at their stances, mm off {offs:?}"
         );
-        std::thread::sleep(Duration::from_millis(100));
+        last = Some(feet);
+        std::thread::sleep(Duration::from_millis(300));
     }
 }
 
