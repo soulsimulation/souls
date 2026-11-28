@@ -302,6 +302,7 @@ pub fn ops(
                 i(int(o, "height")?),
             ],
             door: door_of.get(oid).copied(),
+            bare: false,
         });
     }
     // Stairs: a link from the lower floor to the upper, its row in the lower's field 21.
@@ -334,6 +335,7 @@ pub fn ops(
                 points(need(st, "path")?)?,
             ],
             door: None,
+            bare: false,
         });
     }
     Ok(out)

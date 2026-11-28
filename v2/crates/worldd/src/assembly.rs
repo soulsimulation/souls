@@ -384,6 +384,35 @@ pub fn ways_turning(
     Ok(walks)
 }
 
+/// The parts a part of kind `pk` put into bay `th`'s slot `k` joins by default, a Soul's `part:put` and a creator's
+/// place alike: the bay's seated parts (those `seated` keeps) of the kinds its own kind rests on (a rail its frames, a
+/// sheet its joists), none for a standing part; a resting part only those at its own level (#5067: the ones whose
+/// slots are highest at or under its own, a joist the two beams it lies on, not the two below them).
+pub fn default_joins(
+    tree: &Tree,
+    s: &Structure,
+    th: replica::tree::Handle,
+    pk: &str,
+    k: u64,
+    seated: &dyn Fn(Id) -> bool,
+) -> Vec<Id> {
+    if s.stands(pk) {
+        return Vec::new();
+    }
+    let joins = tree
+        .children(th)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|h| tree.node(*h))
+        .filter(|n| n.slot().is_some() && s.rests_on(pk, n.kind().as_str()) && seated(n.id()))
+        .map(|n| n.id())
+        .collect::<Vec<_>>();
+    match s.rests(pk) {
+        true => at_level(tree, th, k, joins),
+        false => joins,
+    }
+}
+
 /// Of `parts` seated in `bay` (node `th`), those at the level under its slot `k` (#5067): whose slot points are the
 /// highest at or under slot `k`'s (within 10 mm), in the bay's own frame. All of them when none is under it.
 fn at_level(tree: &Tree, th: replica::tree::Handle, k: u64, parts: Vec<Id>) -> Vec<Id> {
@@ -1163,31 +1192,11 @@ impl Assembly {
             }
             Err(r) => return Err(r),
         };
-        // By default a part joins the bay's seated parts of the kinds its own kind rests on (a rail its frames, a
-        // sheet its joists).
-        let rests = s.rests(pk.as_str());
-        let named = joins.is_some();
-        let joins = match joins {
-            Some(j) => j,
-            None if bay && !s.stands(pk.as_str()) => tree
-                .children(th)
-                .unwrap_or(&[])
-                .iter()
-                .filter_map(|h| tree.node(*h))
-                .filter(|n| {
-                    let k = n.kind().as_str();
-                    n.slot().is_some() && s.rests_on(pk.as_str(), k)
-                })
-                .map(|n| n.id())
-                .collect::<Vec<_>>(),
-            None => Vec::new(),
-        };
-        // #5067: a resting part joins only those at its own level: the ones whose slots are highest at or under its
-        // own (a joist the two beams it lies on, not the two below them).
-        // Joins named by the put are its own (`--joins`): never filtered.
-        let joins = match (rests, slot, named) {
-            (true, Some(k), false) => at_level(tree, th, k, joins),
-            _ => joins,
+        // Joins named by the put are its own (`--joins`): never filtered. Else the default ([`default_joins`]).
+        let joins = match (joins, slot) {
+            (Some(j), _) => j,
+            (None, Some(k)) if bay => default_joins(tree, s, th, pk.as_str(), k, &|_| true),
+            (None, _) => Vec::new(),
         };
         let mut joined = Vec::new();
         for other in joins {

@@ -407,6 +407,22 @@ async fn raise_and_lower(tag: &str, restart: bool) {
         assert!(Instant::now() < end, "behind its posts: {offs:?} µm off");
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+    // And their walks there are over (a holder still walking to its stance has no way to walk the lowering yet, and a
+    // lowering asked then is refused `raise.way-blocked`): the holders stand where they stood half a second ago.
+    let mut last = stood(&dir);
+    loop {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let now = stood(&dir);
+        if held
+            .holds
+            .iter()
+            .all(|h| now.get(&h.body) == last.get(&h.body))
+        {
+            break;
+        }
+        assert!(Instant::now() < end, "the holders still walking");
+        last = now;
+    }
     // Lowered again by the same crew: laid down about the same foot, and let go.
     let before = samples(&dir, carry).len();
     // At its last tick there the world may still carry it: refused `raise.way-blocked`, the lowering is asked once more

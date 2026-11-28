@@ -124,6 +124,9 @@ pub enum Op {
         field: u64,
         row: Vec<Value>,
         door: Option<Ref>,
+        /// A bare link (racks: a creator's joint): the link alone, as a Soul's `part:put` makes its joints, with no row
+        /// in any field (`field` and `row` are not read) and no door.
+        bare: bool,
     },
     /// Rows into a node's array field (#3728: a creator's land edit sends only the terrain tiles it changes): each
     /// row replaces the row whose first two values are its own, or is added after the rest. The field holds rows
@@ -671,9 +674,17 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 field,
                 row,
                 door,
+                bare,
             } => {
                 if new.contains_key(name) || !links.insert(*name) {
                     return refuse(here, "edit.name-twice", format!("{name} is placed twice"));
+                }
+                if *bare && (*field != 0 || !row.is_empty() || door.is_some()) {
+                    return refuse(
+                        here,
+                        "edit.link",
+                        "a bare link writes no field, row or door",
+                    );
                 }
                 if ty.as_str().starts_with("souls:") {
                     return refuse(
@@ -716,7 +727,7 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                     }
                 }
                 let at = ends[usize::from(*owner == End::Second)];
-                if !matches!(value(at, *field), None | Some(Value::Array(_))) {
+                if !*bare && !matches!(value(at, *field), None | Some(Value::Array(_))) {
                     return refuse(here, "edit.link", "the owner's field is not a list of rows");
                 }
                 changed.insert(at);

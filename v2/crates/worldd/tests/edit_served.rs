@@ -2349,6 +2349,9 @@ mod shade;
 #[path = "edit_served/deck.rs"]
 mod deck;
 
+#[path = "edit_served/creator_bay.rs"]
+mod creator_bay;
+
 #[path = "edit_served/sit_by_kind.rs"]
 mod sit_by_kind;
 

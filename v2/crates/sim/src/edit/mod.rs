@@ -562,8 +562,26 @@ fn effects(
             field: on,
             row,
             door,
+            bare,
         } = op
         {
+            // A bare link (a creator's joint): the link alone, as a Soul's `part:put` makes it.
+            if *bare {
+                let end = usize::from(*owner == replica::world_model::End::Second);
+                let both = [id(ends[0]), id(ends[1])];
+                groups.push((
+                    both[end],
+                    audience(ends[end]),
+                    vec![Change::Link {
+                        link: names[name],
+                        ty: ty.clone(),
+                        ends: both,
+                        owner: *owner,
+                        audience: audience(ends[end]),
+                    }],
+                ));
+                continue;
+            }
             // #3728: the link, its row appended to its owner's field, and the door standing in it naming it.
             use crate::ground::scene::F_OPEN_DOOR_LINK;
             let end = usize::from(*owner == replica::world_model::End::Second);
@@ -832,6 +850,7 @@ mod doorway_lowering_tests {
                     field: F_DOORWAYS,
                     row: row.clone(),
                     door: Some(Ref::Node(door)),
+                    bare: false,
                 }],
             },
             reads: Vec::new(),
