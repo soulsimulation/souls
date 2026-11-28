@@ -213,7 +213,7 @@ export function validateEntry(entry) {
   if (entry.geometry !== undefined) {
     if (!isObj(entry.geometry)) err('geometry', 'an object');
     else {
-      only(entry.geometry, ['bounds_mm', 'front', 'solids_mm'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true);
+      only(entry.geometry, ['bounds_mm', 'front', 'solids_mm', 'floors', 'stairs', 'ladders'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true);
       // The thing's own walk boxes, [cx, cz, hx, hz, yaw_mdeg, y0, y1] in whole mm, as the engine reads them (solids_of).
       const sol = entry.geometry.solids_mm;
       if (sol !== undefined && !(Array.isArray(sol) && sol.length > 0 && sol.every(r => Array.isArray(r) && r.length === 7 && r.every(isInt) && r[2] >= 0 && r[3] >= 0 && r[5] >= 0 && r[6] > r[5]))) err('geometry.solids_mm', 'a list of walk boxes, each seven whole millimetres [cx, cz, hx, hz, yaw_mdeg, y0, y1]: half sizes and heights none below 0, the top above the bottom');

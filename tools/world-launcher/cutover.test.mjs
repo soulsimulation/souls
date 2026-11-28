@@ -574,6 +574,56 @@ test('#4159: a binding naming the stream CDN gives the routed page v2StreamOrigi
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('#4986: the routed page is told of the replica on the asset CDN only once the launcher has seen both files there', async () => {
+  const dir = mkdtempSync(new URL('replica-cdn-', scratch).pathname);
+  try {
+    const routesFile = join(dir, 'worlds.json'), clientDir = join(dir, 'client');
+    mkdirSync(clientDir);
+    writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { stream: '/s/eden/', canonical: true }, fresh: { stream: '/s/fresh/', canonical: true } } }));
+    writeFileSync(join(clientDir, 'replica.js'), 'test module'); writeFileSync(join(clientDir, 'replica_bg.wasm'), 'test wasm');
+    const version = createHash('sha256').update('test module').update('test wasm').digest('hex').slice(0, 16);
+    const valid = { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir }, w = { slug: 'eden' }, CDN = 'https://cdn.soul.game';
+    for (const bad of ['http://cdn.soul.game', 'https://cdn.soul.game/', 'https://cdn.soul.game/assets/', 'cdn.soul.game', 7])
+      assert.throws(() => cutoverFence({ binding: { ...valid, firstLoadOrigin: bad } }), /cutover.binding-invalid/, String(bad));
+    const asked = [], settle = () => new Promise((r) => setTimeout(r, 5));
+    let clock = 0, there = {};
+    const headers = (name) => ({ 'content-type': name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=31536000, immutable' });
+    const fetcher = async (url, init) => {
+      asked.push([init.method, url]);
+      const name = url.split('/').pop(), a = there[name];
+      if (a === 'down') throw Error('unreachable');
+      return new Response(null, a ? { status: 200, headers: { ...headers(name), ...a } } : { status: 404 });
+    };
+    // no CDN named: never asked, never told
+    const plain = cutoverFence({ binding: valid, fetcher, now: () => clock });
+    assert.equal(plain.v2Fields(w).v2ReplicaCdn, undefined); assert.equal(plain.v2Fields(w).v2Replica, `/w/eden/v2/replica/${version}/replica.js`);
+    await settle(); assert.deepEqual(asked, []);
+    const fence = cutoverFence({ binding: { ...valid, firstLoadOrigin: CDN }, fetcher, now: () => clock });
+    const cdn = () => fence.v2Fields(w).v2ReplicaCdn;
+    // not mirrored yet: the page keeps this host's copy, and the CDN is asked again only a minute later
+    assert.equal(cdn(), undefined); await settle();
+    assert.deepEqual(asked, [['HEAD', `${CDN}/assets/replica/${version}/replica.js`], ['HEAD', `${CDN}/assets/replica/${version}/replica_bg.wasm`]]);
+    assert.equal(cdn(), undefined); await settle(); assert.equal(asked.length, 2, 'not asked again within the minute');
+    // one file there, a file a browser would not take (wrong type, not immutable), or the CDN unreachable: not told
+    for (const partial of [{ 'replica.js': {} }, { 'replica.js': {}, 'replica_bg.wasm': { 'content-type': 'application/octet-stream' } }, { 'replica.js': { 'cache-control': 'no-store' }, 'replica_bg.wasm': {} }, { 'replica.js': 'down', 'replica_bg.wasm': {} }]) {
+      there = partial; clock += 60_000;
+      assert.equal(cdn(), undefined); await settle(); assert.equal(cdn(), undefined, JSON.stringify(partial));
+    }
+    // both there: told from the next page on, with this host's copy still named beside it; never asked again
+    there = { 'replica.js': {}, 'replica_bg.wasm': {} }; clock += 60_000;
+    assert.equal(cdn(), undefined, 'the page that started the look still gets this host\'s copy'); await settle();
+    assert.equal(cdn(), `${CDN}/assets/replica/${version}/replica.js`);
+    assert.equal(fence.v2Fields(w).v2Replica, `/w/eden/v2/replica/${version}/replica.js`);
+    const n = asked.length; clock += 600_000; cdn(); await settle(); assert.equal(asked.length, n);
+    assert.match(withV2Stream('<script>window.__simConfig={"worldKey":"eden"}</script>', fence.v2Stream(w), fence.v2Fields(w)), new RegExp(`"v2ReplicaCdn":"https://cdn\\.soul\\.game/assets/replica/${version}/replica\\.js"`), 'written into the page');
+    // a world with no old twin reads the same replica, so its page is told too
+    assert.equal(fence.v2Fields({ slug: 'fresh', worldId: 'v2:fresh' }).v2ReplicaCdn, `${CDN}/assets/replica/${version}/replica.js`);
+    // a new release's replica is a new version: this host's copy again until that one is seen on the CDN
+    writeFileSync(join(clientDir, 'replica_bg.wasm'), 'next wasm'); there = {};
+    assert.equal(cdn(), undefined); await settle(); assert.equal(cdn(), undefined);
+    assert.notEqual(fence.v2Fields(w).v2Replica, `/w/eden/v2/replica/${version}/replica.js`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('bound body assets preserve admitted URLs, exact bytes and the world/upload fences', t => {
   const dir=mkdtempSync(new URL('bound-body-',scratch)), routesFile=join(dir,'routes.json'), bodiesDir=join(dir,'bodies');

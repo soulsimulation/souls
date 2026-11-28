@@ -4480,6 +4480,7 @@ fn serve(args: &[String]) -> R<()> {
     std::thread::Builder::new()
         .name("public-stream".into())
         .spawn(move || {
+            view_out::io::count_here();
             let result = (|| -> Result<(), Refusal> {
                 let recover = || -> Result<_, Refusal> {
                     let start = view_out::PublicStart {
@@ -4599,7 +4600,10 @@ fn serve(args: &[String]) -> R<()> {
                     });
                 }
                 let published = |w: &view_out::PublicWriter<_>| {
-                    stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
+                    stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed);
+                    if let Some(at) = w.shown_wall_ms() {
+                        measures::STREAM_SHOWN_WALL_MS.store(at, std::sync::atomic::Ordering::Relaxed);
+                    }
                 };
                 published(&writer);
                 stamp("public stream");
