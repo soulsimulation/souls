@@ -6163,6 +6163,48 @@ fn hands_on_the_face_held_from(w: &Seeded, crew: Id, part: Id) {
     }
 }
 
+/// Waits (at most 60 s) until each holder of crew `crew`'s standing `part` has come to its stance behind its post
+/// (`grips::stance`): within 100 mm of it on the plan (a holder's hands sit on its post, a little off the stance's
+/// own line on a frame not centred on its slot), and standing still there across two reads of the world. Fails
+/// otherwise, naming how far.
+fn at_stances(w: &Seeded, crew: Id, part: Id, what: &str) {
+    use sim::activity::carry::grips::{GRIPS, Holds, stance};
+    let end = Instant::now() + Duration::from_secs(60);
+    let mut last: Option<Vec<Vec3>> = None;
+    loop {
+        let (copy, _) = served_copy(w);
+        let t = copy.tree();
+        let x =
+            sim::ground::scene::xform_to(t, t.handle(part).unwrap(), t.handle(w.ground).unwrap())
+                .unwrap();
+        drop(copy);
+        let h = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back()
+            .expect("its holds");
+        let feet: Vec<Vec3> = h.holds.iter().map(|hold| body_at(w, hold.body)).collect();
+        let offs: Vec<i64> = h
+            .holds
+            .iter()
+            .zip(&feet)
+            .map(|(hold, f)| apart_mm(*f, x.point(stance(hold, Vec3::ZERO).0).unwrap()))
+            .collect();
+        if offs.iter().all(|o| *o <= 100) && last.as_ref() == Some(&feet) {
+            return;
+        }
+        assert!(
+            Instant::now() < end,
+            "{what}: the holders not at their stances, mm off {offs:?}"
+        );
+        last = Some(feet);
+        std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
 fn apart_mm(a: Vec3, b: Vec3) -> i64 {
     ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt() / 1000) as i64
 }
@@ -9689,8 +9731,10 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             ("souls:held".to_owned(), vec![a, b]),
             "frame in {slot}: both still hold it"
         );
-        // Each holder walks round to behind its post, its hands on that face.
-        std::thread::sleep(Duration::from_secs(3));
+        // Each holder walks round to behind its post, its hands on that face. The beams' puts wait for the world to
+        // have ended those walks: a holder still on its way round stood where a beam is set in (`site.occupied`, a load
+        // race on a busy runner).
+        at_stances(&w, c, frame, slot);
         hands_on_the_face_held_from(&w, c, frame);
     }
 
