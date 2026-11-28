@@ -3191,6 +3191,13 @@ fn a2_parts_rest_at_the_grounds_height() {
     assert!(lying, "laid down");
     on_ground("laid down beside the bay", mid);
     assert_eq!(hands[1].act("activity:leave", c, BTreeMap::new()).kind, 1);
+    // It steps away from frame A's slot, where the next crew stands.
+    one(
+        &mut hands,
+        1,
+        v3(ua.x - 4_000_000, 0, ua.z - 4_000_000),
+        "Soul 2 steps away",
+    );
 
     // Frame B, with Soul 6 standing beside the bay where frame A was laid on the other side: laid down at Soul 4's
     // retire by Soul 5, on the raised ground (lying, its middle 38 mm up; or standing, its base on it), with no jump.
