@@ -6,19 +6,19 @@ import type {FollowGeometry,Sight,PresentSubject,FollowViewport,FollowProjection
 export type InteriorDiagnostic={status:string;key:string|null;anchor:number[]|null;proposal:number[]|null;visibility:Sight|null;passage:Sight|null;tested:number;retreat:string;validation:'full-authored-building-surfaces-and-current-obstacles';containment:'unproved'};
 export class InteriorView{
  private retreatPlan:{root:Vector3;eye:Vector3;axis:Vector3;progress:number}|null=null;private nextRetreat=0;
- private approaching=false;private openingKey='';
+ private approaching=false;private openingKey='';private candidatePhase=false;
  private key='';private region:EnclosureResult['region']=null;private anchor:Vector3|null=null;private proposals:Vector3[]=[];private cursor=0;private next=0;private retried=false;
  diagnostic:InteriorDiagnostic=this.blank();
  private blank():InteriorDiagnostic{return{status:'inactive',key:null,anchor:null,proposal:null,visibility:null,passage:null,tested:0,retreat:this.retreatPlan?'prepared':'inactive',validation:'full-authored-building-surfaces-and-current-obstacles',containment:'unproved'};}
  sameApproach(context:EnclosureResult,generation:number){return this.approaching&&this.region===context.region&&this.key===JSON.stringify([context.building,context.room,context.floor,context.revision,context.sourceRevision,context.worldMatrix,generation])&&this.openingKey===JSON.stringify(context.openingProposals);}
  discardRetreat(){this.retreatPlan=null;this.nextRetreat=0;}
  destination(){return this.anchor?{eye:this.anchor.clone(),key:this.key}:null;}
- reset(){this.retreatPlan=null;this.nextRetreat=0;this.key='';this.approaching=false;this.openingKey='';this.region=null;this.anchor=null;this.proposals=[];this.cursor=0;this.next=0;this.retried=false;this.diagnostic=this.blank();}
+ reset(){this.retreatPlan=null;this.nextRetreat=0;this.key='';this.approaching=false;this.openingKey='';this.candidatePhase=false;this.region=null;this.anchor=null;this.proposals=[];this.cursor=0;this.next=0;this.retried=false;this.diagnostic=this.blank();}
  sync(context:EnclosureResult|null|undefined,manual:boolean,generation:number){
   if(manual||context?.status!=='enclosed'&&context?.status!=='approaching'||!context.region||!context.worldMatrix){this.reset();this.diagnostic.status=manual?'manual':'inactive';return null;}
   const key=JSON.stringify([context.building,context.room,context.floor,context.revision,context.sourceRevision,context.worldMatrix,generation]);
   const approaching=context.status==='approaching',openingKey=approaching?JSON.stringify(context.openingProposals):'',changed=key!==this.key||context.region!==this.region||approaching&&this.approaching&&openingKey!==this.openingKey;
-  if(changed||approaching!==this.approaching){if(changed)this.reset();this.proposals=[];this.cursor=0;this.next=0;this.retried=false;this.approaching=approaching;this.key=key;this.region=context.region;const r=context.region,m=new Matrix4().fromArray(context.worldMatrix),centre=new Vector3();for(const p of r.poly){centre.x+=p[0]/r.poly.length;centre.z+=p[1]/r.poly.length;}centre.y=r.y+Math.min(1.6,r.height*.55);
+  if(changed||approaching!==this.approaching){if(changed)this.reset();this.candidatePhase=false;this.proposals=[];this.cursor=0;this.next=0;this.retried=false;this.approaching=approaching;this.key=key;this.region=context.region;const r=context.region,m=new Matrix4().fromArray(context.worldMatrix),centre=new Vector3();for(const p of r.poly){centre.x+=p[0]/r.poly.length;centre.z+=p[1]/r.poly.length;}centre.y=r.y+Math.min(1.6,r.height*.55);
    // Opening-adjacent exterior proposals first. Direction from room centre is
    // only a placement heuristic, never a portal normal/connectivity guarantee.
    for(const o of context.openingProposals??[]){if(o.at.length!==2||!o.at.every(Number.isFinite))continue;const opening=new Vector3(o.at[0],centre.y,o.at[1]),world=opening.clone().applyMatrix4(m),outward=world.clone().sub(new Vector3(centre.x,opening.y,centre.z).applyMatrix4(m));outward.y=0;if(outward.lengthSq()<1e-8)continue;world.addScaledVector(outward.normalize(),this.approaching?4:1.2);world.y=new Vector3(centre.x,centre.y,centre.z).applyMatrix4(m).y;this.proposals.push(world);}
@@ -66,15 +66,17 @@ export class InteriorView{
   const sight=(eye:Vector3):Sight=>{for(const p of points){const s=geometry.segmentAuthored(eye,p,0,true);if(s!=='clear')return s;}return'clear';};
   // Destination validity is separate from the still-occluded transit view. Keep
   // one target through a safe approach; never restart selection every search tick.
-  if(this.anchor){const r=radius(this.anchor);d.visibility=sight(this.anchor);if(r===null||d.visibility==='unknown'){d.status='anchor-unknown';return;}const envelope=d.visibility==='clear'?geometry.segmentAuthored(this.anchor,this.anchor,r):'blocked';if(envelope==='unknown'){d.status='anchor-unknown';return;}if(d.visibility==='clear'&&envelope==='clear'&&this.anchor.distanceTo(points[0])>=2){d.status='holding';d.anchor=this.anchor.toArray();return;}this.anchor=null;this.retreatPlan=null;d.anchor=null;}
+  if(this.anchor){const r=radius(this.anchor);d.visibility=sight(this.anchor);if(r===null||d.visibility==='unknown'){d.status='anchor-unknown';return;}const envelope=d.visibility==='clear'?geometry.segmentAuthored(this.anchor,this.anchor,r):'blocked';if(envelope==='unknown'){d.status='anchor-unknown';return;}if(d.visibility==='clear'&&envelope==='clear'&&this.anchor.distanceTo(points[0])>=2){d.status='holding';d.anchor=this.anchor.toArray();return;}this.anchor=null;this.retreatPlan=null;d.anchor=null;if(!this.approaching){this.candidatePhase=true;d.status='anchor-invalidated';return;}}
   // Only enclosed mode can retain the actual eye. An unanchored approach must
   // spend its shared query budget on the candidate's complete admission instead.
-  if(!this.approaching){
-   d.visibility=sight(eye);if(d.visibility==='unknown'){d.status='visibility-unknown';return;}
+  if(!this.approaching&&!this.candidatePhase){
+   d.visibility=sight(eye);
    if(d.visibility==='clear'&&eye.distanceTo(points[0])>=2){this.retried=false;this.anchor=eye.clone();d.anchor=this.anchor.toArray();d.status='holding';return;}
+   // A fresh next-slot candidate repeats all safety checks with its own budget.
+   this.candidatePhase=true;d.status=d.visibility==='unknown'?'visibility-unknown':'candidate-pending';return;
   }
-  this.anchor=null;d.anchor=null;if(!this.proposals.length){d.status='no-proposals';return;}
-  const proposal=this.proposals[this.cursor%this.proposals.length],advance=()=>{this.cursor++;this.retried=false;},unknown=()=>{if(this.retried)advance();else this.retried=true;};d.proposal=proposal.toArray();d.tested=1;
+  this.anchor=null;d.anchor=null;if(!this.proposals.length){this.candidatePhase=false;d.status='no-proposals';return;}
+  const proposal=this.proposals[this.cursor%this.proposals.length],advance=()=>{this.cursor++;this.retried=false;this.candidatePhase=false;},unknown=()=>{if(this.retried)advance();else this.retried=true;};d.proposal=proposal.toArray();d.tested=1;
   if(this.approaching&&(!frame||!frame(proposal))){d.status='approach-framing-unavailable';advance();return;}
   const r=radius(proposal),y=ground(proposal.x,proposal.z);if(r===null||y===null||!Number.isFinite(y)){d.status='proposal-unavailable';unknown();return;}
   if(proposal.y<y+1.2||proposal.distanceTo(points[0])<2){d.status='proposal-shot-too-close';advance();return;}
