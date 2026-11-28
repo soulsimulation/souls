@@ -9449,6 +9449,16 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             across / 1000
         );
         let before: Vec<Vec3> = crew_bodies.iter().map(|b| body_at(&w, *b)).collect();
+        for (k, soul) in w.souls.iter().enumerate() {
+            let b = body_of(&w, *soul);
+            println!(
+                "before the put of {slot}: Soul {} body {} at {:?}{}",
+                k + 1,
+                replica::world_model::show(b),
+                body_at(&w, b),
+                if crew_bodies.contains(&b) { " (crew)" } else { "" }
+            );
+        }
         let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
         println!(
             "crew of {n} seats beam {} in {slot}: {got:?}",
