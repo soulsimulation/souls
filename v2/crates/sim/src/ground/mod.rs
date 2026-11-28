@@ -368,7 +368,27 @@ fn sector(g: &[P; 16], v: (i64, i64)) -> usize {
 /// reflex corner, where the bands leave a gap, the 16-gon's fan from the one band's end to the other's, from the
 /// corner before the gap to the corner after it. A convex corner needs none: there the two bands overlap.
 fn edges_grown(shapes: &IntShapes<i32>, d: i64, out: &mut Vec<Vec<P>>) {
+    edges_grown_but(shapes, d, &[], out);
+}
+
+/// [`edges_grown`], less the band of each edge that lies on one of `seams` (within [`scene::SEAM`], on the grid).
+fn edges_grown_but(shapes: &IntShapes<i32>, d: i64, seams: &[(P, P)], out: &mut Vec<Vec<P>>) {
     let g = sixteen(d);
+    let near = (scene::SEAM / 1000).max(1);
+    let on_seam = |a: P, b: P| {
+        seams.iter().any(|&(c, e)| {
+            let (ex, ez) = (i64::from(e.x - c.x), i64::from(e.y - c.y));
+            let len = (ex * ex + ez * ez).isqrt();
+            if len == 0 {
+                return false;
+            }
+            let off = |p: P| (ex * i64::from(p.y - c.y) - ez * i64::from(p.x - c.x)).abs() / len;
+            let along = |p: P| (ex * i64::from(p.x - c.x) + ez * i64::from(p.y - c.y)) / len;
+            [a, b]
+                .iter()
+                .all(|&p| off(p) <= near && along(p) >= -near && along(p) <= len + near)
+        })
+    };
     for c in shapes.iter().flatten() {
         let n = c.len();
         let normal = |a: P, b: P| {
@@ -384,12 +404,14 @@ fn edges_grown(shapes: &IntShapes<i32>, d: i64, out: &mut Vec<Vec<P>>) {
                 continue;
             }
             let (nx, nz) = normal(a, b);
-            out.push(vec![
-                a,
-                b,
-                P::new(b.x + nx as i32, b.y + nz as i32),
-                P::new(a.x + nx as i32, a.y + nz as i32),
-            ]);
+            if !on_seam(a, b) {
+                out.push(vec![
+                    a,
+                    b,
+                    P::new(b.x + nx as i32, b.y + nz as i32),
+                    P::new(a.x + nx as i32, a.y + nz as i32),
+                ]);
+            }
             let (ex, ez) = (i64::from(b.x - a.x), i64::from(b.y - a.y));
             let (fx, fz) = (i64::from(o.x - b.x), i64::from(o.y - b.y));
             let turn = ex * fz - ez * fx;
@@ -888,34 +910,12 @@ fn square_ring(w: [i32; 4]) -> Vec<P> {
 
 /// The patch of a floor scene for one radius, turned by `t` before it is put on the grid.
 pub fn cut_floor(s: &Scene, radius: i64, t: Turn) -> Result<Patch, String> {
-    // A seam (racks T9) is no edge: the floor is widened past it by the cut's depth, so the cut brings it back to the
-    // seam itself, where the other floor's cut meets it.
-    let widened;
-    let s = if s.seams.is_empty() {
-        s
-    } else {
-        let d = (radius + MARGIN + 1) * 1000;
-        let mut w = s.clone();
-        for (y, [a, b]) in &s.seams {
-            let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
-            let len = (i128::from(ex) * i128::from(ex) + i128::from(ez) * i128::from(ez)).isqrt().max(1) as i64;
-            let (nx, nz) = (
-                (i128::from(-ez) * i128::from(d) / i128::from(len)) as i64,
-                (i128::from(ex) * i128::from(d) / i128::from(len)) as i64,
-            );
-            w.surfaces.push(scene::Surface {
-                y: *y,
-                ring: vec![
-                    [a[0] - nx, a[1] - nz],
-                    [b[0] - nx, b[1] - nz],
-                    [b[0] + nx, b[1] + nz],
-                    [a[0] + nx, a[1] + nz],
-                ],
-            });
-        }
-        widened = w;
-        &widened
-    };
+    // A seam (racks T9) is no edge: the cut does not take the floor back from it, so the two floors meet there.
+    let q = quat(t.yaw_mdeg)?;
+    let mut seams = Vec::with_capacity(s.seams.len());
+    for (y, [a, b]) in &s.seams {
+        seams.push((*y, on_grid(&q, &t, *a)?, on_grid(&q, &t, *b)?));
+    }
     let g = prepare(s, radius, t)?;
     let mut patch = Patch {
         radius,
@@ -925,7 +925,12 @@ pub fn cut_floor(s: &Scene, radius: i64, t: Turn) -> Result<Patch, String> {
     for (y, rings) in &g.levels {
         let floor = op(rings, &[], OverlayRule::Union);
         let mut shrink = Vec::new();
-        edges_grown(&floor, g.d, &mut shrink);
+        let here: Vec<(P, P)> = seams
+            .iter()
+            .filter(|(sy, ..)| (sy - y).abs() <= scene::SEAM)
+            .map(|&(_, a, b)| (a, b))
+            .collect();
+        edges_grown_but(&floor, g.d, &here, &mut shrink);
         let floor = shapes_op(&floor, &shrink, OverlayRule::Difference);
         let shapes = cut_level(&g, floor, *y, None);
         let first = patch.pieces.len() as u32;
@@ -1341,7 +1346,11 @@ pub fn changed(before: &Tree, part: &Part) -> Vec<Id> {
                     .and_then(|h| before.node(h))
                     .and_then(|n| n.parent());
                 for p in [from, Some(pose.frame.node)].into_iter().flatten() {
-                    for &c in before.handle(p).and_then(|h| before.children(h)).unwrap_or(&[]) {
+                    for &c in before
+                        .handle(p)
+                        .and_then(|h| before.children(h))
+                        .unwrap_or(&[])
+                    {
                         let held = before.children(c).unwrap_or(&[]).iter().any(|&f| {
                             before
                                 .node(f)

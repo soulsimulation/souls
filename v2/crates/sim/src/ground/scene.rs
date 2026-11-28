@@ -113,10 +113,18 @@ pub const SEAM: i64 = 5_000;
 /// in its thing's parent (not the open ground), read in that parent's frame and given back in the floor's.
 fn seams_of(tree: &Tree, floor: Handle) -> Vec<(i64, [Xz; 2])> {
     let mut out = Vec::new();
-    let Some(thing) = tree.node(floor).and_then(|n| n.parent()).and_then(|p| tree.handle(p)) else {
+    let Some(thing) = tree
+        .node(floor)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+    else {
         return out;
     };
-    let Some(parent) = tree.node(thing).and_then(|n| n.parent()).and_then(|p| tree.handle(p)) else {
+    let Some(parent) = tree
+        .node(thing)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+    else {
         return out;
     };
     // Things in a thing (parts in a bay), not every building on the open ground: a town's floors are not read
@@ -131,20 +139,29 @@ fn seams_of(tree: &Tree, floor: Handle) -> Vec<(i64, [Xz; 2])> {
         return out;
     };
     let [w, x, y, z] = here.rot.parts();
-    let Some(back) = Quat::new(w, -x, -y, -z).or_else(|_| Quat::new(-w, x, y, z)).ok() else {
+    let Some(back) = Quat::new(w, -x, -y, -z)
+        .or_else(|_| Quat::new(-w, x, y, z))
+        .ok()
+    else {
         return out;
     };
     let local = |p: Xz, y: i64| {
-        back.rotate(Vec3::new(p[0] - here.pos.x, y - here.pos.y, p[1] - here.pos.z))
-            .ok()
-            .map(|v| [v.x, v.z])
+        back.rotate(Vec3::new(
+            p[0] - here.pos.x,
+            y - here.pos.y,
+            p[1] - here.pos.z,
+        ))
+        .ok()
+        .map(|v| [v.x, v.z])
     };
     let mut theirs: Vec<Surface> = Vec::new();
     for &sib in tree.children(parent).unwrap_or(&[]) {
         if sib == thing {
             continue;
         }
-        let Ok(x) = xform_to(tree, sib, parent) else { continue };
+        let Ok(x) = xform_to(tree, sib, parent) else {
+            continue;
+        };
         for &f in tree.children(sib).unwrap_or(&[]) {
             if kind_of(tree, f) == FLOOR
                 && let Ok(ss) = surfaces_of(tree, f, &x)
@@ -153,10 +170,13 @@ fn seams_of(tree: &Tree, floor: Handle) -> Vec<(i64, [Xz; 2])> {
             }
         }
     }
-    let edges = |r: &[Xz]| -> Vec<[Xz; 2]> { (0..r.len()).map(|k| [r[k], r[(k + 1) % r.len()]]).collect() };
+    let edges =
+        |r: &[Xz]| -> Vec<[Xz; 2]> { (0..r.len()).map(|k| [r[k], r[(k + 1) % r.len()]]).collect() };
     let middle = |r: &[Xz]| {
         let n = r.len().max(1) as i64;
-        let (x, z) = r.iter().fold((0, 0), |(x, z), p| (x + p[0] / n, z + p[1] / n));
+        let (x, z) = r
+            .iter()
+            .fold((0, 0), |(x, z), p| (x + p[0] / n, z + p[1] / n));
         [x, z]
     };
     for m in &mine {
@@ -170,13 +190,16 @@ fn seams_of(tree: &Tree, floor: Handle) -> Vec<(i64, [Xz; 2])> {
                 }
                 // Beside it, not over it: the other floor lies on the far side of the edge from this one (a landing
                 // laid over a deck's edge is no seam).
-                let side = |p: Xz| (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])).signum();
+                let side =
+                    |p: Xz| (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])).signum();
                 if side(cm) == side(co) {
                     continue;
                 }
                 let l = l2.isqrt();
                 for [c, d] in edges(&o.ring) {
-                    let off = |p: Xz| (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])).abs() / l;
+                    let off = |p: Xz| {
+                        (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])).abs() / l
+                    };
                     if off(c) > i128::from(SEAM) || off(d) > i128::from(SEAM) {
                         continue;
                     }
@@ -185,14 +208,10 @@ fn seams_of(tree: &Tree, floor: Handle) -> Vec<(i64, [Xz; 2])> {
                     if t1 <= t0 {
                         continue;
                     }
-                    let at = |t: i128| {
-                        [
-                            a[0] + (ex * t / l2) as i64,
-                            a[1] + (ez * t / l2) as i64,
-                        ]
-                    };
+                    let at = |t: i128| [a[0] + (ex * t / l2) as i64, a[1] + (ez * t / l2) as i64];
+                    // Each seam runs with this floor on its left and the other on its right, as an outline step does.
                     if let (Some(p), Some(q)) = (local(at(t0), m.y), local(at(t1), m.y)) {
-                        out.push((m.y - here.pos.y, [p, q]));
+                        out.push((m.y - here.pos.y, if side(co) > 0 { [q, p] } else { [p, q] }));
                     }
                 }
             }
@@ -726,7 +745,12 @@ fn plan_in_parent(tree: &Tree, floor: Handle, frame: Handle) -> Option<([i64; 4]
         let y = um(y)?;
         for p in ring_mm(ring).ok()? {
             let q = on_plane(&x, p, y).ok()?;
-            bb = [bb[0].min(q.x), bb[1].min(q.z), bb[2].max(q.x), bb[3].max(q.z)];
+            bb = [
+                bb[0].min(q.x),
+                bb[1].min(q.z),
+                bb[2].max(q.x),
+                bb[3].max(q.z),
+            ];
             top = Some(top.map_or(q.y, |t: i64| t.max(q.y)));
         }
     }
@@ -736,17 +760,30 @@ fn plan_in_parent(tree: &Tree, floor: Handle, frame: Handle) -> Option<([i64; 4]
 /// Whether nothing in the parent of floor `floor`'s thing, other than the thing, lies over the floor within a standing
 /// body's height (see [`braced`]).
 fn headroom(tree: &Tree, floor: Handle) -> bool {
-    let Some(thing) = tree.node(floor).and_then(|n| n.parent()).and_then(|p| tree.handle(p)) else {
+    let Some(thing) = tree
+        .node(floor)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+    else {
         return false;
     };
-    let Some(parent) = tree.node(thing).and_then(|n| n.parent()).and_then(|p| tree.handle(p)) else {
+    let Some(parent) = tree
+        .node(thing)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+    else {
         return true;
     };
     let Some((bb, y)) = plan_in_parent(tree, floor, parent) else {
         return false;
     };
     let over = |r: [i64; 4], y0: i64| {
-        y0 > y && y0 < y + BODY_HIGH * 1000 && r[0] < bb[2] && r[2] > bb[0] && r[1] < bb[3] && r[3] > bb[1]
+        y0 > y
+            && y0 < y + BODY_HIGH * 1000
+            && r[0] < bb[2]
+            && r[2] > bb[0]
+            && r[1] < bb[3]
+            && r[3] > bb[1]
     };
     for &sib in tree.children(parent).unwrap_or(&[]) {
         if sib == thing {
@@ -1264,6 +1301,34 @@ fn steps_of(
     Ok(out)
 }
 
+/// Where a seam's step's link counters start ([`seam_steps`]), above any inner step's.
+const SEAMS: u64 = 1 << 41;
+
+/// The steps across a floor's seams ([`Scene::seams`]): a doorway of no depth on each, at its height, whose link
+/// [`crate::links::floor_joins`] carries onto the other thing's floor beside it, as an outline step's onto a floor it
+/// lies over (racks T9: two deck sheets side by side are walked as one floor).
+fn seam_steps(floor: Id, seams: &[(i64, [Xz; 2])]) -> Vec<Doorway> {
+    let mut out = Vec::new();
+    for (k, (y, [a, b])) in seams.iter().enumerate() {
+        let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+        let len = (ex * ex + ez * ez).isqrt();
+        if len < 10_000 {
+            continue;
+        }
+        let unit = |v: i128| (v * 1_000_000 / len) as i64;
+        out.push(Doorway {
+            link: step_id(floor, SEAMS + k as u64),
+            at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
+            along: [unit(ex), unit(ez)],
+            across: [unit(ez), -unit(ex)],
+            width: len as i64,
+            y: *y,
+            step: true,
+        });
+    }
+    out
+}
+
 /// Where an inner step's link counters start ([`inner_steps_of`]), above any outline edge's number.
 const INNER: u64 = 1 << 40;
 
@@ -1436,6 +1501,7 @@ impl Scene {
                     return Err("a floor with no surfaces".into());
                 }
                 s.seams = seams_of(tree, h);
+                s.doorways.extend(seam_steps(id, &s.seams));
                 things_below(tree, thing, thing, false, &mut s, None)?;
                 let mut ends = vec![h];
                 ends.extend(tree.children(h).ok_or("a floor")?.iter().copied());

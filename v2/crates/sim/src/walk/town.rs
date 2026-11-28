@@ -968,7 +968,8 @@ impl Town {
                 .iter()
                 .any(|&c| {
                     base.node(c).is_some_and(|n| {
-                        replica::world_model::plain(n.kind().as_str()) == crate::ground::scene::FLOOR
+                        replica::world_model::plain(n.kind().as_str())
+                            == crate::ground::scene::FLOOR
                     })
                 })
         };
@@ -3019,7 +3020,7 @@ impl Town {
         let (has, wet) = if size == Size::Standard {
             (self.water.has(body.id), self.water.here(&self.map, body))
         } else {
-            (HANDS, None)
+            (super::water::WALKER, None)
         };
         let (map, link_at, buildings) = if size == Size::Standard {
             (&mut self.map, &self.link_at, self.buildings.as_slice())
@@ -3138,8 +3139,9 @@ fn plan_on(
 impl<'a> View<'a> {
     /// `body`'s abilities, and its own wet piece when it stands in the water (#3225).
     fn wet(&self, body: &Body) -> (Mask, Option<Spot>) {
-        self.water
-            .map_or((HANDS, None), |w| (w.has(body.id), w.here(self.map, body)))
+        self.water.map_or((super::water::WALKER, None), |w| {
+            (w.has(body.id), w.here(self.map, body))
+        })
     }
 
     /// The ground `body` stands on (#3225).
