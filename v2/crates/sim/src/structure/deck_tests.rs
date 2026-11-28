@@ -254,7 +254,7 @@ fn deck_a_part_with_a_body_on_it_is_not_taken_out() {
         "7. the body on the sheet steps off",
     );
     accepted(
-        w.take_out_and(sheet, vec![Change::Remove { node: floor }]),
+        w.take_out_and(sheet, vec![(floor, vec![Change::Remove { node: floor }])]),
         "8. the sheet off, nobody on it",
     );
     refused(

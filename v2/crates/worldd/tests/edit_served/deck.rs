@@ -273,6 +273,17 @@ impl Deck {
         }
     }
 
+    /// `got` is a receipt; else what the world said on its own output about it (why a carry stopped), and a panic.
+    pub fn ok(&self, got: Got, what: &str) {
+        println!("{what}: {got:?}");
+        if got.kind != 1 {
+            for l in self._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
+                println!("  {l}");
+            }
+            panic!("{what}: {got:?}");
+        }
+    }
+
     pub fn walk(&mut self, to: &[(usize, Vec3)], what: &str) {
         walk_all(&mut self.hands, self.w.ground, to, what);
     }
@@ -312,17 +323,23 @@ impl Deck {
             "Souls 1 and 2 beside bent 1's edges",
         );
         let hold_a = self.crew(0, &[1]);
-        done(self.take(0, hold_a, ba), "bent 1 taken");
-        done(self.put(0, hold_a, "bent_a", None), "bent 1 in bent_a");
-        done(self.leave(0, hold_a), "Soul 1 lets go of bent 1");
+        let got = self.take(0, hold_a, ba);
+        self.ok(got, "bent 1 taken");
+        let got = self.put(0, hold_a, "bent_a", None);
+        self.ok(got, "bent 1 in bent_a");
+        let got = self.leave(0, hold_a);
+        self.ok(got, "Soul 1 lets go of bent 1");
         self.walk(
             &[(0, Deck::at(1_350, 1_500)), (2, Deck::at(-1_350, 1_500))],
             "Souls 1 and 3 beside bent 2's edges",
         );
         let hold_b = self.crew(0, &[2]);
-        done(self.take(0, hold_b, bb), "bent 2 taken");
-        done(self.put(0, hold_b, "bent_b", None), "bent 2 in bent_b");
-        done(self.leave(0, hold_b), "Soul 1 lets go of bent 2");
+        let got = self.take(0, hold_b, bb);
+        self.ok(got, "bent 2 taken");
+        let got = self.put(0, hold_b, "bent_b", None);
+        self.ok(got, "bent 2 in bent_b");
+        let got = self.leave(0, hold_b);
+        self.ok(got, "Soul 1 lets go of bent 2");
         let mut rail = None;
         for (k, (dx, slot)) in [(-1_350, "rail_l"), (1_350, "rail_r")]
             .into_iter()
@@ -337,15 +354,21 @@ impl Deck {
                 None => self.crew(0, &[3]),
             };
             rail = Some(c);
-            done(self.take(0, c, rails[k]), "a rail taken");
-            done(self.put(0, c, slot, None), slot);
+            let got = self.take(0, c, rails[k]);
+        self.ok(got, "a rail taken");
+            let got = self.put(0, c, slot, None);
+        self.ok(got, slot);
             assert_eq!(joints_at(&self.w, rails[k]), 2, "{slot} joins both bents");
         }
-        done(self.leave(1, hold_a), "bent 1's holder lets go");
-        done(self.leave(2, hold_b), "bent 2's holder lets go");
+        let got = self.leave(1, hold_a);
+        self.ok(got, "bent 1's holder lets go");
+        let got = self.leave(2, hold_b);
+        self.ok(got, "bent 2's holder lets go");
         let rail = rail.unwrap();
-        done(self.leave(0, rail), "Soul 1 leaves the rail crew");
-        done(self.leave(3, rail), "Soul 4 leaves the rail crew");
+        let got = self.leave(0, rail);
+        self.ok(got, "Soul 1 leaves the rail crew");
+        let got = self.leave(3, rail);
+        self.ok(got, "Soul 4 leaves the rail crew");
     }
 
     /// Souls `a` and `b` walk to the ends of the part lying or seated `dz` mm from the site's middle, its length
@@ -563,10 +586,8 @@ fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_un
     );
     let c = k.crew(0, &[1]);
     done(k.take(0, c, flight), "Souls 1 and 2 take the flight");
-    done(
-        k.put(0, c, "flight", Some(&[rails[1]])),
-        "the flight set, hooked onto the right rail",
-    );
+    let got = k.put(0, c, "flight", Some(&[rails[1]]));
+    k.ok(got, "the flight set, hooked onto the right rail");
     assert_eq!(where_is(&k.w, flight).0, Some(k.site), "the flight seated");
     done(k.leave(0, c), "Soul 1 leaves");
     done(k.leave(1, c), "Soul 2 leaves");

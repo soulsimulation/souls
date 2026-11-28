@@ -408,13 +408,14 @@ impl World {
         self.take_out_and(part, Vec::new())
     }
 
-    /// As [`World::take_out`], with `first` written before the part goes (what it holds removed with it).
+    /// As [`World::take_out`], with `first` written before the part goes, each node's changes by that node (what the
+    /// part holds removed with it).
     pub(super) fn take_out_and(
         &mut self,
         part: Id,
-        first: Vec<Change>,
+        first: Vec<(Id, Vec<Change>)>,
     ) -> Result<(), (String, String)> {
-        let mut changes: Vec<Change> = first;
+        let mut changes: Vec<Change> = Vec::new();
         for (owner, js) in &self.joints {
             for (link, other) in js {
                 if *owner == part || *other == part {
@@ -423,7 +424,7 @@ impl World {
             }
         }
         // A bent goes with its holders' hold, written by the hold: they carry it out.
-        let mut by = Vec::new();
+        let mut by = first;
         for (k, bent) in self.bents.iter().enumerate() {
             if *bent == part
                 && let Some((act, _)) = &self.holds[k]

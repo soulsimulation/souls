@@ -29,7 +29,8 @@ const M: i64 = 1_000_000;
 /// A site at (20, 0, 0) m with a slot 2 m up at its middle (the sheet's) and one on the ground 3 m south (the
 /// flight's). A sheet 3 m by 2 m lying 8 m east, its floor its top. A flight lying beside it: 5 m of run rising
 /// 2.018 m, its landing 1.1 m by 0.5 m beyond its top. Set in their slots, the flight's top is at the sheet's south
-/// edge, at the sheet's height.
+/// edge, at the sheet's height. Another site of the same kind has a slot 9, so the kind admits a thing in a slot 9
+/// that the first site gives no point for: a thing put there is carried, as on a crew's carry.
 const YARD: &str = r#"{
   "format": "souls/import-eden/1",
   "kinds": [{"ref": "core-site@1", "hash": "aa", "name": "core:site", "form": "point"},
@@ -40,6 +41,9 @@ const YARD: &str = r#"{
      "world": [20000, 0, 0, 0], "scale_ppm": 1000000, "name": "test-site",
      "slots": [{"n": 1, "at": [0, 2000, 0], "yaw": 0, "capacity": 1},
                {"n": 2, "at": [0, 0, 3000], "yaw": 0, "capacity": 1}]},
+    {"id": "e_other", "def": "core-site@1", "ref": "core-site@1", "parent": null, "pose": [12000, 0, -8000, 0],
+     "world": [12000, 0, -8000, 0], "scale_ppm": 1000000, "name": "test-other-site",
+     "slots": [{"n": 9, "at": [0, 0, 0], "yaw": 0, "capacity": 1}]},
     {"id": "e_sheet", "def": "core-sheet@1", "ref": "core-sheet@1", "parent": null, "pose": [28000, 0, 0, 0],
      "world": [28000, 0, 0, 0], "scale_ppm": 1000000, "name": "test-sheet",
      "floors": [{"level": 1, "y": 18, "polygon": [[-1500, -1000], [1500, -1000], [1500, 1000], [-1500, 1000]]}]},
@@ -52,8 +56,8 @@ const YARD: &str = r#"{
   "places": [{"id": "p_yard", "name": "yard", "kind": "zone", "of": "area",
               "polygon": [[8000, -12000], [36000, -12000], [36000, 16000], [8000, 16000]]}],
   "ground": {"tileM": 2, "tiles": [{"tx": 0, "tz": 0, "heights": "AAAAAOgDAADQBwAAAAAAAOgDAADQBwAADP7///QBAADcBQAA", "classes": "AAECAw=="}]},
-  "bake": {"things": 3, "doors": 0, "rooms": 0, "floors": 3, "floor surfaces": 2, "solids": 0, "slots": 2, "windows": 0, "doorways": 0, "stairs:stairs": 1},
-  "byRef": {"core-site@1": 1, "core-sheet@1": 1, "core-flight@1": 1}
+  "bake": {"things": 4, "doors": 0, "rooms": 0, "floors": 3, "floor surfaces": 2, "solids": 0, "slots": 3, "windows": 0, "doorways": 0, "stairs:stairs": 1},
+  "byRef": {"core-site@1": 2, "core-sheet@1": 1, "core-flight@1": 1}
 }"#;
 
 /// `node` moved to `to` at `at`, as a seating writes it: one transfer, its leave by the node and its arrive by where
