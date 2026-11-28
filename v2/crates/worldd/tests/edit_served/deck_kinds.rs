@@ -247,7 +247,7 @@ impl Yard {
     }
 
     /// Into the bay's slot `slot`, joined to `joins` when named.
-    fn into(&self, slot: &str, joins: &[Id]) -> BTreeMap<u64, Value> {
+    fn slot_in(&self, slot: &str, joins: &[Id]) -> BTreeMap<u64, Value> {
         let mut p = BTreeMap::from([
             (1, self.id("deck-bay").to_value()),
             (2, Value::Uint(self.slots[slot])),
@@ -302,7 +302,7 @@ impl Yard {
             let hold = self.crew(a, &[b]);
             let f = self.id(frame);
             self.ok(a, "part:take", hold, Self::part(f), "a 12 ft frame taken");
-            let p = self.into(slot, &[]);
+            let p = self.slot_in(slot, &[]);
             self.ok(a, "part:put", hold, p, slot);
             holds.push(((a, b), hold));
         }
@@ -329,7 +329,7 @@ impl Yard {
                     "the beam carried to 0.5 m outside its slot",
                 );
             }
-            let p = self.into(slot, &[]);
+            let p = self.slot_in(slot, &[]);
             self.ok(0, "part:put", c, p, slot);
             assert_eq!(joints_at(&self.w, b), 2, "{slot} joins both frames");
         }
@@ -362,7 +362,7 @@ impl Yard {
         let j = self.id(name);
         self.ok(a, "part:take", c, Self::part(j), "a joist taken");
         let high = [self.id("deck-beam-high-l"), self.id("deck-beam-high-r")];
-        let p = self.into(slot, &high);
+        let p = self.slot_in(slot, &high);
         self.ok(a, "part:put", c, p, "the joist across both 1.8 m beams");
         let (parent, at, _) = where_is(&self.w, j);
         assert_eq!(
@@ -516,7 +516,7 @@ fn deck_a_crew_seats_a_plywood_sheet_on_two_joists_and_a_joist_under_it_stays() 
     );
     let pair = y.crew(1, &[2]);
     y.ok(1, "part:take", pair, Yard::part(sheet), "the sheet taken");
-    let p = y.into("s1", &[joist_1, joist_2]);
+    let p = y.slot_in("s1", &[joist_1, joist_2]);
     y.ok(1, "part:put", pair, p, "the sheet onto two joists");
     let mut both = vec![joist_1, joist_2];
     both.sort();
