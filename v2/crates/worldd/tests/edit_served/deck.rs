@@ -1089,20 +1089,9 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     // Frame 1's back face is its outer one (it stands at the bay's -z end).
     let perch = k.places[0][0];
     let walker = {
-        // DIAG: where every body is before and after the walk to the ladder's foot.
-        for s in 0..5 {
-            let b = body_of(&k.w, k.w.souls[s]);
-            println!("DIAG before: Soul {} at {:?}", s + 1, body_ticks(&k.w, b).last());
-        }
-        let foot = Bay::at(0, -3_200);
-        println!("DIAG goal {foot:?}");
-        k.hands[4].walk_to(k.w.ground, foot);
-        let got = socket_end(&mut k.hands[4].s);
-        for s in 0..5 {
-            let b = body_of(&k.w, k.w.souls[s]);
-            println!("DIAG after: Soul {} at {:?}", s + 1, body_ticks(&k.w, b).last());
-        }
-        k.ok(got, "Soul 5 to the ladder's foot");
+        // #5268 (#5254): a walk whose goal a body cannot stand at ends `walk.stopped-short`; 3.2 m out ended 0.7 m
+        // short (the ladder's run, 1.4 m from the face, and its holders now standing behind the posts), so 3.9 m.
+        k.walk(&[(4, Bay::at(0, -3_900))], "Soul 5 to the ladder's foot");
         body_of(&k.w, k.w.souls[4])
     };
     assert!(
@@ -1176,7 +1165,7 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     k.leave(1, c);
 
     // Down again.
-    let down = Bay::at(0, -3_500);
+    let down = Bay::at(0, -3_900);
     let to = BTreeMap::from([(1, Value::Array(vec![int(down.x), int(0), int(down.z)]))]);
     k.hands[4].send("eden:walk", g, to);
     let got = socket_end(&mut k.hands[4].s);
