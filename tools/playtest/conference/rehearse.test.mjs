@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { completed, discoverConference, performConference, rehearsalTemplate, conferenceMemberships } from './rehearse.mjs';
+import { completed, discoverConference, performConference, rehearsalTemplate, conferenceMemberships, performSlotPointComponent } from './rehearse.mjs';
 
 import { brief } from '../../../v2/client/src/brief/brief.mjs';
 import { doingLines } from '../../../v2/client/src/together/members.mjs';
@@ -237,4 +237,57 @@ test('authored speaker faces the actual audience and listeners face the stage in
   assert(current.listeners.every(dot=>dot>.9),'each listener must face the speaker on stage');
   const old=structuredClone(scene);old.batches.flatMap(b=>b.ops).find(o=>o.name==='presentation-lectern').r=0;
   assert(facing(old).speaker<-.99,'the prior backwards-facing arrangement must fail the geometric condition');
+});
+
+
+test('separate slot-point component uses one assembly and the same presenter through real interruption, exit and reentry', async () => {
+  const cast = meetingCast({ leaveRises: true });
+  const rows = []; const result = await performSlotPointComponent({ ...cast, lecture: 'lectern', question: 'question', benches: ['left','right'],
+    record: row => rows.push({ ...row, at: performance.now() }) });
+  assert.deepEqual(result, { concern: 'conference-slot-point-component', people: 5, presentations: 1, slotEntries: 2,
+    interruptedStories: 1, fullMeetingComplete: false });
+  const acts = cast.calls.filter(c => c.words[0] === 'act');
+  assert.deepEqual(acts.filter(c => c.words[1] === 'take_the_lectern:lectern').map(c => c.index), [0,0]);
+  assert.deepEqual(acts.filter(c => c.words[1] === 'step_down:lectern').map(c => c.index), [0,0]);
+  assert.equal(acts.filter(c => c.words[1] === 'attend:lectern').length, 4);
+  assert.equal(acts.filter(c => c.words[1] === 'tell_story').length, 2);
+  const started = rows.find(row => row.words[0] === 'receipt' && row.answer.receipt.going);
+  const point = rows.find(row => row.words[0] === 'act' && row.words[1] === 'point');
+  assert(started && point && point.at - started.at >= 249, 'the actual started story retains the real 250ms early-interruption interval');
+  assert(point.words.includes('toward=question'));
+  assert(acts.some(c => c.words[1] === 'clap' && c.words.includes('for=1')));
+  assert.equal(cast.calls.filter(c => c.words[0] === 'together' && c.words[1] === 'offer').length, 1);
+  assert(!acts.some(c => c.words[1]?.startsWith('post_question:')));
+  const observed = cast.events.filter(e => e.startsWith('observe:'));
+  assert.equal(observed.filter(e => e.endsWith(':assembly-start')).length, 1);
+  for (const stage of ['component-exited','component-reentry-start','component-reentry-ready']) assert(observed.includes(`observe:Person0:${stage}`));
+  assert.equal(observed.at(-1), 'observe:undefined:component-clean');
+  assert(!observed.some(e => e.endsWith(':conference-clean') || e.endsWith(':introduction-start')));
+});
+
+test('component refuses a failed original-presenter reentry and uncleared native membership', async () => {
+  const cast = meetingCast(); let entries = 0;
+  const cli = cast.seats[0].cli; cast.seats[0].cli = async (...words) => {
+    const answer = await cli(...words);
+    if (words[1] === 'take_the_lectern:lectern') entries++;
+    return words[0] === 'inspect' && entries === 2 ? { ...answer, parent: 'ground' } : answer;
+  };
+  await assert.rejects(performSlotPointComponent({ ...cast, lecture:'lectern',question:'question',benches:['left','right'] }), /reentry reaches/);
+  assert(!cast.events.some(e => e.endsWith(':component-clean')));
+  const stuck = meetingCast({ stuckActivity: true });
+  await assert.rejects(performSlotPointComponent({ ...stuck, lecture:'lectern',question:'question',benches:['left','right'] }), /activities must end/);
+});
+
+
+test('component does not count a failed or absent public parent read as a successful slot exit', async () => {
+  for (const answer of [{ok:false,code:'not_found'}, {ok:true}, {ok:true,parent:17}]) {
+    const cast=meetingCast();const cli=cast.seats[0].cli;let stepped=false;
+    cast.seats[0].cli=async(...words)=>{
+      const result=await cli(...words);
+      if(words[1]==='step_down:lectern') stepped=true;
+      return stepped&&words[0]==='inspect'?answer:result;
+    };
+    await assert.rejects(performSlotPointComponent({...cast,lecture:'lectern',question:'question',benches:['left','right']}),/authoritative parent read/);
+    assert(!cast.events.some(e=>e.endsWith(':component-reentry-ready')||e.endsWith(':component-clean')));
+  }
 });

@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
-import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools, conferenceNativeLectureBinding, conferenceLecternIdentity } from './conference-native-page.mjs';
-import { explainConference, rehearsalTemplate } from '../../playtest/conference/rehearse.mjs';
+import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools, conferenceNativeLectureBinding, conferenceLecternIdentity, conferenceExecution, conferenceComponentStage, conferenceComponentJourney, conferenceRenderedArms, SLOT_POINT_COMPONENT } from './conference-native-page.mjs';
+import { explainConference, rehearsalTemplate, performConference, performSlotPointComponent } from '../../playtest/conference/rehearse.mjs';
 import { drawnLoad, bodyGeometry } from '../../playtest/carry-contact/oracle.mjs';
 import { describeThing } from '../../../v2/client/src/creator/thing.mjs';
 const THREE = createRequire(new URL('../../../mars/viewer/package.json', import.meta.url))('three');
@@ -340,3 +340,58 @@ for (const kinds of [{ 'eden:conference_question@pin': {}, 'eden:conference_ques
     assert.equal(creator.calls.filter(words => words[0] === 'place').length, 0);
   });
 }
+
+
+test('the default full meeting and explicitly separate component select their own unchanged acceptance paths', async () => {
+  const full = conferenceExecution(), component = conferenceExecution(SLOT_POINT_COMPONENT);
+  assert.equal(full.perform, performConference); assert.equal(full.stage, conferenceMeetingStage); assert.equal(full.journey, conferenceMeetingJourney);
+  assert.equal(component.perform, performSlotPointComponent); assert.equal(component.stage, conferenceComponentStage); assert.equal(component.journey, conferenceComponentJourney);
+  assert.throws(() => conferenceExecution('conference-complete'), /unknown conference proof concern/);
+  const wrapper = await import('./conference-slot-point-component.mjs'), shared = await import('./conference-native-page.mjs');
+  assert.equal(wrapper.prepare, shared.prepare); assert.equal(wrapper.beforeNavigation, shared.beforeNavigation);
+});
+
+test('component last-render arm evidence cannot substitute target or missing/ambiguous limbs for actual palms', () => {
+  const arms = ['left','right'].map((side,i) => ({ side, shoulder:[i,1,0], palm:[i,.7,.4], target:[99,99,99] }));
+  const read = conferenceRenderedArms({ arms }); assert.deepEqual(read[0].palm,[0,.7,.4]);
+  arms[0].palm[0]=5; assert.equal(read[0].palm[0],0,'retained measurement is copied');
+  for (const bad of [null,{arms:[]},{arms:[arms[0],arms[0]]},{arms:[{...arms[0],palm:[NaN,0,0]},arms[1]]}])
+    assert.throws(() => conferenceRenderedArms(bad), /rendered arms unavailable/);
+});
+
+function componentFrames() {
+  const seats=Array.from({length:5},(_,i)=>({soul:`s${i}`})), frames=[],stages=[], pose=Array.from({length:5},()=>({activity:'idle',seated:false}));
+  let tick=0;
+  const draw=()=>frames.push({at:tick*50,tick:++tick,dt:.05,renderFrame:tick,
+    souls:seats.map((s,i)=>({id:s.soul,entityId:`e${i}`})),residents:seats.map((s,i)=>({id:s.soul,body:`e${i}`,activity:pose[i].activity,activityAge:.2})),
+    entities:Object.fromEntries(seats.map((s,i)=>[`e${i}`,{state:{baseActivity:pose[i].seated?'sit':'idle',seatHeight:pose[i].seated?.4:0}}]))});
+  const stage=(name,i,extra={},changes=[])=>{
+    const e={stage:name,...(i===null?{}:{soul:seats[i].soul}),frameIndex:frames.length-1,...extra};stages.push(e);
+    for(const [who,activity,seated]of changes){pose[who]={activity,seated};draw();}
+    draw();draw();
+    if(!['assembly-start','attend-start','story-start','rise-start','departure-start','component-reentry-start'].includes(name)){
+      conferenceComponentStage(frames,stages,e);e.observed=true;e.endFrameIndex=frames.length-1;
+    }
+    return e;
+  };
+  draw();stage('assembly-start',0,{listeners:seats.slice(1).map(s=>s.soul)});stage('lectern-ready',0);
+  for(let i=1;i<5;i++){stage('attend-start',i);stage('attend-done',i,{},[[i,'sit',true]]);}
+  stage('lecture-ready',0,{listeners:seats.slice(1).map(s=>s.soul)});
+  stage('story-start',0);stage('story-complete',0,{},[[0,'tell-story',false],[0,'idle',false]]);
+  stage('tell-story',0,{},[[0,'tell-story',false]]);stage('point',0,{},[[0,'point',false]]);
+  stage('settled',0,{},[[0,'clap',false],[0,'idle',false]]);stage('departure-start',0);
+  for(let i=1;i<5;i++){stage('rise-start',i);stage('rise-done',i,{},[[i,'idle',false]]);}
+  stage('component-exited',0);stage('component-reentry-start',0);stage('component-reentry-ready',0);
+  stage('departure-start',0);stage('component-clean',null,{seats:seats.map(s=>s.soul)});
+  return {seats,frames,stages};
+}
+
+test('component stage coverage requires advancing rendered entry/interruption/point/return/reentry and never passes the full meeting gate',()=>{
+  const {frames,stages,seats}=componentFrames();const result=conferenceComponentJourney(frames,stages,seats);
+  assert.equal(result.fullMeetingComplete,false);assert.equal(result.slotEntries,2);
+  assert.throws(()=>conferenceMeetingJourney(frames,stages,seats),/coverage incomplete/);
+  assert.throws(()=>conferenceComponentJourney(frames,stages.filter(e=>e.stage!=='point'),seats),/point stage coverage/);
+  assert.throws(()=>conferenceComponentJourney(frames,stages.map(e=>e.stage==='component-reentry-ready'?{...e,soul:seats[1].soul}:e),seats),/original presenter/);
+  const end=stages.at(-1);assert.throws(()=>conferenceComponentStage(frames.map(f=>({...f,tick:1,renderFrame:1})),stages,end),/clock stale/);
+  assert.throws(()=>conferenceComponentJourney(frames,stages.map(e=>e.stage==='component-reentry-ready'?{...e,observed:false}:e),seats),/unfinished/);
+});

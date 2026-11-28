@@ -157,6 +157,24 @@ export function conferenceMemberships(look) {
   return look.in ?? [];
 }
 
+export async function closeConference({ speaker, listeners, lecture, benches, record = () => {}, observe = async () => {} }) {
+  const { act, body, parent, leave } = conferenceCommands(record);
+  // Successful permission-checked step_down also proves the speaker link survived the gestures.
+  await observe('departure-start', { seat: speaker, listeners });
+  // Leaving an activity may itself release a seat. Observe before that command as well as any explicit rise.
+  const seated = [];
+  for (const listener of listeners) if (benches.includes(await parent(listener))) {
+    seated.push(listener); await observe('rise-start', { seat: listener });
+  }
+  await act(speaker, 'step_down', lecture);
+  for (const listener of listeners) await leave(listener, 'hall-lecture');
+  await leave(speaker, 'hall-lecture');
+  for (const listener of seated) {
+    if (benches.includes(await parent(listener))) await body(listener, 'rise');
+    await observe('rise-done', { seat: listener });
+  }
+}
+
 export async function performConference({ seats, lecture, benches, question, record = () => {}, storyRepeats = 1, interruptStory = false, interruptFirstOnly = false, observe = async () => {} }) {
   assert.equal(seats.length, 5, 'one speaker and four listeners');
   const [presenter, next] = seats;
@@ -164,22 +182,7 @@ export async function performConference({ seats, lecture, benches, question, rec
   const { command, act, body, parent, offer, leave } = conferenceCommands(record);
   const assemble = (speaker, listeners) => assembleConference({ seats: [speaker, ...listeners], lecture, benches, record, observe });
   const explain = async speaker => { const result = await explainConference({ speaker, lecture, question, record, storyRepeats, interruptStory: interruptStory && (!interruptFirstOnly || speaker === presenter), observe }); interruptedStories += Number(result.interrupted); };
-  async function closeLecture(speaker, listeners) {
-    // Successful permission-checked step_down also proves the speaker link survived the gestures.
-    await observe('departure-start', { seat: speaker, listeners });
-    // Leaving an activity may itself release a seat. Observe before that command as well as any explicit rise.
-    const seated = [];
-    for (const listener of listeners) if (benches.includes(await parent(listener))) {
-      seated.push(listener); await observe('rise-start', { seat: listener });
-    }
-    await act(speaker, 'step_down', lecture);
-    for (const listener of listeners) await leave(listener, 'hall-lecture');
-    await leave(speaker, 'hall-lecture');
-    for (const listener of seated) {
-      if (benches.includes(await parent(listener))) await body(listener, 'rise');
-      await observe('rise-done', { seat: listener });
-    }
-  }
+  const closeLecture = (speaker, listeners) => closeConference({ speaker, listeners, lecture, benches, record, observe });
   await assemble(presenter, seats.slice(1));
   await explain(presenter);
   const audienceBench = await parent(next);
@@ -272,6 +275,38 @@ export async function performConference({ seats, lecture, benches, question, rec
   }
   await observe('conference-clean', { seats });
   return { people: seats.length, presentations: 2, question: 'posted-refused-answered-withdrawn-reposted-withdrawn', handover: true, interruptedStories };
+}
+
+/** Separate component concern: this never substitutes for the full two-presenter meeting. */
+export async function performSlotPointComponent({ seats, lecture, benches, question, record = () => {}, observe = async () => {} }) {
+  assert.equal(seats.length, 5, 'slot-point component requires five participants');
+  const [speaker, ...listeners] = seats;
+  const { command, act } = conferenceCommands(record);
+  const parent = async seat => {
+    const answer = await command(seat, 'inspect', seat.body);
+    assert(answer.ok === true && Object.hasOwn(answer, 'parent') && (answer.parent === null || typeof answer.parent === 'string'),
+      'component authoritative parent read unavailable');
+    return answer.parent;
+  };
+  await assembleConference({ seats, lecture, benches, record, observe });
+  const explanation = await explainConference({ speaker, lecture, question, record, observe, storyRepeats: 1, interruptStory: true });
+  await closeConference({ speaker, listeners, lecture, benches, record, observe });
+  assert.notEqual(await parent(speaker), lecture, 'component departure releases the lectern');
+  await observe('component-exited', { seat: speaker });
+  await observe('component-reentry-start', { seat: speaker });
+  await act(speaker, 'take_the_lectern', lecture, 'place=lectern');
+  assert.equal(await parent(speaker), lecture, 'component reentry reaches the original lectern');
+  await observe('component-reentry-ready', { seat: speaker });
+  await closeConference({ speaker, listeners: [], lecture, benches, record, observe });
+  assert.notEqual(await parent(speaker), lecture, 'component final departure releases the lectern');
+  for (const seat of seats) {
+    const look = await command(seat, 'look');
+    assert(!conferenceMemberships(look).some(line => /hall-lecture|speaker-introduction|round-of-applause/.test(line)),
+      'component activities must end after ordinary departure');
+  }
+  await observe('component-clean', { seats });
+  return { concern: 'conference-slot-point-component', people: 5, presentations: 1, slotEntries: 2,
+    interruptedStories: Number(explanation.interrupted), fullMeetingComplete: false };
 }
 
 /** Fresh homes run the exact client downloaded from the served world, including its normal pairing flow. */

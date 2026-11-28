@@ -7,7 +7,7 @@ import { join, resolve, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { decode, idText } from '../../../v2/client/src/brief/copy.mjs';
 import { nativeCameraMode } from './camera-native-page.mjs';
-import { discoverConference, performConference } from '../../playtest/conference/rehearse.mjs';
+import { discoverConference, performConference, performSlotPointComponent } from '../../playtest/conference/rehearse.mjs';
 import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
@@ -354,6 +354,68 @@ export function conferenceMeetingJourney(frames, stages, seats) {
     firstTick: frames[0].tick, lastTick: frames.at(-1).tick };
 }
 
+/** Actual last-render bone readout; no intended target substitutes for the drawn shoulder or palm. */
+export function conferenceRenderedArms(diagnostic) {
+  const arms = diagnostic?.arms, finite = p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
+  if (!Array.isArray(arms) || arms.length !== 2 || ['left','right'].some(side => arms.filter(a => a.side === side).length !== 1) ||
+      arms.some(a => !finite(a.shoulder) || !finite(a.palm))) throw Error('component actual rendered arms unavailable');
+  return arms.map(a => ({ side: a.side, shoulder: [...a.shoulder], palm: [...a.palm],
+    basis: 'actual last-render bone diagnostics rounded to 0.1mm; not native contact or index-finger direction' }));
+}
+
+export const SLOT_POINT_COMPONENT = 'conference-slot-point-component';
+
+export function conferenceComponentStage(frames, stages, event) {
+  if (!event.stage.startsWith('component-')) return conferenceMeetingStage(frames, stages, event);
+  assert(['component-exited','component-reentry-ready','component-clean'].includes(event.stage), 'unknown component observation stage');
+  const before = stages.slice(0, stages.indexOf(event));
+  const startName = event.stage === 'component-reentry-ready' ? 'component-reentry-start' : 'departure-start';
+  const start = before.findLast(s => s.stage === startName);
+  assert(start, `component ${event.stage} has no command-start marker`);
+  const window = frames.slice(start.frameIndex, event.endFrameIndex === undefined ? undefined : event.endFrameIndex + 1);
+  assert(window.length >= 2 && window.at(-1).tick > window[0].tick && window.at(-1).renderFrame > window[0].renderFrame,
+    'component endpoint depicted clock stale or missing');
+  const souls = event.seats ?? [event.soul];
+  for (const soul of souls) {
+    const tail = window.slice(-2).map(f => conferenceObservation(f, soul));
+    assert(tail.every(s => s.activity === 'idle' && !s.seated), 'component standing endpoint not depicted');
+  }
+  return { stage: event.stage, firstTick: window[0].tick, lastTick: window.at(-1).tick };
+}
+
+export function conferenceComponentJourney(frames, stages, seats) {
+  assert.equal(seats.length, 5, 'component requires five participants');
+  const counts = { 'assembly-start': 1, 'lectern-ready': 1, 'attend-done': 4, 'lecture-ready': 1,
+    'story-complete': 1, 'tell-story': 1, point: 1, settled: 1, 'rise-done': 4, 'departure-start': 2,
+    'component-exited': 1, 'component-reentry-start': 1, 'component-reentry-ready': 1, 'component-clean': 1 };
+  for (const [stage, count] of Object.entries(counts)) assert.equal(stages.filter(e => e.stage === stage).length, count,
+    `component ${stage} stage coverage incomplete`);
+  const assembly = stages.find(e => e.stage === 'assembly-start');
+  assert.equal(assembly.soul, seats[0].soul, 'component must keep the original presenter');
+  assert.deepEqual(stages.filter(e => e.stage === 'attend-done').map(e => e.soul).sort(),
+    seats.slice(1).map(s => s.soul).sort(), 'component must observe every listener entry');
+  const ordered = ['story-complete', 'tell-story', 'point', 'settled', 'component-exited', 'component-reentry-start', 'component-reentry-ready', 'component-clean'];
+  assert(ordered.every((name, i) => !i || stages.findIndex(e => e.stage === name) > stages.findIndex(e => e.stage === ordered[i-1])),
+    'component gesture, exit and reentry order changed');
+  const departures = stages.map((e,i) => e.stage === 'departure-start' ? i : -1).filter(i => i >= 0);
+  assert(departures[0] < stages.findIndex(e => e.stage === 'component-exited') &&
+    departures[1] > stages.findIndex(e => e.stage === 'component-reentry-ready') &&
+    departures[1] < stages.findIndex(e => e.stage === 'component-clean'), 'component ordinary departure order changed');
+  for (const stage of ['component-exited', 'component-reentry-ready'])
+    assert.equal(stages.find(e => e.stage === stage).soul, seats[0].soul, 'component reentry must use the original presenter');
+  for (const event of stages) if (event.observed) conferenceComponentStage(frames, stages, event);
+  assert(stages.filter(e => counts[e.stage] && !['assembly-start', 'component-reentry-start', 'departure-start'].includes(e.stage)).every(e => e.observed),
+    'component depicted stage unfinished');
+  return { concern: SLOT_POINT_COMPONENT, people: 5, presentations: 1, slotEntries: 2, fullMeetingComplete: false,
+    firstTick: frames[0].tick, lastTick: frames.at(-1).tick };
+}
+
+export function conferenceExecution(mode = 'full-meeting') {
+  if (mode === 'full-meeting') return { perform: performConference, stage: conferenceMeetingStage, journey: conferenceMeetingJourney };
+  assert.equal(mode, SLOT_POINT_COMPONENT, 'unknown conference proof concern');
+  return { perform: performSlotPointComponent, stage: conferenceComponentStage, journey: conferenceComponentJourney };
+}
+
 /** Ordinary creator proof: the edit's returned name is the only identity used for readback. */
 export async function proveConferenceCreator({ creator, record = () => {}, signal }) {
   const cli = async (...words) => {
@@ -453,7 +515,7 @@ export function conferenceFinalization(page, paths, state) {
   state.persistSequence = () => {
     if (state.sequenceSaved) return;
     save(paths, 'command-conference-sequence.json', {
-      qualification: 'ordinary fixed-sequence conference diagnostic; independent-agent, creator and actual visual/contact acceptance remain separate',
+      qualification: state.component ? 'separate standing-slot/point component diagnostic; full meeting remains unproved; natural limbs/contact remain actual visual acceptance' : 'ordinary fixed-sequence conference diagnostic; independent-agent, creator and actual visual/contact acceptance remain separate',
       stage: 'before-observer-collection',
       result: state.result ?? null, failure: state.failure ?? null, rows: state.rows,
       depictedJourney: state.depictedJourney ?? null, stages: state.stages ?? [],
@@ -487,7 +549,7 @@ export async function beforeNavigation({ paths, page, base }) {
   await page.route(oracleURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: oracle }));
   state.oracleURL = oracleURL;
   const geometryURL = new URL('/__proof/conference-clearance.mjs', base).href;
-  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `export ${conferenceClearanceTools.toString()}\nexport ${conferenceLecternIdentity.toString()}` }));
+  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `export ${conferenceClearanceTools.toString()}\nexport ${conferenceLecternIdentity.toString()}\nexport ${conferenceRenderedArms.toString()}` }));
   state.geometryURL = geometryURL;
   const entryBytes = readFileSync(new URL('../../../content/kinds/hall/lecture.json', import.meta.url));
   state.lecternEntry = { kind: JSON.parse(entryBytes).kind, sha256: createHash('sha256').update(entryBytes).digest('hex') };
@@ -504,8 +566,12 @@ export async function beforeNavigation({ paths, page, base }) {
   };
 }
 
-export default async function ({ page, paths, check, expectHttp, signal }) {
+export default context => runConferencePage(context);
+
+export async function runConferencePage({ page, paths, check, expectHttp, signal }, mode = 'full-meeting') {
+  const execution = conferenceExecution(mode), component = mode === SLOT_POINT_COMPONENT;
   const state = states.get(paths.dir); assert(state, 'conference-proof preparation missing');
+  state.component = component;
   expectHttp('/safety.md', 404, 'The old-page fixture does not route this optional standalone client document.');
   const url = new URL(page.url()); url.search = 'post=0&hour=12:00&eye=6,3.5,6&at=0,1,2';
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
@@ -525,9 +591,9 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, binding: state.lecternBinding });
   save(paths, 'command-conference-lectern-identity.json', identity);
   assert(identity.ok, identity.error);
-  await page.evaluate(async ({ oracleURL, geometryURL, kitURL, souls, entry, binding }) => {
+  await page.evaluate(async ({ oracleURL, geometryURL, kitURL, souls, entry, binding, component }) => {
     const { observeRender, bodyGeometry, drawnLoad } = await import(oracleURL);
-    const { conferenceClearanceTools } = await import(geometryURL);
+    const { conferenceClearanceTools, conferenceRenderedArms } = await import(geometryURL);
     const { TakePeople } = await import(kitURL), prototype = TakePeople.prototype;
     const world = window.__soulsEntity, original = prototype.show;
     if (!world || !original || window.__conferenceDrawObserver) throw Error('conference final-draw observer unavailable');
@@ -570,7 +636,8 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
           const distance = anchor => q.p.reduce((sum, n, i) => sum + (n - anchor[i]) ** 2, 0);
           sides[distance(anchors[0]) <= distance(anchors[1]) ? 0 : 1].push(q);
         }
-        return { soul, entity, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
+        const arms = component ? conferenceRenderedArms(diagnostics?.[entity]) : undefined;
+        return { ...(component ? { arms, pointAim: frame.entities[entity]?.state?.pointAim ?? null } : {}), soul, entity, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
           lecternClearance: geometry.clearance(points, lectern),
           // Inferred nearest-rendered-ankle clusters; these are not native contact/rig vertex-side identities.
           footClusters: sides.map((group, index) => ({ inferred: true, nearestRenderedAnkleIndex: index, anchor: anchors[index], ...bounds(group) })),
@@ -586,7 +653,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
       lecternEntry: { ...entry, ...binding, entity: lecternEntity, identity: identity.witness, association: 'validated public native node, actual product layerDraws/NodeRec.origin or CreatorKinds entityId; exact scene id/def and visibly attached drawn geometry; native name is checked separately, streamSnapshot Entity.name is optional; canonical entry bytes are provenance, drawn triangles own the measurement' },
       qualification: 'actual visible indexed bodyDraw vertices measured; bounded extrema/lectern vertex-inside witnesses every250ms, not every-frame or complete triangle-intersection proof; inferred skin/foot groups are not native identities; no native contact certification; original full-body video remains required. Historical story clips used hidden-source primitive extrema and did not measure actual lectern clearance.' };
   }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul),
-    entry: state.lecternEntry, binding: state.lecternBinding });
+    entry: state.lecternEntry, binding: state.lecternBinding, component });
   state.observerInstalled = true;
   state.frameReads = []; state.frameReadErrors = []; state.stages = [];
   let reading = true;
@@ -608,7 +675,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   })();
   try {
     const immediate = new Set(['assembly-start', 'attend-start', 'story-start', 'seated-wave-start', 'rise-start',
-      'question-start', 'question-refused', 'question-recovered', 'departure-start', 'introduction-start', 'applause-start']);
+      'question-start', 'question-refused', 'question-recovered', 'departure-start', 'introduction-start', 'applause-start', 'component-reentry-start']);
     const observe = async (stage, details = {}) => {
       const event = { stage, at: Date.now(), frameIndex: Math.max(0, state.frameReads.length - 1),
         soul: details.seat?.soul, body: details.seat?.body, person: details.seat?.label,
@@ -622,7 +689,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
         const last = state.frameReads.at(-1);
         try {
           assert(last && Date.now() - last.receivedAt < 500, 'conference page observation stale');
-          conferenceMeetingStage(state.frameReads, state.stages, event);
+          execution.stage(state.frameReads, state.stages, event);
           event.observed = true; event.endFrameIndex = state.frameReads.length - 1; return;
         } catch (error) {
           assert(Date.now() < until, `conference ${stage} not observed on advancing page: ${error.message}`);
@@ -630,13 +697,15 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
         signal.throwIfAborted(); await new Promise(ok => setTimeout(ok, 50));
       }
     };
-    state.result = await performConference({ seats: state.seats, ...state.fixtures, record: state.record,
+    state.result = await execution.perform({ seats: state.seats, ...state.fixtures, record: state.record,
       storyRepeats: 1, interruptStory: true, interruptFirstOnly: true, observe });
-    state.depictedJourney = conferenceMeetingJourney(state.frameReads, state.stages, state.seats);
+    state.depictedJourney = execution.journey(state.frameReads, state.stages, state.seats);
     const draw = await page.evaluate(() => ({ samples: window.__conferenceDrawObserver?.samples.length, failures: window.__conferenceDrawObserver?.failures }));
     assert(draw.samples >= 2 && draw.failures?.length === 0, 'conference final-draw measurement missing or failed');
     signal.throwIfAborted();
-    check('conference-meeting-depicted', state.result.presentations === 2 && state.result.interruptedStories === 1 && state.result.handover,
+    if (component) check(SLOT_POINT_COMPONENT + '-depicted', state.result.presentations === 1 && state.result.slotEntries === 2 && state.result.interruptedStories === 1 && state.result.fullMeetingComplete === false,
+      'Separate ordinary slot-front/point/interruption/exit/reentry component; full meeting and natural limbs/contact remain unproved.');
+    else check('conference-meeting-depicted', state.result.presentations === 2 && state.result.interruptedStories === 1 && state.result.handover,
       'Ordinary receipts and advancing depicted entry, seated gesture/return, rise, questions/recovery, handover and cleanup; natural limbs/contact remain visual acceptance.');
     await page.screenshot({ path: join(paths.dir, 'conference-completion.png') });
   } catch (error) { state.failure = String(error.stack ?? error); throw error; }
