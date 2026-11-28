@@ -2156,6 +2156,18 @@ impl Bodies {
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(mm) = self.gap_to(body, t, p).filter(|mm| *mm > STOPPED_SHORT_MM)
                 {
+                    {
+                        let g = self.runner.granted.get(&body).copied();
+                        let tb = self.town.spots.table(&sim::spots::Target::new(t, p));
+                        use std::io::Write as _;
+                        let mut f = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/n4diag.log").unwrap();
+                        let _ = writeln!(
+                            f,
+                            "worldd: N4DIAG walk {} of {} to {:?} on {}: {mm} mm short; granted {:?} (there {:?}); passage_at {:?}; table clear {:?} places {:?}; pose {:?}",
+                            replica::world_model::show(id), replica::world_model::show(body), p, replica::world_model::show(t), g, g.and_then(|g| self.gap_to(body, t, g)),
+                            self.town.passage_at(t, p), tb.map(|x| x.clear), tb.map(|x| x.places.len()), self.pose(body)
+                        );
+                    }
                     let crowd = self.short.contains(&id);
                     let n = self.walked_again.get(&id).copied().unwrap_or(0);
                     // Sent again half a second after it stopped, so bodies in its way have time to move off.
