@@ -1763,17 +1763,9 @@ impl Town {
     }
 
     /// The doorway or stair whose passage `p` (µm, `node`'s frame) lies in, as the spot tables keep walkers out of it
-    /// ([`passage_named`] with [`CLEAR`]): the thing it belongs to and the link's kind (#5254).
+    /// ([`passage_named`], a walker's clearance): the thing it belongs to and the link's kind (#5254).
     pub fn passage_at(&self, node: Id, p: Vec3) -> Option<(Id, Kind)> {
-        passage_named(
-            &self.buildings,
-            &self.passages,
-            self.ground,
-            node,
-            p,
-            None,
-            CLEAR,
-        )
+        passage_named(&self.buildings, &self.passages, self.ground, node, p, None)
     }
 
     /// The world's entry as [`Town::set_entry`] took it, on dry ground: where the main ground is judged from. `None`:
@@ -2597,10 +2589,9 @@ fn passage_indexed(
 /// [`CLEAR`] past its width along its line.
 const CLEARS: (i64, i64) = (CLEAR, CLEAR / 2);
 
-/// The first link of `buildings` with an end on `node` whose passage `p` lies in, read with clearance `clear` (µm)
-/// round its ends and past its width instead of [`CLEAR`] (#5254): the thing it belongs to and the link's kind. With
-/// [`CLEAR`] it is the passage [`in_passage_indexed`] finds (its band then half [`CLEAR`]); with a body's radius and
-/// margin it is the passage itself, which a body standing there would be in.
+/// The first link of `buildings` with an end on `node` whose passage `p` lies in, read with a walker's clearance
+/// ([`CLEARS`]: [`CLEAR`] round its ends, half [`CLEAR`] past its width along its line, #5254; A3): the thing it
+/// belongs to and the link's kind. It is the passage [`in_passage_indexed`] finds.
 pub fn passage_named(
     buildings: &[Building],
     passages: &Passages,
@@ -2608,13 +2599,7 @@ pub fn passage_named(
     node: Id,
     p: Vec3,
     door: Option<Id>,
-    clear: i64,
 ) -> Option<(Id, Kind)> {
-    let clears = if clear == CLEAR {
-        CLEARS
-    } else {
-        (clear, clear)
-    };
     for &(bi, li) in passages.on.get(&node).map_or(&[][..], |v| &v[..]) {
         let i = bi as usize;
         if node == ground
@@ -2625,7 +2610,7 @@ pub fn passage_named(
         }
         let b = &buildings[i];
         let l = &b.links[li as usize];
-        if link_passage(b, l, ground, node, p, door, false, clears) != Lies::Clear {
+        if link_passage(b, l, ground, node, p, door, false, CLEARS) != Lies::Clear {
             return Some((b.thing, l.kind));
         }
     }
@@ -2842,7 +2827,6 @@ impl Grounds<'_> {
     /// [`CLEAR`] of a link's end or of its width along its line, as a walker is kept (A3: no standing place narrows a
     /// doorway or a stair for others; #5254).
     fn passage_within(&self, node: Id, p: Vec3, _size: Size) -> bool {
-        let clear = CLEAR;
         passage_named(
             self.buildings,
             self.passages,
@@ -2850,7 +2834,6 @@ impl Grounds<'_> {
             node,
             p,
             self.door,
-            clear,
         )
         .is_some()
     }
@@ -3466,8 +3449,8 @@ impl<'a> View<'a> {
     /// Where `body` would stand at point `p` of the open ground (µm, the ground's frame; its height is not read): of
     /// the ground a body may stand on at that point on the plan, the open ground's own (at its terrain's height) and
     /// each floor's (a deck's top, a frame's standing place, a room), the one whose height is nearest the body's own
-    /// level, of those its walk may reach. The node and the point in its frame, or `None` when no ground a body may
-    /// stand on lies there (a walk to a point, FOR-FABLE 14).
+    /// level, of those its walk may reach first. The node and the point in its frame, or `None` when no ground a body
+    /// may stand on lies there (a walk to a point, FOR-FABLE 14).
     pub fn level_under(&self, body: &Body, p: Vec3) -> Option<(Id, Vec3)> {
         let ground = self.tree.handle(self.ground)?;
         let height = |node: Id, at: Vec3| -> Option<i64> {
@@ -3481,19 +3464,18 @@ impl<'a> View<'a> {
             .map
             .spot_near(node_of(body), body.pose.position, AT_EDGE);
         let joined = |s: &Spot| start.is_none_or(|a| self.map.may_reach(a.piece, s.piece));
-        let mut best: Option<(i64, Id, Vec3)> = None;
+        // The nearest level its walk may reach, else (none joined to it: a pocket of ground walled in) the nearest of
+        // all, which the walk then goes as near to as it can, as before.
+        let mut best: Option<(bool, i64, Id, Vec3)> = None;
         let mut keep = |node: Id, s: Spot, y: i64| {
             let gap = (y - own).abs();
             let at = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
-            if best.is_none_or(|(g, ..)| gap < g) {
-                best = Some((gap, node, at));
+            let far = !joined(&s);
+            if best.is_none_or(|(f, g, ..)| (far, gap) < (f, g)) {
+                best = Some((far, gap, node, at));
             }
         };
-        if let Some(s) = self
-            .map
-            .spot_for(self.ground, Vec3::new(p.x, 0, p.z), has)
-            .filter(|s| joined(s))
-        {
+        if let Some(s) = self.map.spot_for(self.ground, Vec3::new(p.x, 0, p.z), has) {
             // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
             let at = Vec3::new(s.at[0] * 1000, 0, s.at[2] * 1000);
             let frame = Frame {
@@ -3527,11 +3509,11 @@ impl<'a> View<'a> {
             else {
                 continue;
             };
-            if let Some(s) = self.map.spot(node, local).filter(|s| joined(s)) {
+            if let Some(s) = self.map.spot(node, local) {
                 keep(node, s, self.map.world(s.piece, s.at)[1] * 1000);
             }
         }
-        best.map(|(_, node, at)| (node, at))
+        best.map(|(_, _, node, at)| (node, at))
     }
 
     /// The nearest point of the open ground's plan (µm, the ground's frame) round `p` where `body` would stand

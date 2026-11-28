@@ -2349,6 +2349,9 @@ mod shade;
 #[path = "edit_served/deck.rs"]
 mod deck;
 
+#[path = "edit_served/creator_bay.rs"]
+mod creator_bay;
+
 #[path = "edit_served/sit_by_kind.rs"]
 mod sit_by_kind;
 
@@ -6217,6 +6220,48 @@ fn hands_on_the_face_held_from(w: &Seeded, crew: Id, part: Id) {
     }
 }
 
+/// Waits (at most 60 s) until each holder of crew `crew`'s standing `part` has come to its stance behind its post
+/// (`grips::stance`): within 100 mm of it on the plan (a holder's hands sit on its post, a little off the stance's
+/// own line on a frame not centred on its slot), and standing still there across two reads of the world. Fails
+/// otherwise, naming how far.
+fn at_stances(w: &Seeded, crew: Id, part: Id, what: &str) {
+    use sim::activity::carry::grips::{GRIPS, Holds, stance};
+    let end = Instant::now() + Duration::from_secs(60);
+    let mut last: Option<Vec<Vec3>> = None;
+    loop {
+        let (copy, _) = served_copy(w);
+        let t = copy.tree();
+        let x =
+            sim::ground::scene::xform_to(t, t.handle(part).unwrap(), t.handle(w.ground).unwrap())
+                .unwrap();
+        drop(copy);
+        let h = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
+            .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
+            .next_back()
+            .expect("its holds");
+        let feet: Vec<Vec3> = h.holds.iter().map(|hold| body_at(w, hold.body)).collect();
+        let offs: Vec<i64> = h
+            .holds
+            .iter()
+            .zip(&feet)
+            .map(|(hold, f)| apart_mm(*f, x.point(stance(hold, Vec3::ZERO).0).unwrap()))
+            .collect();
+        if offs.iter().all(|o| *o <= 100) && last.as_ref() == Some(&feet) {
+            return;
+        }
+        assert!(
+            Instant::now() < end,
+            "{what}: the holders not at their stances, mm off {offs:?}"
+        );
+        last = Some(feet);
+        std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
 fn apart_mm(a: Vec3, b: Vec3) -> i64 {
     ((i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt() / 1000) as i64
 }
@@ -9703,8 +9748,10 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             ("souls:held".to_owned(), vec![a, b]),
             "frame in {slot}: both still hold it"
         );
-        // Each holder walks round to behind its post, its hands on that face.
-        std::thread::sleep(Duration::from_secs(3));
+        // Each holder walks round to behind its post, its hands on that face. The beams' puts wait for the world to
+        // have ended those walks: a holder still on its way round stood where a beam is set in (`site.occupied`, a load
+        // race on a busy runner).
+        at_stances(&w, c, frame, slot);
         hands_on_the_face_held_from(&w, c, frame);
     }
 
@@ -9841,4 +9888,165 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
         .count();
     assert_eq!(downs, 0, "no carry broke off");
+}
+
+/// FOR-FABLE 10, a raise into a slot that declares a turn: the deck bay's `upright_b` declares a quarter turn (this
+/// test's copy of its entry). The 12 ft frame lies at it as [`a_frame_turned_a_half_turn_is_raised_into_upright_b_the_same_either_way`]
+/// lays it, which stood up faces as the bay's frames do (a half turn from them, the same either way): neither the
+/// slot's turn nor its half turn, so the raise is refused `raise.not-at-slot` before anything moves, naming the turn the
+/// slot expects.
+#[test]
+fn a_frame_turned_as_the_bay_is_not_raised_into_a_slot_that_declares_a_quarter_turn() {
+    use sim::activity::carry::raise::{SIDE, Spec};
+    let d = scratch("raiseturned");
+    let (facts, _) = yard_world(&d);
+    // The deck bay's `upright_b` declares a quarter turn (FOR-FABLE 10), in this test's copy of its entry.
+    let path = d.join("entries/deck_bay.json");
+    let mut entry = json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    if let json::Value::Obj(top) = &mut entry
+        && let Some((_, json::Value::Obj(slots))) = top.iter_mut().find(|(k, _)| k == "slots")
+        && let Some((_, json::Value::Obj(b))) = slots.iter_mut().find(|(k, _)| k == "upright_b")
+    {
+        b.push(("turn_mdeg".into(), json::Value::Int(90_000)));
+    }
+    std::fs::write(&path, entry.to_json()).unwrap();
+    let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xab);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let kind = |prefix: &str| {
+        Name::new(rules.kinds.keys().find(|k| k.starts_with(prefix)).unwrap()).unwrap()
+    };
+    let place = |prefix: &str, at: Vec3, q: Quat| Op::Place {
+        name: 1,
+        kind: kind(prefix),
+        parent: Ref::Node(g),
+        at: Spot {
+            slot: None,
+            position: at,
+            orientation: q,
+            support: Support::Surface {
+                surface: g,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let got = creator_edit(place(
+        "mars:deck_bay@",
+        Vec3::new(56 * M, 0, -24 * M),
+        Quat::IDENTITY,
+    ));
+    assert_eq!(got.kind, 1, "a deck bay: {got:?}");
+    // Its slots by number, in its entry's order.
+    let deck: BTreeMap<String, u64> =
+        match json::parse(&std::fs::read_to_string(d.join("entries/deck_bay.json")).unwrap())
+            .unwrap()
+            .get("slots")
+        {
+            Some(json::Value::Obj(o)) => o
+                .iter()
+                .enumerate()
+                .map(|(k, (n, _))| (n.clone(), k as u64 + 1))
+                .collect(),
+            _ => panic!("its slots"),
+        };
+    let slots = deck;
+    let bay = got.names[&1];
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let points =
+        sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap()).unwrap();
+    let at = |k: u64| points.iter().find(|(n, _)| *n == k).unwrap().1;
+    let ub = at(slots["upright_b"]);
+    drop(copy);
+    // Lying on its face at upright_b, its length along +z from its foot (outward from the bay), turned so its own x runs
+    // along -x: stood up, it faces opposite to the slot (#5067: the 12 ft frame raised with its top away from the bay).
+    let spec = Spec::of(
+        &json::parse(&std::fs::read_to_string(d.join("entries/rack_upright_12ft.json")).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    let half = 759_250_125;
+    let lie = Quat::from_yaw_mdeg(180_000)
+        .unwrap()
+        .then(Quat::new(half, -half, 0, 0).unwrap())
+        .unwrap();
+    let foot = Vec3::new(ub.x + 80_000, spec.half_thick, ub.z);
+    let got = creator_edit(place("mars:rack_upright_12ft@", foot, lie));
+    assert_eq!(got.kind, 1, "a frame lying: {got:?}");
+    let frame = got.names[&1];
+
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    // The lifter beside its top end, the footer beside its base on the other side.
+    let beside = spec.half_width + SIDE;
+    let stations = [
+        v3(foot.x - beside, 0, foot.z + spec.height),
+        v3(foot.x + beside, 0, foot.z),
+    ];
+    for (k, p) in stations.iter().enumerate() {
+        hands[k].walk_to(g, *p);
+    }
+    for h in hands.iter_mut() {
+        let e = socket_end(&mut h.s);
+        assert_eq!(e.kind, 1, "to its raise station: {e:?}");
+    }
+    let body = body_of(&w, w.souls[1]);
+    let got = hands[0].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    assert_eq!(
+        hands[1].act("activity:accept", crew, BTreeMap::new()).kind,
+        1
+    );
+    let into = |k: u64| {
+        BTreeMap::from([
+            (1, frame.to_value()),
+            (4, bay.to_value()),
+            (5, Value::Uint(k)),
+        ])
+    };
+    let got = hands[0].act("part:raise", crew, into(slots["upright_b"]));
+    println!("raised into upright_b, which declares a quarter turn: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "raise.not-at-slot"),
+        "{got:?}"
+    );
+    assert!(
+        got.detail
+            .contains("turned 90000 millidegrees from the bay's frames"),
+        "names the slot's turn: {got:?}"
+    );
 }
