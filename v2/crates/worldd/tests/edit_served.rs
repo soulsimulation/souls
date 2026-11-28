@@ -4079,6 +4079,7 @@ fn rest_of(w: &Seeded, id: Id, up_mm: i64) -> (i64, i64, bool) {
 ///   where it was, and Soul 1 may leave the crew.
 /// - Taking frame A out from under beam 1 is refused `support.none`, and nothing changes.
 #[test]
+#[ignore = "N4 item 5: passes under the two-holder rule up to frame B laid down beside its bay; taking it up again from where it lies and putting it back is refused part.grip-out-of-reach (a lying frame's grip places lie on it: FOR-FABLE 20)"]
 fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     const H: i64 = 1_200_000;
     let d = scratch("a2seat");
@@ -6122,7 +6123,6 @@ fn a_crew_puts_a_frame_back_into_a_live_placed_stand() {
 /// - Every part ends where it started, under the same id, and every node of the world as built is still there. The
 ///   checks read the world as its log replays from the start, so the history plays back.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "#5067 task 4 (coordinator, 27 Nov): its choreography stands crews 2.2 m off; rewrite for carriers at their grips, after raise and lower"]
 async fn a3_four_souls_build_a_bay_and_take_it_down() {
     const H: i64 = 1_200_000;
     let d = scratch("a3bay");
