@@ -8016,6 +8016,8 @@ fn edit_checker(
                                 crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                             let tree = buildsafe::souls(&copy, &world.kinds);
                             let souls = buildsafe::judged(tree, &snapshot.bodies);
+                            // Nothing is placed onto a Soul: not inside a placed thing's bounds (racks, lane C).
+                            buildsafe::bounds_clear(&copy, &p, &entries, &souls, reserved.clone())?;
                             stages.end(measures::EDIT_PLACES);
                             let maps = source
                                 .map(|source| {
@@ -8710,11 +8712,26 @@ mod tests {
         let said = Value::Map([(23, Value::Bytes(b"by the well".to_vec()))].into());
         i.parameters.insert(1, said);
         let rx = send(&w, &i);
-        thread::sleep(Duration::from_millis(100));
+        // On the world, not the wall clock (a loaded machine runs fewer 10 ms ticks in a fixed sleep): the words' sync
+        // is held, then the clock runs ten more ticks while it is.
+        let until = Instant::now() + Duration::from_secs(10);
+        let held = || {
+            let d = text.0.lock().unwrap();
+            d.stall_sync.is_some_and(|n| d.syncs >= n)
+        };
+        while !held() {
+            assert!(Instant::now() < until, "the words' sync is asked for");
+            thread::sleep(Duration::from_millis(5));
+        }
         let from = w.beat.read().0;
-        thread::sleep(Duration::from_millis(300));
-        let to = w.beat.read().0;
-        assert!(to >= from + 10, "the clock ticks on: tick {from} to {to}");
+        while w.beat.read().0 < from + 10 {
+            assert!(
+                Instant::now() < until,
+                "the clock ticks on: tick {from} to {}",
+                w.beat.read().0
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
         assert!(
             rx.try_recv().is_err(),
             "no answer before its words are on the disk"
