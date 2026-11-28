@@ -1507,6 +1507,19 @@ impl Assembly {
                     w
                 }
                 Err(why) => {
+                    // A straight set-in admitted from nearby keeps its own answer, as before the feed (the client
+                    // carries the crew there and asks again): the feed's is for a part with no such place.
+                    if r.name == "part.grip-out-of-reach"
+                        && let Some(p) = admitted_from(carriers, ends, from, end, walkable)
+                    {
+                        r.detail = format!(
+                            "{}; {ADMITTED_AT} x={} z={} mm",
+                            r.detail,
+                            p.x / 1000,
+                            p.z / 1000
+                        );
+                        return Err(r);
+                    }
                     // Where it would work comes first: a refusal's detail is cut short where it is long.
                     let whence = match fed_from(end, from.0.y, feed) {
                         Some((p, front)) => format!(
