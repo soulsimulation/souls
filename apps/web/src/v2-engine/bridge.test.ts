@@ -65,6 +65,60 @@ function standingSlotProjection({ cold = false, posture = 'stand', known = true,
   return { bridge, at, oldChunk, expected: Math.atan2(forward.z, forward.x), expectedPoint: point.toArray() };
 }
 
+// Retained conference timing: leave toward +Z, native face toward -Z at7.95s,
+// then a70mm/500ms return to the raised standing slot at8.45s.
+function slowStandingReentry(period = 500_000, quiet = false) {
+  const bridge = new V2Bridge({ rulesVersion: 'test/1' });
+  const yaw = (r: number) => [Math.cos(r / 2) * Q, 0, Math.sin(r / 2) * Q, 0] as [number, number, number, number];
+  const platform = node('p.1', 'w.0', [0, 0, 4_000_000], { kind: 'fixture:lectern@1', rot: yaw(Math.PI), slots: [[1, 0, 100, -350, 0, 1]] });
+  const entry = node('k.1', null, [0, 0, 0], { kind: 'souls:kind@1', defines: platform.kind,
+    entry: new TextEncoder().encode(JSON.stringify({ owner: 'thing', slots: { lectern: { admits: 'body', at_mm: [0, 100, -350], posture: 'stand' } } })) });
+  const occupied = node('b.7', 'p.1', [0, 0, 0], { kind: 'souls:body@1', soul: 'soul-abc-7', slot: 1, at: T0 });
+  const free = { ...occupied, parent: 'w.0', slot: null, pos: [0, 0, 4_420_000] as [number, number, number], rot: yaw(2.8855), at: null };
+  bridge.receive({ t: 'snapshot', s: { nodes: [world, platform, entry, occupied], removed: [] } });
+  type Sample = [string, string, number | null, number, number, number, number];
+  const samples: Sample[] = [[ 'b.7', 'w.0', null, T0 + 3_000_000, 0, 0, 4_350_000 ],
+    ['b.7', 'w.0', null, T0 + 3_050_000, 0, 0, 4_420_000], ['b.7', 'w.0', null, T0 + 3_100_000, 0, 0, 4_420_000],
+    ['b.7', 'w.0', null, T0 + 7_950_000, 0, 0, 4_420_000], ['b.7', 'p.1', 1, T0 + 8_450_000, 0, 0, 0]];
+  const records = [{ at: T0 + 3_100_000, value: free }, { at: T0 + 7_950_000, value: { ...free, rot: yaw(Math.PI / 2) } },
+    { at: T0 + 8_450_000, value: { ...occupied, at: null } }];
+  let frozen = '';
+  for (let from = T0, number = 0; from < T0 + 12_000_000; from += period, number++) {
+    const to = from + period;
+    bridge.receive({ t: 'part', p: { number, from, to, nodes: records.filter(r => r.at >= from && r.at < to).map(r => r.value), removed: [],
+      samples: samples.filter(r => r[3] >= from && r[3] < to) } });
+    if (quiet && to === T0 + 8_000_000) {
+      bridge.receive({ t: 'pointer', p: { newest: number, newestTo: to, period, anchorWorld: to, anchorWallMs: 0, quietUntil: T0 + 8_300_000 } });
+      frozen = JSON.stringify(bridge.view.takes.chunks.find(c => c.fromTick === T0 / TICK_US + 140));
+    }
+  }
+  const at = (seconds: number) => {
+    const tick = T0 / TICK_US + seconds / DT, chunk = bridge.view.takes.chunks.find(c => c.fromTick <= tick && tick < c.toTick)!;
+    assert(chunk, `reentry chunk at ${seconds}`);
+    return sampleTake(chunk.take as unknown as Take, (tick - chunk.fromTick) * DT).entities[E];
+  };
+  return { bridge, at, frozen };
+}
+
+test('a native standing turn continues through slow opposite walking and slot acquisition across immutable chunks', () => {
+  const ordinary = slowStandingReentry(), split = slowStandingReentry(250_000), live = slowStandingReentry(500_000, true);
+  const angle = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  const times = Array.from({ length: 45 }, (_, i) => 7.8 + i / 25);
+  const expected = times.map(t => ordinary.at(t));
+  assert.ok(Math.abs(ordinary.at(7.8).yaw - Math.PI / 2) < .002, 'the previous departure really faces the opposite way');
+  assert.ok(Math.abs(ordinary.at(9).yaw + Math.PI / 2) < .002, 'the native slot front is eventually attained');
+  for (let i = 1; i < times.length; i++) assert(angle(expected[i - 1].yaw, expected[i].yaw) <= 1.5 * Math.PI / .6 / 25 + .005,
+    `25fps continuity at ${times[i]}: ${expected[i - 1].yaw} to ${expected[i].yaw}`);
+  for (const [i, t] of times.entries()) {
+    const p = t <= 7.95 ? [0, 0, 4.42] : t < 8.45 ? [0, .1 * (t - 7.95) / .5, 4.42 - .07 * (t - 7.95) / .5] : [0, .1, 4.35];
+    expected[i].p.forEach((v, k) => assert.ok(Math.abs(v - p[k]) <= .001, 'the authoritative position interpolation is unchanged'));
+    for (const other of [split, live]) assert(angle(expected[i].yaw, other.at(t).yaw) < .002, `same history across part/quiet boundaries at ${t}`);
+  }
+  for (const i of [44, 0, 30, 3, 12, 20]) assert.deepEqual(ordinary.at(times[i]), expected[i], 'fresh/backward seeks are independent of earlier sampling');
+  for (const boundary of [8, 8.45, 9]) assert(angle(live.at(boundary - .00001).yaw, live.at(boundary + .00001).yaw) < .002, `continuous seam/acquisition at ${boundary}`);
+  assert.equal(live.frozen, JSON.stringify(live.bridge.view.takes.chunks.find(c => c.fromTick === T0 / TICK_US + 140)), 'the earlier published chunk stays immutable');
+});
+
 test('the actual lecture slot faces through its authored lectern front toward the conference benches', () => {
   const entry = JSON.parse(readFileSync(new URL('../../../../content/kinds/hall/lecture.json', import.meta.url), 'utf8'));
   // Retained conference-rehearsal layout: lectern [0,0,4], yaw pi; benches [-1.4,0,0] and [1.4,0,0].

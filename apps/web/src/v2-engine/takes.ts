@@ -170,6 +170,52 @@ export function standingFacingAt(records: readonly StandingFacing[] | undefined,
   return last.heading === null && Math.abs(Math.atan2(Math.sin(facing - target), Math.cos(facing - target))) < 1e-9 ? null : facing;
 }
 
+/** A native standing turn or slot release keeps its attained facing when walking starts. Compile from public
+ * timestamps once per chunk; sampling this plan never depends on an earlier draw or the chunk's loop fallback. */
+export function facingHandoffs(samples: readonly WorldSample[], heading: number, turns: readonly Turn[] = [], standing?: readonly StandingFacing[]): (t: number) => number | null {
+  type Event = { at: number; native?: Turn; toward?: number; walking?: boolean; seated?: boolean };
+  const events: Event[] = turns.map(native => ({ at: native.at, native }));
+  for (let i = 0; i + 1 < samples.length; i++) {
+    const a = samples[i], b = samples[i + 1], dx = b.p[0] - a.p[0], dz = b.p[2] - a.p[2];
+    const seated = !!(a.seat || b.seat), seconds = (b.at - a.at) / 1e6;
+    const walking = !seated && seconds > 0 && Math.hypot(dx, dz) / POS_Q / seconds >= WALKING;
+    events.push({ at: a.at, walking, seated: !!a.seat, ...(walking ? { toward: Math.atan2(dz, dx) } : {}) });
+  }
+  if (samples.length) events.push({ at: samples[samples.length - 1].at, walking: false, seated: !!samples[samples.length - 1].seat });
+  // Native facing at a movement's start is the standing left limit, before that new segment owns travel direction.
+  events.sort((a, b) => a.at - b.at || Number(!a.native) - Number(!b.native));
+  const movingAfter = new Map(events.filter(e => !e.native).map(e => [e.at, e.walking]));
+  const plan: { at: number; turn: Turn | null }[] = [];
+  let moving = false, ordinary = turns[0]?.from ?? heading, turn: Turn | null = null;
+  for (const e of events) {
+    const attained: number = turn ? turnFrom(turn, turn.from, e.at) : ordinary;
+    if (e.native) {
+      if (moving && movingAfter.get(e.at) !== false) continue; // travel owns a turn made during its ongoing segment
+      const from: number = standingFacingAt(standing, e.at, attained) ?? attained;
+      turn = { at: e.at, from, to: e.native.to }; ordinary = turn.to;
+    } else {
+      moving = e.walking!;
+      if (e.seated) { turn = null; plan.push({ at: e.at, turn }); continue; }
+      if (e.toward === undefined) continue;
+      const owned = standingFacingAt(standing, e.at, attained);
+      const pending = turn && Math.abs(Math.atan2(Math.sin(attained - turn.to), Math.cos(attained - turn.to))) > 1e-9;
+      if (owned !== null || pending) {
+        // A matching native target already turning before the first step retains that original phase.
+        if (!turn || !pending || owned !== null && Math.abs(Math.atan2(Math.sin(owned - attained), Math.cos(owned - attained))) > 1e-9
+          || Math.abs(Math.atan2(Math.sin(e.toward - turn.to), Math.cos(e.toward - turn.to))) > 1e-9)
+          turn = { at: e.at, from: owned ?? attained, to: e.toward };
+      } else turn = null;
+      ordinary = e.toward;
+    }
+    plan.push({ at: e.at, turn });
+  }
+  return t => {
+    let last: Turn | null = null;
+    for (const e of plan) { if (e.at > t) break; last = e.turn; }
+    return last ? turnFrom(last, last.from, t) : null;
+  };
+}
+
 /** How long a let-go hand hold stays in the take after it ends, µs: the old renderer lowers both arms over it
  *  (mars/viewer/engine/social/hand-hold.ts RELEASE_SECONDS, HAND_STATE_TAIL). */
 const HOLD_TAIL = 2_600_000;
@@ -218,6 +264,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
   for (const b of bodies) {
     if (!b.samples.length || b.samples[0].at > endUs || (b.until !== undefined && fromTick * TICK_US >= b.until)) continue;
     const track: number[][] = [];
+    const handoffAt = facingHandoffs(b.samples, b.heading, b.turns, b.standing);
     let baseActivity: string | null | undefined;
     let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
     let pressKey: string | undefined, pointKey: string | undefined;
@@ -236,7 +283,9 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       const op = other ? positionAt(other.samples, t) : null;
       const aim: [number, number] | null = op && !g?.hold ? [op[0], op[2]] : g?.toward && !seatAt(b.samples, t) ? g.toward : null;
       const ordinary = aim && Math.hypot(aim[0] - p[0], aim[1] - p[2]) > 1 ? Math.atan2(aim[1] - p[2], aim[0] - p[0]) : heading;
-      const standing = !seatAt(b.samples, t) && carryHeading(b.entity, t) === null ? standingFacingAt(b.standing, t, ordinary, !walking) : null;
+      const handoff = aim ? null : handoffAt(t);
+      const standing = !seatAt(b.samples, t) && carryHeading(b.entity, t) === null
+        ? standingFacingAt(b.standing, t, handoff ?? ordinary, !walking) ?? handoff : null;
       const drawn = standing ?? ordinary;
       // Dancers on one beat move in step: each names the first of them (by entity) its partner, whose phase the old
       // renderer shares between partners; that first one names none.

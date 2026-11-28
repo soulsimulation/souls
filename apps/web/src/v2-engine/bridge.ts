@@ -2,7 +2,7 @@
 // (v2/web/src/source/worker.ts: the stream's pointer and parts, played on the replica's WASM in a worker), keeps the
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
-import { activityAt, chunkEnd, chunkOf, motionAt, positionAt, standingFacingAt, TICK_US, type Body, type Frame, type RecordedChunk, type StandingFacing, type Thing, type Turn, type WorldSample } from './takes.ts';
+import { activityAt, chunkEnd, chunkOf, motionAt, positionAt, standingFacingAt, facingHandoffs, TICK_US, type Body, type Frame, type RecordedChunk, type StandingFacing, type Thing, type Turn, type WorldSample } from './takes.ts';
 import { bodySlotsOf, defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, endGesture, endReading, gestureFrom, readingFrom, type Gesture } from './take-gestures.ts';
@@ -478,7 +478,8 @@ export class V2Bridge {
     }
     const last = t.standing?.at(-1);
     if ((!last && heading === null) || last && (at < last.at || last.heading === heading)) return;
-    const ordinary = motionAt(t.samples, at, heading ?? 0, t.turns).heading;
+    const ordinary = facingHandoffs(t.samples, heading ?? 0, t.turns, t.standing)(at)
+      ?? motionAt(t.samples, at, heading ?? 0, t.turns).heading;
     const from = standingFacingAt(t.standing, at, ordinary) ?? ordinary;
     const record = { at, heading, from };
     if (last?.at === at) t.standing![t.standing!.length - 1] = record;
