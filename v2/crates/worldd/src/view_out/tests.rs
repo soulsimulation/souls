@@ -5320,11 +5320,60 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
         std::collections::BTreeMap::new(),
         std::collections::BTreeMap::new(),
     );
+    // Soul 0 now and then flies to a spot of the zone and lands a second later: the cuts it spans are whole.
+    let destination = Pose {
+        frame: Frame {
+            node: h.zone,
+            slot: None,
+        },
+        position: Vec3::new(5, 0, 5),
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: h.zone,
+            height: 0,
+        },
+    };
+    let mut flight: Option<(Id, u64)> = None;
     let mut seq = 0u64;
     for record in 0..400u64 {
         let mut effects = Vec::new();
+        if let Some((transfer, due)) = flight
+            && record == due
+        {
+            effects.push(w3e_effect(
+                seq,
+                h.zone,
+                everyone,
+                Body::Transfer(replica::effects::TransferRec::Arrive {
+                    transfer,
+                    carried: Vec::new(),
+                }),
+            ));
+            seq += 1;
+            flight = None;
+        } else if flight.is_none() && live[0] && record % 37 == 36 {
+            let transfer = id(0xd0, seq);
+            let node = id(0xa0, 0);
+            effects.push(w3e_effect(
+                seq,
+                node,
+                everyone,
+                Body::Transfer(replica::effects::TransferRec::Leave {
+                    transfer,
+                    node,
+                    lineage: h.lineage,
+                    zone: h.zone,
+                    pose: destination,
+                }),
+            ));
+            seq += 1;
+            flight = Some((transfer, record + 20));
+        }
         for _ in 0..1 + next(4) {
-            let s = next(souls);
+            let mut s = next(souls);
+            if s == 0 && flight.is_some() {
+                s = 1;
+            }
             let node = id(0xa0, s);
             if !live[s as usize] {
                 // A Soul made, public or (one in five) private, with words on it.
@@ -5356,7 +5405,7 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                         // A link between two public Souls.
                         let t = next(souls);
                         let to = id(0xa0, t);
-                        if t != s && live[t as usize] && s % 5 != 4 && t % 5 != 4 {
+                        if t != s && live[t as usize] && s % 5 != 4 && t % 5 != 4 && s != 0 && t != 0 {
                             let link = id(0xb0, seq);
                             links.insert(link, node);
                             effects.push(change(
@@ -5379,7 +5428,7 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                         Some((link, owner)) => effects.push(change(seq, owner, everyone, Change::Unlink { link })),
                         None => effects.push(change(seq, node, audience, set(node, 1, Value::Uint(2)))),
                     },
-                    17..=18 => {
+                    17..=18 if s != 0 => {
                         let timer = id(0xc0, seq);
                         timers.insert(timer, node);
                         effects.push(w3e_effect(
@@ -5393,6 +5442,7 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                             }]),
                         ));
                     }
+                    17..=18 => effects.push(change(seq, node, audience, set(node, 1, Value::Uint(4)))),
                     _ => match timers.pop_first() {
                         Some((timer, owner)) => effects.push(w3e_effect(
                             seq,
