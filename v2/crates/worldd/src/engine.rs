@@ -1847,8 +1847,8 @@ impl Engine {
             return Err(refusal(
                 "raise.under-way",
                 format!(
-                    "{} holds its part standing, not seated (the ground's map stayed busy); next: part raise {} to seat \
-                     it, or part lower {} to lay it down, then leave",
+                    "{} holds its part standing, not seated (the ground's map stayed busy); next: part raise {} to set it in \
+                     its slot, or part lower {} to lay it down, then leave",
                     show(activity),
                     show(activity),
                     show(activity)
