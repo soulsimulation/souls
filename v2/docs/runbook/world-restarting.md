@@ -85,7 +85,10 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   synced (a part that starts a new generation, one in 240, writes its pointer after the generation's baseline,
   a few more; a part whose words had a removal applied while it was cut writes them, then the pointer, on their own:
   three). A part whose write is refused stops the stream (`stream-write`, `"state":"stopped"`); a restart recovers it
-  from the disk.
+  from the disk, and removes the temporary files a write killed midway left. One wait is still the disk's time: at
+  1,000 agents on a disk shared with heavy build writes (27 Nov 2026, about 2.5 GB a minute) it took about 0.2 s a
+  part and the stream fell up to five minutes behind at the start of the load; on a disk the builds did not write
+  to it kept within 1.3 s (p99), bound by the stream thread's processor time, not the disk.
   `STREAM_PROFILE=1` prints each stage's time, bytes, syncs and waits every 10 s to the journal.
   Before this (November 2026) every waiting record was held in memory: at 1,000 agents on a busy disk that was
   about 2 GB an hour.
