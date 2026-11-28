@@ -114,7 +114,7 @@ use replica::encode::{Name, Value};
 use replica::host::{Progress, Skill};
 use replica::ids::{Id, Minter};
 use replica::moves::Move;
-use replica::pose::Vec3;
+use replica::pose::{Frame, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::who_may::{self, Answer, Who};
@@ -1492,6 +1492,27 @@ impl Forms {
             Actor::Soul(s) => s,
             _ => body,
         };
+        // A take of a thing in another body's hand is refused before any step, naming the holder (#5275): nothing
+        // walks or reaches for it. Its effect asks again at contact (`amounts`), as every take into a hand does.
+        for e in &effects {
+            if let form_runner::Effect::Take { what } = e {
+                let thing = match what {
+                    form_runner::Of::This => node,
+                    form_runner::Of::Node(id) => *id,
+                };
+                let at = w
+                    .tree
+                    .handle(thing)
+                    .and_then(|h| w.tree.node(h))
+                    .and_then(|n| {
+                        Some(Frame {
+                            node: n.parent()?,
+                            slot: n.slot(),
+                        })
+                    });
+                hands::not_held_by_another(w.controller, at, body, thing)?;
+            }
+        }
         let rises_first = (in_its_slot && !stays) || rises_elsewhere;
         let mut unlinked: Vec<&Name> = Vec::new();
         for e in effects.iter().filter(|_| rises_first) {
@@ -1913,6 +1934,7 @@ impl Forms {
                     _ => fr.body,
                 },
                 hands: &hands,
+                controller,
                 node: fr.node,
                 reserved: &reserved,
                 now: at,
