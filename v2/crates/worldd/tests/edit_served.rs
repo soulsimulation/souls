@@ -3124,15 +3124,6 @@ fn a2_parts_rest_at_the_grounds_height() {
             "{what}: frame A at {:?}, its ends {p:?} {q:?}",
             where_is(&w, fa).2
         );
-        for (k, s) in w.souls.iter().enumerate().filter(|_| what != "frame A in") {
-            let b = body_of(&w, *s);
-            println!(
-                "{what}: Soul {} body {} at {:?}",
-                k + 1,
-                replica::world_model::show(b),
-                body_at(&w, b)
-            );
-        }
         both(hands, ab, p, q, what);
         let c = crew(hands, ab);
         let got = hands[ab.0].act("part:take", c, part(fa));
