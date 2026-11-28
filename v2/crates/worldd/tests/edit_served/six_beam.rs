@@ -203,7 +203,8 @@ async fn six_souls_seat_one_rack_beam_each_at_its_own_grip() {
 
     // Six take it, carry it to 2.5 m west of the slot and step east to the bay's mouth: the front and the back in line
     // with the beam, [`BEAM_MOUTH`] west of the slot's line, the sides beside their grips either side of it.
-    let six: &mut [&mut GwSoul] = &mut [&mut *s5, &mut *s6, &mut *s7, &mut *s8, &mut *s9, &mut *s10];
+    let six: &mut [&mut GwSoul] =
+        &mut [&mut *s5, &mut *s6, &mut *s7, &mut *s8, &mut *s9, &mut *s10];
     walk_all(&s, six, &places(at, &l, 6, l.places()[1]), "six gather").await;
     let c = crew_all(&s, six).await;
     let got = six[0].act("part:take", c, part_of(beam)).await;

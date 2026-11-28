@@ -595,19 +595,30 @@ fn deck_five_joists_seated_across_the_high_beams_from_where_their_put_is_admitte
         y.ok(0, "part:take", c, Yard::part(j), "a joist taken");
         // 0.6 m along the bay, off its slot's line.
         let off = if dz > 0 { -600 } else { 600 };
-        y.walk(&[(0, (-1_082, dz + off)), (5, (1_082, dz + off))], "carried along the bay");
+        y.walk(
+            &[(0, (-1_082, dz + off)), (5, (1_082, dz + off))],
+            "carried along the bay",
+        );
         let p = y.slot_in(slot, &high);
         let mut got = y.act(0, "part:put", c, p.clone(), "the joist put from 0.6 m off");
         for _ in 0..2 {
             if got.kind == 1 {
                 break;
             }
-            assert_eq!(got.reason, "part.grip-out-of-reach", "{slot}: refused only out of reach: {got:?}");
+            assert_eq!(
+                got.reason, "part.grip-out-of-reach",
+                "{slot}: refused only out of reach: {got:?}"
+            );
             let m = got
                 .detail
                 .split("admitted with the crew's node at x=")
                 .nth(1)
-                .unwrap_or_else(|| panic!("{slot}: the refusal names where it is admitted: {}", got.detail));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{slot}: the refusal names where it is admitted: {}",
+                        got.detail
+                    )
+                });
             let n: Vec<i64> = m
                 .split(|c: char| !(c.is_ascii_digit() || c == '-'))
                 .filter(|w| !w.is_empty())
@@ -617,7 +628,10 @@ fn deck_five_joists_seated_across_the_high_beams_from_where_their_put_is_admitte
             // The whole crew moved by the node's way there, each its own walk.
             let node = where_is(&y.w, c).2;
             let (dx, dz2) = (n[0] - node.x / 1000, n[1] - node.z / 1000);
-            let feet: Vec<Vec3> = [0, 5].iter().map(|k| body_at(&y.w, body_of(&y.w, y.w.souls[*k]))).collect();
+            let feet: Vec<Vec3> = [0, 5]
+                .iter()
+                .map(|k| body_at(&y.w, body_of(&y.w, y.w.souls[*k])))
+                .collect();
             let (bx, bz) = (y.x, y.z);
             let rel = |f: Vec3| ((f.x / 1000 - bx) + dx, (f.z / 1000 - bz) + dz2);
             let to = [(0, rel(feet[0])), (5, rel(feet[1]))];
@@ -626,7 +640,11 @@ fn deck_five_joists_seated_across_the_high_beams_from_where_their_put_is_admitte
         }
         assert_eq!(got.kind, 1, "{slot} seated: {got:?}");
         let (parent, at, _) = where_is(&y.w, j);
-        assert_eq!((parent, at), (Some(y.id("deck-bay")), Some(y.slots[slot])), "the joist in {slot}");
+        assert_eq!(
+            (parent, at),
+            (Some(y.id("deck-bay")), Some(y.slots[slot])),
+            "the joist in {slot}"
+        );
         let mut both = high.to_vec();
         both.sort();
         assert_eq!(y.joined(j), both, "{slot}: one joint to each 1.8 m beam");
