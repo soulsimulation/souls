@@ -573,3 +573,38 @@ test('#4159: a binding naming the stream CDN gives the routed page v2StreamOrigi
     assert.equal(named.v2Fields({ slug: 'other' }), null, 'another world is never given it');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test('bound body assets preserve admitted URLs, exact bytes and the world/upload fences', t => {
+  const dir=mkdtempSync(new URL('bound-body-',scratch)), routesFile=join(dir,'routes.json'), bodiesDir=join(dir,'bodies');
+  t.after(()=>rmSync(dir,{recursive:true,force:true})); mkdirSync(join(bodiesDir,'models'),{recursive:true});
+  const route=canonical=>writeFileSync(routesFile,JSON.stringify({schema:'souls/world-routes/1',worlds:{lab:{canonical,stream:'/s/lab/'}}})); route(true);
+  const bytes=Buffer.from('exact previously admitted model bytes'), hash=createHash('sha256').update(bytes).digest('hex'), file=join(bodiesDir,'models',hash+'.glb');writeFileSync(file,bytes);
+  const fence=cutoverFence({binding:{oldWorldId:'lab-1',canonicalSlug:'lab',routesFile,clientDir:join(dir,'client'),bodiesDir}}), world={slug:'lab',worldId:'lab-1'};
+  const path=`/v1/edge/body/assets/body_${hash}.glb`;
+  const ask=(path,method='GET',w=world)=>{let result;const res={writeHead(status,headers){result={status,headers};return this;},end(body){result.body=body;return this;},setHeader(){}};
+    return fence.handle({method},res,w,new URL('http://x/w/lab'+path))?result:null;};
+  const got=ask(path);assert.equal(got.status,200);assert.deepEqual(got.body,bytes);assert.equal(got.headers['content-type'],'model/gltf-binary');
+  const head=ask(path,'HEAD');assert.equal(head.status,200);assert.equal(head.body,undefined);assert.equal(head.headers['content-length'],bytes.length);
+  assert.equal(ask(path,'GET',{slug:'other',worldId:'other-1'}),null);
+  route(false);assert.equal(ask(path),null);route(true);
+  assert.equal(ask(path,'POST').status,409,'existing new-engine mutation fence stays authoritative');
+  for(const [p,m] of [[path+'?x=1','GET'],[path.replace(hash,'f'.repeat(64)),'GET'],[path.replace(hash,'INVALID'),'GET'],['/v1/edge/body/assets/../secret.glb','GET']])assert.equal(ask(p,m),null);
+  writeFileSync(file,'damaged');assert.equal(ask(path).status,503,'present corrupted bytes cannot fall back to a different model');
+  rmSync(file);assert.equal(ask(path),null,'missing package model preserves ordinary upload handling');
+});
+
+
+test('canonical appearance is immutable, active-world/stream/hash fenced and read-only',t=>{
+ const dir=mkdtempSync(new URL('appearance-',scratch)),routesFile=join(dir,'routes.json'),file=join(dir,'appearance.json');t.after(()=>rmSync(dir,{recursive:true,force:true}));
+ const route=(canonical,stream='/s/lab/')=>writeFileSync(routesFile,JSON.stringify({schema:'souls/world-routes/1',worlds:{lab:{canonical,stream}}}));route(true);
+ const bytes=Buffer.from('{"public":"appearance"}'),hash=createHash('sha256').update(bytes).digest('hex');writeFileSync(file,bytes);
+ const fence=cutoverFence({binding:{oldWorldId:'lab-1',canonicalSlug:'lab',routesFile,clientDir:join(dir,'client'),appearance:{file,sha256:hash,world:'lab',stream:'/s/lab/'}}}),w={slug:'lab',worldId:'lab-1'},path=`/v2/appearance/${hash}.json`;
+ const ask=(p=path,method='GET',world=w)=>{let result;const res={writeHead(status,headers){result={status,headers};return this;},end(body){result.body=body;return this;},setHeader(){}};return fence.handle({method},res,world,new URL('http://x/w/lab'+p))?result:null;};
+ assert.deepEqual(fence.v2Fields(w).v2Appearance,{url:'/w/lab'+path,sha256:hash,world:'lab',stream:'/s/lab/'});
+ assert.deepEqual(ask().body,bytes);assert.equal(ask(''+path,'HEAD').body,undefined);assert.equal(ask().status,200);assert.equal(ask(path,'POST').status,409);
+ assert.equal(ask(path,'GET',{slug:'other',worldId:'other-1'}),null);route(false);assert.equal(ask(),null);route(true);
+ assert.equal(ask(path+'?x=1').status,404);assert.equal(ask(path.replace(hash,'f'.repeat(64))).status,404);
+ route(true,'/s/changed/');assert.equal(fence.v2Fields(w).v2Appearance,undefined);assert.equal(ask().status,404);route(true);
+ writeFileSync(file,'corrupt');assert.equal(ask().status,503);rmSync(file);assert.equal(ask().status,503);
+});

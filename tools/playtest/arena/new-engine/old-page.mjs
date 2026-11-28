@@ -40,6 +40,7 @@ import { REPO_ROOT } from '../../../lib/paths.mjs';
 import { sleep } from '../../lib/clock.mjs';
 import { WORLD, freePorts, startWorld, stopWorld, runOwnedCommand } from './world.mjs';
 import { REPLICA_PKG } from './seat.mjs';
+import { publishCanonicalAppearance } from '../../../world-launcher/canonical-appearance.mjs';
 
 export const FRONT_FILE = join(REPO_ROOT, 'v2/tools/ops/proxy/soul-game.caddy');
 export const MARS_WEB = join(REPO_ROOT, 'mars/viewer/dist/client');
@@ -215,6 +216,20 @@ export function oldPageBodyArgs(bodies) {
   return { world: { bodies: join(directory,'bodies.json') }, launcher: ['--bodies',directory] };
 }
 
+/** Attach only this ordinary boot's immutable public appearance, after the normal switch wrote its binding. */
+export function canonicalAppearanceNamed(text, appearance) {
+  const match=/"v2Appearance"\s*:\s*(\{[^}]*\})/.exec(text);if(!match)return false;
+  try { const d=JSON.parse(match[1]);return d.world===appearance.world&&d.stream===appearance.stream&&d.sha256===appearance.sha256&&d.url===`/w/${appearance.world}/v2/appearance/${appearance.sha256}.json`; }catch{return false;}
+}
+export function bindCanonicalAppearance(bindingFile, slug, appearance) {
+  const binding=JSON.parse(readFileSync(bindingFile,'utf8'));
+  const rows=Array.isArray(binding.worlds)?binding.worlds:[binding];
+  const matches=rows.filter(row=>row.canonicalSlug===slug);
+  if(matches.length!==1||appearance.world!==slug)throw Error('old-page.appearance-binding');
+  matches[0].appearance=appearance;
+  writeFileSync(bindingFile+'.tmp',JSON.stringify(binding));renameSync(bindingFile+'.tmp',bindingFile);
+}
+
 export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], facts = null, dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, bodies = null, log = () => {}, checkout = REPO_ROOT, bin = null, port: requestedPort = null, signal, onSpawn, onCommand, timeoutMs = 180000, caddy = process.env.CADDY ?? 'caddy', pinnedArtifacts = false } = {}) {
   dir = resolve(dir);
   const bodyArgs=oldPageBodyArgs(bodies);
@@ -275,13 +290,15 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
     await command('build-client', process.execPath, [join(checkout, 'v2/client/served/build.mjs'), '--out', client, '--version', '0.0.0', '--pkg', pkg], { cwd: checkout, stdio: 'ignore' });
     const sw = JSON.parse(await command('switch-native-page', process.execPath, [join(checkout, 'tools/world-launcher/v2-switch.mjs'), '--binding', binding, '--slug', slug, '--stream', routes.worlds[slug].stream,
       '--routes', routesFile, '--client', client, '--static', join(dir, 'static'), '--no-unit', '--port', String(launcher), ...bodyArgs.launcher], { cwd: checkout, encoding: 'utf8' }));
+    const appearance=await publishCanonicalAppearance({world:slug,stream:routes.worlds[slug].stream,directory:world.dir,factsFile:world.facts,pkg,out:join(dir,'canonical-appearance')});
+    bindCanonicalAppearance(binding,slug,appearance);
     if (!sw.page?.v2Stream) throw new Error(`the switch did not take: ${JSON.stringify(sw).slice(0, 300)}`);
     const page = `${base}/w/${slug}/`;
     // the page's inline config names the stream once the launcher has the binding (within a second)
     let routed = false;
-    const names = async (u) => /"v2Stream"/.test(await fetch(u, { signal: AbortSignal.any([signal, AbortSignal.timeout(remaining())].filter(Boolean)), headers: { accept: 'text/html' } }).then((r) => r.text(), () => ''));
+    const names = async (u) => canonicalAppearanceNamed(await fetch(u, { signal: AbortSignal.any([signal, AbortSignal.timeout(remaining())].filter(Boolean)), headers: { accept: 'text/html' } }).then((r) => r.text(), () => ''),appearance);
     for (let i = 0; i < 100 && !(routed = (await names(page)) || (await names(`${page}v1/config`))); i++) await sleep(200);
-    if (!routed) throw new Error(`the page at /w/${slug}/ does not name the stream: ${await fetch(`${page}v1/config`, { signal: AbortSignal.any([signal, AbortSignal.timeout(remaining())].filter(Boolean)) }).then((r) => r.text(), (e) => e.message).then((t) => t.slice(0, 200))}`);
+    if (!routed) throw new Error(`the page at /w/${slug}/ does not name the stream's canonical appearance: ${await fetch(`${page}v1/config`, { signal: AbortSignal.any([signal, AbortSignal.timeout(remaining())].filter(Boolean)) }).then((r) => r.text(), (e) => e.message).then((t) => t.slice(0, 200))}`);
     return { page, slug, base, world, stop };
   } catch (e) { await stop(); throw e; }
 }

@@ -256,6 +256,7 @@ function fenceOf(binding) {
 function oneFence(binding) {
   if (!binding || typeof binding.oldWorldId !== 'string' || !binding.oldWorldId.length || binding.oldWorldId.length > 256 || /[\x00-\x1f\x7f]/.test(binding.oldWorldId) || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(binding.canonicalSlug)
       || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '') || (binding.staticDir !== undefined && !isAbsolute(binding.staticDir)) || (binding.v2Bodies !== undefined && !sameOriginDir(binding.v2Bodies)) || (binding.bodiesDir !== undefined && !isAbsolute(binding.bodiesDir))
+      || (binding.appearance !== undefined && (!isAbsolute(binding.appearance.file ?? '') || !/^[a-f0-9]{64}$/.test(binding.appearance.sha256 ?? '') || binding.appearance.world !== binding.canonicalSlug || !publicStream(binding.appearance.stream)))
       || (binding.v2Gateway !== undefined && !samePath(binding.v2Gateway)) || (binding.v2Directory !== undefined && binding.v2Directory !== '/')
       || (binding.v2StreamOrigin !== undefined && !httpsOrigin(binding.v2StreamOrigin))) throw Error('cutover.binding-invalid');
   // v2Bodies: the same-origin directory serving the v2 body catalogue (bodies.json and its models), as the operator places it.
@@ -357,6 +358,7 @@ function oneFence(binding) {
       // v2StreamOrigin (#4159): the CDN in front of the stream, when the binding names one (docs/operations/cdn.md)
       return { ...(v2Bodies ? { v2Bodies } : {}), ...(binding.v2StreamOrigin ? { v2StreamOrigin: binding.v2StreamOrigin } : {}), v2World: canonicalSlug, v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
         v2Views: this.published(w),
+        ...(binding.appearance?.stream === this.v2Stream(w) ? {v2Appearance:{url:`/w/${canonicalSlug}/v2/appearance/${binding.appearance.sha256}.json`,sha256:binding.appearance.sha256,world:canonicalSlug,stream:binding.appearance.stream}} : {}),
         ...(version ? { v2Replica: `/w/${canonicalSlug}/v2/replica/${version}/replica.js` } : {}) };
     },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written
@@ -430,10 +432,12 @@ function oneFence(binding) {
       // V4 (0.133): Explore's place pictures are asked for by POST but change nothing: the old world renders its own
       // architecture, which a moved world keeps (its ground and buildings are the old twin's), so they pass through.
       const mutating = (!read && !(req.method === 'POST' && path === '/v1/world/context/views')) || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
+      const appearance = binding.appearance && path.startsWith('/v2/appearance/') ? binding.appearance : null;
       const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
+      const bodyAsset = bodiesDir && read && !url.search ? /^\/v1\/edge\/body\/assets\/body_([a-f0-9]{64})\.glb$/.exec(path)?.[1] ?? null : null;
       const capture = mutating ? null : /^\/v1\/scenes\/([a-f0-9]{64})$/.exec(path)?.[1] ?? null;
       const versioned = mutating ? null : /^\/v2\/replica\/([0-9a-f]{16})\/(replica\.js|replica_bg\.wasm)$/.exec(path);
-      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && capture === null && !versioned) return false;
+      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && bodyAsset === null && capture === null && !versioned && !appearance) return false;
       let on;
       try { on = active(); } catch {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -443,6 +447,29 @@ function oneFence(binding) {
       if (!on) {
         if (read && path === '/v1/config') res.setHeader('x-souls-engine', 'old');
         return false;
+      }
+      if (appearance && read) {
+        if (appearance.stream !== this.v2Stream(w) || path !== `/v2/appearance/${appearance.sha256}.json` || url.search) {
+          res.writeHead(404, {'content-type':'application/json','cache-control':'no-store'}).end(req.method==='HEAD'?undefined:JSON.stringify({ok:false,code:'not-found'})); return true;
+        }
+        let bytes; try { bytes=readBounded(appearance.file,8*1024*1024); } catch { /* Invalid bound bytes fail closed. */ }
+        if (!bytes || createHash('sha256').update(bytes).digest('hex') !== appearance.sha256) {
+          res.writeHead(503, {'content-type':'application/json','cache-control':'no-store'}).end(req.method==='HEAD'?undefined:JSON.stringify({ok:false,code:'cutover.appearance-invalid'})); return true;
+        }
+        res.writeHead(200, {'content-type':'application/json','content-length':bytes.length,'cache-control':'no-cache'}).end(req.method==='HEAD'?undefined:bytes); return true;
+      }
+      if (bodyAsset !== null) {
+        // The catalogue's legacy look uses the admitted upload URL. Its bound package contains the SAME bytes.
+        // Unknown hashes still belong to the old upload handler; a present but damaged package is never substituted.
+        let bytes;
+        try { bytes = readBounded(join(bodiesDir, 'models', `${bodyAsset}.glb`), 64 * 1024 * 1024); }
+        catch (error) { if (error.code === 'ENOENT') return false; }
+        if (!bytes || createHash('sha256').update(bytes).digest('hex') !== bodyAsset) {
+          res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'cutover.body-asset-invalid' }));
+          return true;
+        }
+        res.writeHead(200, { 'content-type': 'model/gltf-binary', 'content-length': bytes.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : bytes);
+        return true;
       }
       if (body !== null) {
         // B3-1: the routed page's body catalogue, from the binding's bodiesDir; a name outside the catalogue's is not here
