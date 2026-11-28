@@ -3123,10 +3123,10 @@ fn a2_parts_rest_at_the_grounds_height() {
     // A crew of Souls `ab` takes frame A from where it lies, puts it in upright_a, and Soul `ab.0` retires (it leaves
     // the world): Soul `ab.1` keeps the hold alone (a seated frame's holder may not just let go).
     let seat = |hands: &mut [Hand], ab: (usize, usize), fa: Id, what: &str| {
-        // A frame standing loose is taken from beside its edges; one left standing in its slot from where its holders
-        // stand, behind its posts outside the bay (`grips::stance`: its posts 571.5 mm either side of its middle, 0.35 m
-        // off its 38 mm back face): its edges' places are in the bay its seated parts cut.
-        let (p, q) = if where_is(&w, fa).0 == Some(bay) {
+        // A frame on its yard stand is taken from beside its edges; one left standing on the ground at its slot, or in
+        // it, from where its holders stood, behind its posts (`grips::stance`: its posts 571.5 mm either side of its
+        // middle, 0.35 m off its 38 mm back face): the world keeps a walker off its edges' places there.
+        let (p, q) = if [Some(bay), Some(g)].contains(&where_is(&w, fa).0) {
             let (copy, _) = served_copy(&w);
             let t = copy.tree();
             let x = sim::ground::scene::xform_to(t, t.handle(fa).unwrap(), t.handle(g).unwrap())
