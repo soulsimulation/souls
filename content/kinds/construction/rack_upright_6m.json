@@ -3,6 +3,18 @@
  "kind": "mars:rack_upright_6m",
  "owner": "thing",
  "state": {
+  "symmetry": {
+   "n": 31,
+   "type": "enum",
+   "values": [
+    "none",
+    "front_back"
+   ],
+   "default": "front_back",
+   "audience": {
+    "rule": "everyone"
+   }
+  },
   "hold_crew": {
    "n": 28,
    "type": "int",

@@ -111,6 +111,25 @@ Every kind of thing states both. `motion.how` is one closed list, shared with En
 `pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
 by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
 moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+A part the same turned a half turn about its upright (a rack frame, its beam seats on both faces) says so with an enum
+field `state.symmetry` whose default is `front_back` (else `none`). A put into a slot, and a raise into one, then seat
+it turned as the slot or a half turn from it, whichever is nearer to how it is held; a raise into a slot admits either
+turn within 15 degrees.
+
+Raised and lowered (#5067, `sim::activity::carry::raise`): a part whose entry names a point `foot` at its origin (role
+`contact`) and whose height is its longest side is tilted up about that foot by a crew of two, from lying to standing,
+and laid down again (`part:raise`, `part:lower`); `state.raise_crew`'s default is how many it takes (two when it says
+none). The Soul who asks is the lifter and stands beside the part's top end; the other, the footer, stands beside its base
+on the other side, each 0.42 m beyond a post. The world walks the lifter beside the part at 0.4 m/s and the part turns
+as far as the lifter has come, at most 0.9 degrees a tick: the foot never moves on the plan. Raised, the part stands on
+its foot with its crew holding it; a crew too small, a carrier more than 0.7 m from its hold, a part not lying (or not
+standing) and a lifter with no ground to walk on are refused by name (`raise.crew-too-small`, `part.grip-out-of-reach`,
+`raise.not-lying`, `raise.not-standing`, `raise.way-blocked`). The stream: the take's commit (the crew's node set at the
+foot, the part in its slot); `souls:carry-track` `souls:raise` or `souls:lower`; `souls:carry-grips` in that phase; one
+motion sample of the crew's node a tick, its position the foot, its turn about the base line; then `souls:raised`, the
+part's leave to the ground standing with the crew's node under it and `souls:carry-grips` `souls:held`, or
+`souls:lowered`, the part's leave to the ground lying and `souls:carry-grips` `souls:released`.
+
 Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
 width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
 hold it (each stands 0.35 m beyond its grip), and `state.carry_crew`'s default is how many must carry it (else
@@ -130,13 +149,21 @@ between to the side carriers in join order from the back. It is kept on the carr
 audience each time it changes (`souls:carry-grips`): `{1: carry, 2: load, 3: phase, 4: since µs, 5?: until µs, 6:
 [{1: body, 2: point:<grip>, 3: grip [x, y, z], 4: [hand, hand]}, ...]}`, points in µm in the load's own (entry) frame,
 the two hands 0.1 m either side of where the carrier holds along the load's length, from the carry's back toward its
-front. The phases are `souls:carry` (lifted or taken), `souls:set-in` and `souls:return` (a seating's track, until it
-ends), `souls:held` (seated, its crew still holding it: a frame in its bay) and `souls:released` (set down, seated or
-broken off; the last holds kept). A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it
-is held (a frame taken standing) is held by its front and its back at its edge on the line they stand on (a rack
-frame's posts, a timber bent's), its lower hand at the carry's height and its upper 0.3 m above: for the 2.4 m rack
-frame `[±609.5, 0, 0]` and `[±609.5, 300, 0]` mm in its own frame, which carried (its foot 1.05 m up) is 1.05 m and
-1.35 m above the ground. A load is carried 1.05 m above its carriers' feet; an end carrier stands 0.35 m beyond its end grip,
+front. The phases are `souls:lift` (a take's track, the part on its way into its carriers' hands), `souls:carry`
+(lifted, or a take once `souls:lifted`), `souls:return` (a refused seating's way back, until it ends), `souls:raise` and
+`souls:lower` (a raise's track), `souls:held` (seated or raised, its crew still holding it: a frame in its bay) and
+`souls:released` (set down, seated or broken off; the last holds kept). A put keeps `souls:carry` on its set-in's track,
+said as a track of its own: `souls:carry-track` `souls:fit` with its start and end, then `souls:fitted` with the same
+times at the commit (`souls:set-in` is no longer said for a put). The set-in moves the crew's node a motion sample a tick
+to the pose that seats the part exactly, its turn blended, at 0.4 m/s and at least 0.6 s; an unseat's way out goes at the
+same pace. A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it
+is held (a frame taken standing) is lifted 0.15 m, not carried at the 1.05 m of a load held by its middle, and is held by
+its front and its back at its edge on the line they stand on (a rack frame's posts, a timber bent's), its hands 0.9 m
+and 1.2 m up it: for the 2.4 m rack frame `[±609.5, 900, 0]` and `[±609.5, 1200, 0]` mm in its own frame, 1.05 m and
+1.35 m above the ground. Held standing once seated or raised (`souls:held`, two holders for a rack frame:
+`hold_crew` 2), each holder holds its own post from the frame's outer side (away from its bay's other upright, else its
+back), both hands on the post's outward face: `[±571.5, 1050, ±38]` and `[±571.5, 1350, ±38]` mm; the world walks each
+round its post to stand 0.35 m off that face, out of the space between the frames, facing it. A load is carried 1.05 m above its carriers' feet; an end carrier stands 0.35 m beyond its end grip,
 or as near as 0.25 m for a load too low to block a walker where it is set down (a rack beam: its hands 0.15 m and
 0.35 m ahead of it). Every carrier must be within reach of its
 own hold, measured from its feet to the middle of its two hands as they are said: at most 0.7 m on the plan, and its

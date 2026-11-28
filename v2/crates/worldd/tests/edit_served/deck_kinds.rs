@@ -10,6 +10,8 @@ use super::*;
 const J1_Z: i64 = -1_172;
 const J2_Z: i64 = -572;
 const J4_Z: i64 = 578;
+const J3_Z: i64 = -2;
+const J5_Z: i64 = 1_178;
 const S1_Z: i64 = -612;
 
 /// N2's test world with a deck bay's parts at its site (`content/kinds/construction/`): the bay at the site's centre,
@@ -83,6 +85,8 @@ fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
         ("two-by-four", 3, [x, 0, z + J4_Z, 0]),
         ("two-by-four-1", 3, [x, 0, z + J1_Z, 0]),
         ("two-by-four-2", 3, [x, 0, z + J2_Z, 0]),
+        ("two-by-four-3", 3, [x, 0, z + J3_Z, 0]),
+        ("two-by-four-5", 3, [x, 0, z + J5_Z, 0]),
         ("plywood-sheet", 4, [x + 5_000, 0, z, 0]),
         ("plywood-sheet-2", 4, [x, 0, z + S1_Z, 0]),
     ];
@@ -566,4 +570,85 @@ fn deck_a_crew_seats_a_plywood_sheet_on_two_joists_and_a_joist_under_it_stays() 
         Some(pair),
         "the sheet rides its crew"
     );
+}
+
+/// #5067 (the joists' puts, page lane's rehearsal): the bay's frame stands on its beams ([`Yard::frame`]); then each of
+/// its five joists is taken by a crew of two at its ends, carried 0.6 m along the bay, and put into its slot from
+/// there. A put the crew cannot reach from where it stands is refused `part.grip-out-of-reach`, naming the place its
+/// node is admitted from (`admitted with the crew's node at x= z= mm`, that 50 mm inside every reach); the crew walks
+/// there by that place alone (no point of the test's own) and puts it again: seated across both 1.8 m beams.
+#[test]
+fn deck_five_joists_seated_across_the_high_beams_from_where_their_put_is_admitted() {
+    let mut y = Yard::serve("deckjoists", 6);
+    y.frame();
+    let high = [y.id("deck-beam-high-l"), y.id("deck-beam-high-r")];
+    for (name, slot, dz) in [
+        ("two-by-four-1", "j1", J1_Z),
+        ("two-by-four-2", "j2", J2_Z),
+        ("two-by-four-3", "j3", J3_Z),
+        ("two-by-four", "j4", J4_Z),
+        ("two-by-four-5", "j5", J5_Z),
+    ] {
+        y.walk(&[(0, (-1_082, dz)), (5, (1_082, dz))], "at a joist's ends");
+        let c = y.crew(0, &[5]);
+        let j = y.id(name);
+        y.ok(0, "part:take", c, Yard::part(j), "a joist taken");
+        // 0.6 m along the bay, off its slot's line.
+        let off = if dz > 0 { -600 } else { 600 };
+        y.walk(
+            &[(0, (-1_082, dz + off)), (5, (1_082, dz + off))],
+            "carried along the bay",
+        );
+        let p = y.slot_in(slot, &high);
+        let mut got = y.act(0, "part:put", c, p.clone(), "the joist put from 0.6 m off");
+        for _ in 0..2 {
+            if got.kind == 1 {
+                break;
+            }
+            assert_eq!(
+                got.reason, "part.grip-out-of-reach",
+                "{slot}: refused only out of reach: {got:?}"
+            );
+            let m = got
+                .detail
+                .split("admitted with the crew's node at x=")
+                .nth(1)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{slot}: the refusal names where it is admitted: {}",
+                        got.detail
+                    )
+                });
+            let n: Vec<i64> = m
+                .split(|c: char| !(c.is_ascii_digit() || c == '-'))
+                .filter(|w| !w.is_empty())
+                .take(2)
+                .map(|w| w.parse().unwrap())
+                .collect();
+            // The whole crew moved by the node's way there, each its own walk.
+            let node = where_is(&y.w, c).2;
+            let (dx, dz2) = (n[0] - node.x / 1000, n[1] - node.z / 1000);
+            let feet: Vec<Vec3> = [0, 5]
+                .iter()
+                .map(|k| body_at(&y.w, body_of(&y.w, y.w.souls[*k])))
+                .collect();
+            let (bx, bz) = (y.x, y.z);
+            let rel = |f: Vec3| ((f.x / 1000 - bx) + dx, (f.z / 1000 - bz) + dz2);
+            let to = [(0, rel(feet[0])), (5, rel(feet[1]))];
+            y.walk(&to, "to where the put is admitted");
+            got = y.act(0, "part:put", c, p.clone(), "the joist put again");
+        }
+        assert_eq!(got.kind, 1, "{slot} seated: {got:?}");
+        let (parent, at, _) = where_is(&y.w, j);
+        assert_eq!(
+            (parent, at),
+            (Some(y.id("deck-bay")), Some(y.slots[slot])),
+            "the joist in {slot}"
+        );
+        let mut both = high.to_vec();
+        both.sort();
+        assert_eq!(y.joined(j), both, "{slot}: one joint to each 1.8 m beam");
+        y.leave(0, c);
+        y.leave(5, c);
+    }
 }

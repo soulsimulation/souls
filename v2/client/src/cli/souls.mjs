@@ -151,7 +151,7 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount, soulProfile } from '../account/account.mjs';
 import { feedDue, mention } from '../home/news.mjs';
 import { clientUpdate } from '../upgrade/served.mjs';
-import { goTime, nextStep } from '../carry/carry.mjs';
+import { goTime, nextStep, putFromAdmitted } from '../carry/carry.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = [
@@ -427,14 +427,21 @@ export function requestOf(argv) {
   if (op === 'carry' || op === 'part') {
     // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
     const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
-    const on = flag('--on'), from = flag('--from'), out = flag('--out'), go = flag('--go');
+    const on = flag('--on'), from = flag('--from'), out = flag('--out'), go = flag('--go'), joins = flag('--joins');
     if (go !== undefined && !Number.isFinite(goTime(go))) return { refused: 'carry-go', detail: '--go <hh:mm:ss UTC | ISO time | Unix ms>: the moment every carrier sets off' };
     const [does, a, b, c] = words;
     Object.assign(req, { op: 'carry', do: does });
-    if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
+    // #5067: part raise <crew> <part> [<bay> <slot>]; part lower <crew> [<part>] [toward x,z]; part put ... --joins a,b
+    if (op === 'part') {
+      const more = words.slice(4).filter((w) => w !== 'toward');
+      Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c, ...(joins !== undefined ? { joins } : {}) }
+        : does === 'raise' ? { part: b, ...(c !== undefined ? { into: c, slot: words[4] } : {}) }
+        : does === 'lower' ? { part: b === 'toward' ? undefined : b, toward: c === 'toward' ? more[0] : c } : { part: b }) });
+    }
     else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
     else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}), ...(out !== undefined ? { out } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });
+    else if (does === 'turn') Object.assign(req, { crew: a, deg: b });
     // A place named in words (`carry to <crew> the loading spot`) is one name, with no slot.
     else if (does === 'to' && (b === 'the' || words.length > 4)) Object.assign(req, { crew: a, where: words.slice(2).join(' '), ...(go !== undefined ? { go: goTime(go) } : {}) });
     else if (does === 'to') Object.assign(req, { crew: a, where: b, ...(c !== undefined ? { slot: c } : {}), ...(go !== undefined ? { go: goTime(go) } : {}) });
@@ -738,6 +745,7 @@ export const CARRY_HELP = [
   'carry lift <crew id> <load id>   lift a loose load together',
   'carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>]   walk so the load gets there (its middle, or a bay\'s slot); the front\'s walks the whole crew, each keeping its place, and turns it square into a slot. A carrier who sends its own walk keeps to it (--go sets it off at that UTC moment) and stays where it ends until the front walks again. A beam\'s slot, from its own side of the bay: the load stops lined up outside the bay, and part put sets it in',
   'carry to <crew id> the loading spot   the load goes into the spot\'s first free bay, square (the answer names it): the front\'s walks the whole crew; then one sends carry set-down',
+  'carry turn <crew id> <degrees>   turn the carried load about its middle (positive: from east toward north); every carrier walks round with it. carry to <crew id> <x,z> <degrees> names its heading there (0 east, 90 north)',
   'carry set-down <crew id>   put the lifted load down where it is',
   'part take <crew id> <part id>   take a loose part, or one standing in a stand',
   'part put <crew id> <bay id> <slot name|number>   seat it; part put <crew id> here | <x,z> lays it on the ground',
@@ -854,7 +862,9 @@ if (isMain(import.meta.url)) {
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
       if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
-      const answer = asked.wait ? await actEnd(ask, await ask(req, ms), { ms: actWaitMs(req) }) : await ask(req, ms);
+      let answer = asked.wait ? await actEnd(ask, await ask(req, ms), { ms: actWaitMs(req) }) : await ask(req, ms);
+      // #5067: a put refused out of reach that names where it would be admitted carries the crew there and asks again.
+      if (asked.wait && req.op === 'carry') answer = await putFromAdmitted(answer, req, async (r) => actEnd(ask, await ask(r, ms), { ms: actWaitMs(r) }));
       // 0.135 C: an offered crew is named once its node is in the copy, for the steps that follow.
       if (req.op === 'carry' && req.do === 'offer' && answer?.ok && answer.before) Object.assign(answer, await newCrew(ask, answer.before));
       if (req.op === 'carry') await nextOf(ask, req, answer);

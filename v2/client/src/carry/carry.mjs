@@ -28,6 +28,10 @@
 //   part take|unseat <crew id> <part id>   the crew takes a loose part, or one out of a bay or stand
 //   part put <crew id> <bay id> <slot name | number>   seats the crew's part in that slot
 //   part put <crew id> here | x,z     lays it on the open ground, under the crew or at that point
+//   part raise <crew id> <part id>    tilts a lying part up about its foot until it stands, held by the crew; the
+//                                     Soul who asks is the lifter (carry grip <part> top), the other the footer
+//                                     (carry grip <part> foot)
+//   part lower <crew id> [<part id> | x,z]   lays a standing part down again, toward its front or toward that point
 //
 // Points are metres in the world's frame (x east, z south). The asked Soul's `wait` shows the offer and how long it
 // has left: `{"kind":"carry","what":"offered","offer":..,"from":..,"open_s":60,"note":..}`; a crew offered to several
@@ -46,7 +50,7 @@ export const REACH = 350_000;
 export const SIDE_REACH = 450_000;
 /** How far beyond the edge it holds each of the two carriers of a part that stands upright (no long axis on the plan)
  * stands, along its wider side on the plan, µm (#5067). `part:take` holds a standing part at its edges on the line its
- * carriers stand on (a rack frame's posts, a timber bent's), its hands 1.05 m and 1.35 m above the ground, and refuses a
+ * carriers stand on (a rack frame's posts, a timber bent's), lifted 0.15 m, its hands 1.05 m and 1.35 m above the ground, and refuses a
  * carrier more than 0.7 m from its hold (`part.grip-out-of-reach`). 0.35 m is where a standing body holds both
  * without squatting: 0.96 m from the middle of a 1.22 m rack frame, 10 mm clear of the ground the frame's own columns
  * take in a bay (0.95 m). A frame stand's walk box (1.05 m) is further out: there the walk ends as near as it can.
@@ -60,8 +64,8 @@ const ONE = 2 ** 30;
 const no = (code, detail) => ({ code, detail });
 
 export const USAGE = {
-  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n> [--from <m>] [--out <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot>] [--go <hh:mm:ss>] | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
-  part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z',
+  carry: 'carry offer <name or body id> [...] [--on <thing id>] | carry accept|decline <offer id> | carry leave <crew id> | carry grip <thing id> front|back|left|right [<n>]|side <n>|top|foot [--from <m>] [--out <m>] | carry lift <crew id> <load id> | carry to <crew id> <x,z | thing id> [<slot> | <degrees>] [--go <hh:mm:ss>] | carry turn <crew id> <degrees> | carry to <crew id> the loading spot | carry set-down <crew id> | carry list',
+  part: 'part take|unseat <crew id> <part id> | part put <crew id> <bay id> <slot> | part put <crew id> here | x,z | part raise <crew id> <part id> | part lower <crew id> [<part id> | x,z]',
 };
 
 /**
@@ -180,6 +184,23 @@ export function gripSpot(at, load, end, from = null, away = null, floor = false)
   return [p[0] + n[0] * away.by * s, p[1] + n[1] * away.by * s];
 }
 
+/** sim::activity::carry::raise::SIDE: how far beyond a post's outer face a part's footer and lifter stand, µm. */
+export const RAISE_SIDE = 420_000;
+
+/**
+ * Where a part's raise crew stands (#5067, sim's `carry::raise`), on the plan, µm: `top`, the lifter's place, beside the
+ * top end of its length on its own +x side; `foot`, the footer's, beside its base on its −x side; each RAISE_SIDE beyond
+ * the post. For a part that lies these are either end of it; for one that stands, either side of its base. Null for a
+ * kind that names no `foot` point at its origin, or whose height is not its longest side.
+ */
+export function raiseSpot(at, entry, end) {
+  const b = entry?.geometry?.bounds_mm, foot = entry?.points?.foot?.at_mm;
+  if (!Array.isArray(b) || b.length !== 3 || !Array.isArray(foot) || foot.some((c) => c !== 0) || b[1] < b[0] || b[1] < b[2]) return null;
+  const beside = b[0] * 500 + RAISE_SIDE, rot = at.rot ?? [ONE, 0, 0, 0];
+  const p = turn(rot, end === 'top' ? [beside, b[1] * 1000, 0] : [-beside, 0, 0]);
+  return [at.pos[0] + p[0], at.pos[2] + p[2]];
+}
+
 /** A turn about +y by `mdeg` millidegrees, as a quaternion [w, x, y, z]. */
 const yawQuat = (mdeg) => { const h = (mdeg / 1000) * (Math.PI / 360); return [Math.cos(h) * ONE, 0, Math.sin(h) * ONE, 0]; };
 const times = (a, b) => [a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3], a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
@@ -215,6 +236,50 @@ export function slotPoint(at, entry, slot) {
   if (!s || !Array.isArray(s.at_mm)) return null;
   const p = turn(at.rot ?? [ONE, 0, 0, 0], s.at_mm.map((c) => c * 1000)).map((c, i) => c + at.pos[i]);
   return { n: k + 1, name: names[k], point: [p[0], p[2]], yaw: Number.isInteger(s.yaw_mdeg) ? s.yaw_mdeg : 0 };
+}
+
+/** How near a free slot's place a lying part's foot (its origin) must be for `part raise` to raise it into the slot,
+ *  µm: worldd's own bound for a raise into a slot (`raise.not-at-slot`). */
+export const RAISE_INTO = 150_000;
+/** And how near its turn: the cosine between its base line and the bay's, at least (15 degrees). */
+export const RAISE_INTO_COS = 0.966;
+
+/** The free slot of a bay in the copy that takes `part`'s kind, its place nearest the part's foot within RAISE_INTO:
+ *  {bay, n, name}, or null. `ctx.loose()` lists what stands on the open ground, `ctx.seated(bay)` what fills its slots. */
+export function raiseSlot(ctx, part) {
+  const { kinds, kindOf, placeOf } = ctx, at = placeOf(part), kind = String(kindOf(part) ?? '').split('@')[0];
+  if (!at) return null;
+  let best = null;
+  for (const bay of ctx.loose?.() ?? []) {
+    const entry = kinds[kindOf(bay)], b = placeOf(bay);
+    if (!entry?.slots || !b || bay === part) continue;
+    const taken = new Set((ctx.seated?.(bay) ?? []).map((p) => p.slot));
+    for (const [name, slot] of Object.entries(entry.slots)) {
+      if (!(slot.kinds ?? []).some((k) => String(k).split('@')[0] === kind)) continue;
+      const s = slotPoint(b, entry, name);
+      if (!s || taken.has(s.n)) continue;
+      const d = Math.hypot(s.point[0] - at.pos[0], s.point[1] - at.pos[2]);
+      // turned as the slot within 15 degrees (worldd's bound too): its own x, its base line, along the bay's
+      const px = turn(at.rot ?? [ONE, 0, 0, 0], [M, 0, 0]), bx = turn(b.rot ?? [ONE, 0, 0, 0], [M, 0, 0]);
+      const cos = (px[0] * bx[0] + px[2] * bx[2]) / ((Math.hypot(px[0], px[2]) * Math.hypot(bx[0], bx[2])) || 1);
+      // a kind the same turned a half turn (`state.symmetry` front_back) is raised into the slot turned either way
+      const either = kinds[kindOf(part)]?.state?.symmetry?.default === 'front_back';
+      if (d <= RAISE_INTO && (either ? Math.abs(cos) : cos) >= RAISE_INTO_COS && (!best || d < best.d)) best = { bay, n: s.n, name, d };
+    }
+  }
+  return best && { bay: best.bay, n: best.n, name: best.name };
+}
+
+/** The part a crew lowers when none is named: the standing part its node is under, else the one in its slot. */
+function lowered(ctx, crew) {
+  const under = ctx.parentOf?.(crew);
+  return (under && under !== ctx.ground ? under : null) ?? ctx.heldBy?.(crew) ?? null;
+}
+
+/** `v` on the plan ([x, z]) turned `deg` degrees about +y: positive from east (+x) toward north (−z). */
+export function turnBy(v, deg) {
+  const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  return [v[0] * c + v[1] * s, -v[0] * s + v[1] * c];
 }
 
 /** A point word, `x,z` in metres, as µm; null when it is not one. */
@@ -273,11 +338,52 @@ export function carryIntents(req, ctx) {
   if (req.kind === 'part') {
     if (!id(req.crew)) return usage;
     if (req.do === 'take' || req.do === 'unseat') return id(req.part) ? [{ verb: `part:${req.do}`, target: req.crew, params: { 1: req.part } }] : usage;
+    // #5067: the Soul who asks is the lifter. It stands beside the part's top end to raise it (carry grip <part> top) and
+    // beside its base to lower it; the other carrier, the footer, stands beside the base on the other side (carry grip
+    // <part> foot). The world walks the lifter beside the part as it turns; raised, the crew holds it standing.
+    // #5067: raised into a bay's slot (parameters 4 and 5): the one named, or with none named a free slot of a bay in
+    // the copy that takes the part's kind, its place within RAISE_INTO of the part's foot (the world checks its turn).
+    if (req.do === 'raise') {
+      if (!id(req.part)) return usage;
+      const params = { 1: req.part };
+      if (req.into !== undefined) {
+        const at = id(req.into) && placeOf(req.into), s = at && slotPoint(at, kinds[kindOf(req.into)], req.slot);
+        if (!s) return no('part-slot-unknown', `${req.into} has no slot ${req.slot ?? '(none named)'} in its entry here`);
+        Object.assign(params, { 4: req.into, 5: s.n });
+      } else {
+        const s = raiseSlot(ctx, req.part);
+        if (s) Object.assign(params, { 4: s.bay, 5: s.n });
+      }
+      return [{ verb: 'part:raise', target: req.crew, params }];
+    }
+    // `part lower <crew> [<part>] [toward x,z]`: the part and a direction together, or either. With no direction, away
+    // from the bay the part stands in, else toward the part's own back.
+    if (req.do === 'lower') {
+      const words = [req.part, req.toward].filter((w) => w !== undefined && w !== 'toward');
+      const part = words.find(id), toward = words.map(pointOf).find(Boolean) ?? null;
+      if (words.some((w) => !id(w) && !pointOf(w))) return usage;
+      const held = part ?? lowered(ctx, req.crew), at = held && placeOf(held);
+      const params = part ? { 1: part } : {};
+      let dir = null;
+      if (toward) {
+        const from = at ? [at.pos[0], at.pos[2]] : ctx.crewMiddle?.(req.crew);
+        if (from) dir = [toward[0] - from[0], toward[1] - from[1]];
+      } else if (at) {
+        const bay = ctx.parentOf?.(held), b = bay && bay !== ground && placeOf(bay);
+        const back = turn(at.rot ?? [ONE, 0, 0, 0], [0, 0, -M]);
+        dir = b ? [at.pos[0] - b.pos[0], at.pos[2] - b.pos[2]] : [back[0], back[2]];
+      }
+      if (dir && (dir[0] || dir[1])) params[3] = [Math.round(dir[0]), 0, Math.round(dir[1])];
+      return [{ verb: 'part:lower', target: req.crew, params }];
+    }
     if (req.do !== 'put') return usage;
     if (id(req.into)) {
       const at = placeOf(req.into), s = at && slotPoint(at, kinds[kindOf(req.into)], req.slot);
       if (!s) return no('part-slot-unknown', `${req.into} has no slot ${req.slot ?? '(none named)'} in its entry here`);
-      return [{ verb: 'part:put', target: req.crew, params: { 1: req.into, 2: s.n } }];
+      // `--joins a,b`: the parts it is joined to, when its kind's default is not the one wanted.
+      const joins = req.joins === undefined ? null : String(req.joins).split(',').filter(Boolean);
+      if (joins && !joins.every(id)) return no('part-joins', '--joins <id,id,...>: the parts it is joined to');
+      return [{ verb: 'part:put', target: req.crew, params: { 1: req.into, 2: s.n, ...(joins ? { 4: joins } : {}) } }];
     }
     const p = req.into === 'here' ? ctx.crewMiddle(req.crew) : pointOf(req.into);
     if (!p) return req.into === 'here' ? no('part-crew-unseen', `${req.crew} holds nothing the copy places`) : usage;
@@ -301,9 +407,15 @@ export function carryIntents(req, ctx) {
     case 'set-down':
       return id(req.crew) ? [{ verb: 'carry:set-down', target: req.crew }] : usage;
     case 'grip': {
-      if (!id(req.thing) || !/^(front|back|left|right|side[1-4])$/.test(String(req.end))) return usage;
+      if (!id(req.thing) || !/^(front|back|left|right|top|foot|side[1-4])$/.test(String(req.end))) return usage;
       const at = placeOf(req.thing);
       if (!at) return no('carry-thing-unseen', `${req.thing} is not in the copy`);
+      if (req.end === 'top' || req.end === 'foot') {
+        // #5067: where a part's raise crew stands (sim's carry::raise): the lifter beside its top end, the footer beside
+        // its base on the other side.
+        const s = raiseSpot(at, kinds[kindOf(req.thing)], req.end);
+        return s ? [walk(ns, ground, s)] : no('carry-grip-unknown', `${req.thing} names no foot to be raised about: only a part with a foot point is raised`);
+      }
       const from = req.from === undefined ? null : Number(req.from);
       if (from !== null && !(from > 0 && from < 10)) return no('carry-usage', '--from <metres, 0 to 10>');
       if (req.n !== undefined && (req.end === 'left' || req.end === 'right')) {
@@ -325,8 +437,24 @@ export function carryIntents(req, ctx) {
       if (!spot) return no('carry-grip-unknown', `${req.thing} has ${inner} grip${inner === 1 ? '' : 's'} between its ends, so no ${req.end.replace('side', 'side ')}: a crew of ${2 + inner} at most carries it`);
       return [walk(ns, ground, spot)];
     }
+    case 'turn': {
+      // #5067: `carry turn <crew> <degrees>`: the load turned about its middle, positive from east toward north (the
+      // world's yaw), its carriers walked round with it by the world (`carry:turn`, its heading as parameter 3).
+      const deg = Number(req.deg), e = ctx.crewEnds?.(req.crew);
+      if (!id(req.crew) || !Number.isFinite(deg)) return usage;
+      if (!e) return no('carry-crew-unseen', `${req.crew} holds nothing the copy places: lift or take first`);
+      const h = turnBy([e.at[0][0] - e.at[1][0], e.at[0][1] - e.at[1][1]], deg);
+      return [{ verb: 'carry:turn', target: req.crew, params: { 3: [Math.round(h[0]), 0, Math.round(h[1])] } }];
+    }
     case 'to': {
       if (!id(req.crew) || req.where === undefined) return usage;
+      // `carry to <crew> x,z <degrees>`: the load's heading there (the world's yaw, from its back toward its front),
+      // named on the front's walk (parameter 3), the crew turned as it goes, a quarter turn at most a walk.
+      let turnTo = null;
+      if (req.slot !== undefined && pointOf(req.where) && /^-?\d+(\.\d+)?$/.test(String(req.slot))) {
+        turnTo = Number(req.slot);
+        req = { ...req, slot: undefined };
+      }
       if (req.slot === undefined && id(req.where) && isSpot(kinds[kindOf(req.where)])) {
         // A loading spot (spot.mjs): its first free bay that takes the crew's load, square in it.
         const s = toSpot(req, ctx, req.where);
@@ -374,8 +502,19 @@ export function carryIntents(req, ctx) {
           return [heading(walk(ns, ground, [dest[0] + sz[0] * d, dest[1] + sz[1] * d]), [sz[0] * side, sz[1] * side])];
         }
         const end = ends.ids.includes(me);
-        const along = end ? Math.hypot(...off) * (dot(off, w) < 0 ? -1 : 1) : dot(off, w), across = end ? 0 : off[1] * w[0] - off[0] * w[1];
+        // #5067: an end carrier stops no further from the load's middle than its own place (its grip and 0.35 m) and
+        // END_SPARE more: 50 mm inside its 0.7 m reach of its grip at the slot, so the put is admitted from there.
+        const held = ctx.heldBy?.(req.crew), places = held ? loadOf(kinds[kindOf(held)])?.places : null;
+        const most = end && Array.isArray(places) ? Math.max(...places.map(Math.abs)) + END_SPARE : Infinity;
+        const along = end ? Math.min(Math.hypot(...off), most) * (dot(off, w) < 0 ? -1 : 1) : dot(off, w), across = end ? 0 : off[1] * w[0] - off[0] * w[1];
         return [heading(walk(ns, ground, [dest[0] + u[0] * along - u[1] * across, dest[1] + u[1] * along + u[0] * across]), u)];
+      }
+      if (turnTo !== null) {
+        const r = turnTo * Math.PI / 180, h = [Math.cos(r), -Math.sin(r)], e = ctx.crewEnds?.(req.crew);
+        // This Soul's place in the crew turns with it: its offset from the load's middle, turned from now to there.
+        const now = e ? Math.atan2(-(e.at[0][1] - e.at[1][1]), e.at[0][0] - e.at[1][0]) : r;
+        const o = turnBy(off, (r - now) * 180 / Math.PI);
+        return [heading(walk(ns, ground, [dest[0] + o[0], dest[1] + o[1]]), h)];
       }
       return [walk(ns, ground, [dest[0] + off[0], dest[1] + off[1]])];
     }
@@ -383,8 +522,39 @@ export function carryIntents(req, ctx) {
   }
 }
 
+/** worldd's words, ending a `part.grip-out-of-reach` put, for where the put would be admitted (#5067, the engine's
+ *  `assembly::ADMITTED_AT`): then `x=<mm> z=<mm> mm`, the crew's node on its ground. */
+export const ADMITTED_AT = "admitted with the crew's node at";
+
+/** Where a refused put's detail says it would be admitted from: [x, z] metres on the crew's ground, or null. */
+export function admittedAt(detail) {
+  const m = new RegExp(`${ADMITTED_AT} x=(-?\\d+) z=(-?\\d+) mm`).exec(String(detail ?? ''));
+  return m ? [Number(m[1]) / 1000, Number(m[2]) / 1000] : null;
+}
+
+/** The receipt's words when a put was asked again from where the slot can be reached. */
+export const PUT_MOVED = 'moved to where the slot can be reached';
+
+/**
+ * `part put` refused `part.grip-out-of-reach` with where it would be admitted from (#5067 item 4): the crew is carried
+ * there (`carry to <crew> x,z`, the front's walk takes the whole crew) and the put asked once more. `ask(req)` sends a
+ * request and waits for its end, as the command does. The refusal is shown only when the second ask is refused too;
+ * a put admitted the second time says so (`moved`).
+ */
+export async function putFromAdmitted(answer, req, ask) {
+  if (req?.kind !== 'part' || req.do !== 'put' || answer?.code !== 'part.grip-out-of-reach') return answer;
+  const at = admittedAt(answer.detail);
+  if (!at) return answer;
+  const walked = await ask({ op: 'carry', do: 'to', crew: req.crew, where: `${at[0]},${at[1]}` });
+  if (walked?.ok !== true) return answer;
+  const again = await ask(req);
+  return again?.ok === true ? { ...again, moved: PUT_MOVED, from: at } : again;
+}
+
 /** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
 export const HEIGHT = 1_050_000;
+/** sim::activity::carry::STAND_LIFT: how high above its carriers' feet the foot of a load held standing is, µm. */
+export const STAND_LIFT = 150_000;
 /** The furthest ahead a `--go` moment may be, ms: a command waits for it within its daemon's patience (30 s). */
 export const GO_MOST_MS = 20_000;
 
@@ -402,6 +572,10 @@ export function goTime(word, now = Date.now()) {
  *  however short of its goal a walk ends (0.3 m). */
 export const MOUTH_CLEAR = 200_000;
 
+/** How much further than its own place (its grip and 0.35 m) an end carrier carrying into a slot may stand, µm: 0.3 m,
+ *  so 50 mm inside its 0.7 m reach of its grip there (worldd's `part.grip-out-of-reach`). */
+export const END_SPARE = 300_000;
+
 /** The part a crew holds and its half extents as it is held now (its turn in the copy): `ext` [x, up, z], the heights
  *  it spans as carried (`band`), and its half length and half width on the plan. Null when the copy cannot say. */
 function heldExtent(ctx, crew) {
@@ -410,7 +584,9 @@ function heldExtent(ctx, crew) {
   const hb = b.map((v) => v * 500);
   const corners = [-1, 1].flatMap((a) => [-1, 1].flatMap((c) => [-1, 1].map((e) => turn(hp.rot ?? [ONE, 0, 0, 0], [a * hb[0], c * hb[1], e * hb[2]]))));
   const ext = [0, 1, 2].map((k) => Math.max(...corners.map((v) => Math.abs(v[k]))));
-  return { id, ext, band: [HEIGHT - ext[1], HEIGHT + ext[1]], long: Math.max(ext[0], ext[2]), across: Math.min(ext[0], ext[2]) };
+  // held standing (taller than it is long on the plan), it is lifted by its foot; else carried by its middle
+  const band = ext[1] > Math.max(ext[0], ext[2]) ? [STAND_LIFT, STAND_LIFT + 2 * ext[1]] : [HEIGHT - ext[1], HEIGHT + ext[1]];
+  return { id, ext, band, long: Math.max(ext[0], ext[2]), across: Math.min(ext[0], ext[2]) };
 }
 
 /**
