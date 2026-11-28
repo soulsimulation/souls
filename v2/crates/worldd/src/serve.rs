@@ -4449,9 +4449,7 @@ fn serve(args: &[String]) -> R<()> {
         &built.header,
         &key,
     )?;
-    let (stream_tx, stream_handed_rx) = channel::<(u64, Vec<u8>)>();
-    // Each record is read on the stream's reading thread, ahead of the stream's own (#5282).
-    let stream_rx = view_out::read::beside(stream_handed_rx).map_err(|e| e.to_string())?;
+    let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
     // At most [`STREAM_WINDOW`] of records wait in that channel; past it they stay in the log for the stream to read.
     let stream_hand = Handover::gauged(STREAM_WINDOW, &measures::STREAM_QUEUE);
     let stream_handed = Arc::clone(&stream_hand);
@@ -4622,18 +4620,16 @@ fn serve(args: &[String]) -> R<()> {
                     }
                     let wait = std::time::Duration::from_millis(if reading { 0 } else { 20 });
                     match stream_rx.recv_timeout(wait) {
-                        Ok((record, bytes, read)) => {
+                        Ok((record, bytes)) => {
                             stream_hand.took(bytes.len());
-                            view_out::read::took();
                             if record >= writer.source_cursor() {
-                                writer.push_read(record, &bytes, read)?;
+                                writer.push(record, &bytes)?;
                             }
                             // What is already waiting first: a writer behind would cut a part a record (#3799).
-                            while let Ok((record, bytes, read)) = stream_rx.try_recv() {
+                            while let Ok((record, bytes)) = stream_rx.try_recv() {
                                 stream_hand.took(bytes.len());
-                                view_out::read::took();
                                 if record >= writer.source_cursor() {
-                                    writer.push_read(record, &bytes, read)?;
+                                    writer.push(record, &bytes)?;
                                 }
                             }
                         }
@@ -4668,11 +4664,10 @@ fn serve(args: &[String]) -> R<()> {
                         // Each record handed is in the channel or left in the log: the channel is emptied, a batch of
                         // the log is read, and so on until neither holds one.
                         loop {
-                            while let Ok((record, bytes, read)) = stream_rx.try_recv() {
+                            while let Ok((record, bytes)) = stream_rx.try_recv() {
                                 stream_hand.took(bytes.len());
-                                view_out::read::took();
                                 if record >= writer.source_cursor() {
-                                    writer.push_read(record, &bytes, read)?;
+                                    writer.push(record, &bytes)?;
                                 }
                             }
                             if !stream_from_log(&stream_hand, &mut stream_log, &mut |record, bytes| {
