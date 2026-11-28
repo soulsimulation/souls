@@ -5245,6 +5245,10 @@ fn a_writer_opening_removes_what_a_killed_group_left() {
 /// written by the public writer, and every file of its generation, its baseline and the reader's state hash to what
 /// main wrote before the change (e72df671e). Also: every part read back in place says the sequences and times
 /// `stream_effect` reads whole, and the references found in place are `references`'.
+///
+/// The pin was taken by running this test on main's writer: `view_out/mod.rs` as at e72df671e, with this branch's
+/// `seq_at`, `refs_into` and `refs_of` appended (the test calls them; the writer there does not), and this
+/// `tests.rs`. The test then fails only on the pin, printing main's hash.
 #[test]
 fn i5282_a_fixed_seed_writes_the_parts_main_wrote() {
     let (all, parts, whole) = i5282_run();
@@ -5340,6 +5344,8 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
         },
     };
     let mut flight: Option<(Id, u64)> = None;
+    // Souls 20 to 23 hold no links or timers; now and then one is taken out, for good.
+    let mut gone = vec![false; souls as usize];
     let mut seq = 0u64;
     for record in 0..400u64 {
         let mut effects = Vec::new();
@@ -5377,7 +5383,7 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
         }
         for _ in 0..1 + next(4) {
             let mut s = next(souls);
-            if s == 0 && flight.is_some() {
+            if s == 0 && flight.is_some() || gone[s as usize] {
                 s = 1;
             }
             let node = id(0xa0, s);
@@ -5406,6 +5412,13 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                 } else {
                     everyone
                 };
+                let plain = s < 20;
+                if !plain && record % 53 == 52 {
+                    effects.push(change(seq, node, audience, Change::Remove { node }));
+                    gone[s as usize] = true;
+                    seq += 1;
+                    continue;
+                }
                 match next(20) {
                     0..=11 => effects.push(change(
                         seq,
@@ -5433,6 +5446,8 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                             && t % 5 != 4
                             && s != 0
                             && t != 0
+                            && plain
+                            && t < 20
                         {
                             let link = id(0xb0, seq);
                             links.insert(link, node);
@@ -5460,7 +5475,7 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
                             effects.push(change(seq, node, audience, set(node, 1, Value::Uint(2))))
                         }
                     },
-                    17..=18 if s != 0 => {
+                    17..=18 if s != 0 && plain => {
                         let timer = id(0xc0, seq);
                         timers.insert(timer, node);
                         effects.push(w3e_effect(
@@ -5524,5 +5539,6 @@ fn i5282_run() -> (Vec<u8>, u64, u64) {
     all.extend(&out.baseline);
     all.extend(wire(state).unwrap());
     let parts = out.public_player().next();
+    let _ = fs::remove_dir_all(&d);
     (all, parts, out.whole_cuts)
 }

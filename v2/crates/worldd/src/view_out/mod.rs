@@ -1504,6 +1504,11 @@ fn seq_at(header: &Header, record: &Value) -> R<(u64, i64)> {
             _ => None,
         }
     {
+        // A debug build (the tests) still reads it whole and checks the two agree.
+        debug_assert!(
+            stream_effect(header, record.clone())
+                .is_ok_and(|e| (e.envelope.sequence, e.envelope.at) == (*seq, at))
+        );
         return Ok((*seq, at));
     }
     let e = stream_effect(header, record.clone())?;
