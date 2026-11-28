@@ -393,6 +393,9 @@ async fn walk_goal_a_walk_a_crowd_holds_off_its_point_is_done_as_near_as_the_cro
         f.get(&11),
         Some(&body_of(&dir, ids[0]).to_value()),
         "field 11 names the other body nearest the point: {f:?}"
+    );
+    drop(served);
+}
 
 /// Each part of the log, in order: its tick, its body rows of `body` (where it stood) and whether it ended a move of
 /// `body` (`souls:move-ended`).
