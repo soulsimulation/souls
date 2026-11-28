@@ -141,6 +141,10 @@ const production = { source, changed: (root, from, to) => git(root, 'diff', '--n
   lineChanged: (root, from, to, path, line) => [...git(root, 'diff', '--unified=0', from, to, '--', path).matchAll(/^@@ .*\+(\d+)(?:,(\d+))? @@/gm)].some(m => line >= Number(m[1]) && line < Number(m[1]) + Number(m[2] ?? 1)),
   boot: o => o.kind === 'native-page' ? startNativePageFixture(o) : o.kind === 'v2-bodies' ? startV2BodyFixture(o) : o.kind === 'v2-account' ? startV2AccountFixture(o) : (requireThat(o.kind === undefined, 'unknown-fixture-kind'), startWorld(o)), browser: openBrowser, stop: stopOwnedChild, portFree, now: () => Date.now(), test: false };
 
+/** The journey's cap, and its video's: 90 s, or 300 s for a survey cycle (an id starting `survey-`), which records where
+ * a long build stands rather than passing or failing one step. */
+export const journeyCap = o => typeof o.cycle?.id === 'string' && o.cycle.id.startsWith('survey-') ? 300000 : 90000;
+
 /** Exactly one invocation = one fresh owned lifecycle. A failed slot cannot be replaced by another sample id.
  * cycle.plan is fixed in advance, e.g. baseline1,baseline2,candidate1,candidate2. Each slot's repair loop is capped3.
  * A material corrective cycle must be explicit; changing HEAD never starts one. No URL parameter is accepted. */
@@ -153,7 +157,7 @@ async function run(o, d) {
   requireThat(o.world?.kind === undefined || (o.world.kind === 'v2-account' || o.world.kind === 'v2-bodies' || o.world.kind === 'native-page'), 'unknown-fixture-kind');
   requireThat(o.owner?.trim() && o.cycle?.id && o.cycle.plan?.length && o.ledger, 'plan-and-agent-identity-required');
   requireThat(!('url' in o) && !('runDir' in o) && !('dataDir' in o) && !('profileDir' in o), 'existing-resource-override');
-  for (const [value, max] of [[o.phaseTimeoutMs ?? 30000, 30000], [o.cleanupTimeoutMs ?? 8000, 8000], [o.journeyTimeoutMs ?? 90000, 90000], [o.navigationTimeoutMs ?? 30000, 30000], [o.world?.timeoutMs ?? 180000, 180000]]) requireThat(Number.isSafeInteger(value) && value > 0 && value <= max, 'timeout-out-of-bounds');
+  for (const [value, max] of [[o.phaseTimeoutMs ?? 30000, 30000], [o.cleanupTimeoutMs ?? 8000, 8000], [o.journeyTimeoutMs ?? 90000, journeyCap(o)], [o.navigationTimeoutMs ?? 30000, 30000], [o.world?.timeoutMs ?? 180000, 180000]]) requireThat(Number.isSafeInteger(value) && value > 0 && value <= max, 'timeout-out-of-bounds');
   if (o.world.kind === 'v2-bodies') requireThat((o.world.timeoutMs ?? 30000) <= 30000, 'body-boot-timeout-out-of-bounds');
   if (!d.test) requireThat(!o.journey && o.driver?.root && o.driver?.path, 'committed-driver-required');
   const ledger = resolve(o.ledger), toolRoot = resolve(o.toolRoot ?? TOOL_ROOT), lock = ledger + '.lock';
@@ -394,7 +398,7 @@ async function run(o, d) {
           const at = join(paths.video, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) });
           if (!d.test && native && file.endsWith('.webm')) {
             const seconds = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', at], { encoding: 'utf8', timeout: 5000 }));
-            requireThat(Number.isFinite(seconds) && seconds > 0 && seconds <= 90, 'video-duration-out-of-bounds');
+            requireThat(Number.isFinite(seconds) && seconds > 0 && seconds <= journeyCap(o) / 1000, 'video-duration-out-of-bounds');
             (report.videoDurations ??= []).push({ file: at, seconds });
           }
         }
