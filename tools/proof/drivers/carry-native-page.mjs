@@ -592,10 +592,14 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
         await stations(); await wait(800);
         await retried(state, lift, 'part', 'raise', crew, frame.id, ...(slot ? [bay, slot] : [])); await wait(3000); await shot(`${name}-raise-${n}-part-way`); await wait(6500);
         if (!slot) break;
-        const again = await asked(state, lift, 'part', 'raise', crew, frame.id, bay, slot);
-        (state.raises ??= []).push({ name, n, again: again.ok === true ? 'accepted: it had turned back' : again.code ?? 'refused' });
-        if (again.ok !== true) break;
-        await wait(9500); break;
+        // attempt 25: on a busy page run a raise can still be on its way after 9.5 s (part.held), and the world can turn
+        // its end back (edit.body-stale: the frame lies again where it lay); so wait for it to end, in its slot or on the
+        // ground (`object`'s `in`), up to 40 s, and raise it again only when it lies on the ground
+        let ended = null;
+        for (let i = 0; i < 80 && !ended; i++) { const o = await asked(state, lift, 'object', frame.id); const at = String(o.in ?? ''); if (at.startsWith(T.bay)) ended = 'in-slot'; else if (/^ground/.test(at)) ended = 'turned-back'; else await wait(500); }
+        (state.raises ??= []).push({ name, n, ended: ended ?? 'still-held-after-40-s' });
+        if (ended !== 'turned-back') break;
+        await wait(1500);
       }
     }));
     await shot('frames-raised-and-held'); await phase(state, page, 'frames-held');
