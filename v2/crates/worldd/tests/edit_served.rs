@@ -215,7 +215,13 @@ fn static_creator(w: &Seeded, creator: Id) {
 }
 
 fn serve_with(w: &Seeded, socket: &Path, bucket: Option<&Path>) -> Served {
+    serve_env(w, socket, bucket, &[])
+}
+
+/// [`serve_with`], the served world given `envs` (a test world's shortened clocks).
+fn serve_env(w: &Seeded, socket: &Path, bucket: Option<&Path>, envs: &[(&str, &str)]) -> Served {
     let mut command = Command::new(env!("CARGO_BIN_EXE_worldd"));
+    command.envs(envs.iter().copied());
     command
         .args(["serve", "--dir"])
         .arg(&w.dir)
@@ -5277,15 +5283,34 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
 /// and no word of crew A says it was turned back (`souls:raise-refused`).
 #[test]
 fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
+    raise_beside_a_walking_crew(false);
+}
+
+/// FOR-FABLE 15, past the world's seat wait (shortened to 3 s here, `WORLDD_SEAT_WAIT_S`): crew B's lifter walks on
+/// through A's end for longer than A's seating may wait, so A stops held where it stands, its crew holding it
+/// (`souls:raise-held`, why `raise.map-busy`), never turned back; once B's crew stands still, A's lifter asks again and
+/// it is seated in `upright_a`.
+#[test]
+fn a_raise_into_a_slot_past_the_seat_wait_stops_held_and_is_seated_when_asked_again() {
+    raise_beside_a_walking_crew(true);
+}
+
+/// The two crews of the FOR-FABLE 15 cases; `busy`: the seat wait shortened to 3 s, so A's end outlasts it.
+fn raise_beside_a_walking_crew(busy: bool) {
     use sim::activity::carry::grips::{GRIPS, HELD, Holds};
     use sim::activity::carry::raise::{SIDE, Spec};
-    let d = scratch("raisestale");
+    let d = scratch(if busy { "raisebusy" } else { "raisestale" });
     let (facts, slots) = yard_world(&d);
     let w = seed_entries(&d, &facts, 4, (52, -20), Some(&d.join("entries")));
     let (creator_id, creator_actor) = creator(0xab);
     static_creator(&w, creator_id);
     let socket = d.join("s");
-    let s = serve_with(&w, &socket, None);
+    let envs: &[(&str, &str)] = if busy {
+        &[("WORLDD_SEAT_WAIT_S", "3")]
+    } else {
+        &[]
+    };
+    let s = serve_env(&w, &socket, None, envs);
     s.line("listening ", 120);
     let (_, rules) = served_copy(&w);
     let mut world = connect_socket(&socket);
@@ -5438,19 +5463,24 @@ fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
             })
             .collect()
     };
-    let t0 = std::time::Instant::now();
-    loop {
-        let h = logged(&w)
+    let grips_of = |crew: Id| {
+        logged(&w)
             .iter()
             .flat_map(|p| p.effects.iter())
             .flat_map(|e| e.events.iter().flatten())
             .filter(|ev| ev.name.as_str() == GRIPS && ev.fields.get(&1) == Some(&crew.to_value()))
             .filter_map(|ev| Holds::read(&Value::Map(ev.fields.clone())))
-            .next_back();
-        if h.is_some_and(|h| h.phase == HELD) {
+            .next_back()
+    };
+    let t0 = std::time::Instant::now();
+    loop {
+        let said = words(crew);
+        if busy && said.iter().any(|s| s.contains("raise.map-busy")) {
             break;
         }
-        let said = words(crew);
+        if !busy && grips_of(crew).is_some_and(|h| h.phase == HELD) {
+            break;
+        }
         if t0.elapsed() > Duration::from_secs(60)
             || said.iter().any(|s| s.contains("raise-refused"))
         {
@@ -5460,12 +5490,65 @@ fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
                 }
             }
             panic!(
-                "frame A never held in its slot: {:?}; crew A's words {said:?}; crew B's {:?}",
+                "frame A neither held in its slot nor stopped held: {:?}; crew A's words {said:?}; crew B's {:?}",
                 where_is(&w, frame),
                 words(crew_b)
             );
         }
         std::thread::sleep(Duration::from_millis(200));
+    }
+    if busy {
+        // Stopped held where it stands, beside its slot, not in it; its crew holding it; never turned back.
+        let said = words(crew);
+        println!(
+            "frame A stopped held after {:?}: {:?}; crew A's words {said:?}",
+            t0.elapsed(),
+            where_is(&w, frame)
+        );
+        assert!(
+            said.last().is_some_and(|s| s.contains("souls:held")),
+            "its crew holds it: {said:?}"
+        );
+        assert!(
+            said.iter().any(|s| s.contains("souls:raise-held")),
+            "said stopped held: {said:?}"
+        );
+        assert!(
+            !said
+                .iter()
+                .any(|s| s.contains("raise-refused") || s.contains("souls:lower")),
+            "never turned back: {said:?}"
+        );
+        assert_ne!(where_is(&w, frame).0, Some(bay), "not seated yet");
+        // Once crew B is still (its raise and its holders' stance walk over), A's lifter asks again.
+        let bodies = [body_of(&w, w.souls[2]), body_of(&w, w.souls[3])];
+        let t1 = std::time::Instant::now();
+        let mut last = bodies.map(|b| body_at(&w, b));
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let now = bodies.map(|b| body_at(&w, b));
+            let still = now == last && grips_of(crew_b).is_some_and(|h| h.phase == HELD);
+            last = now;
+            if still {
+                break;
+            }
+            assert!(
+                t1.elapsed() < Duration::from_secs(60),
+                "crew B never stood still: {:?}",
+                words(crew_b)
+            );
+        }
+        let got = hands[0].act(
+            "part:raise",
+            crew,
+            BTreeMap::from([
+                (1, frame.to_value()),
+                (4, bay.to_value()),
+                (5, Value::Uint(slots["upright_a"])),
+            ]),
+        );
+        println!("frame A raised again: {got:?}");
+        assert_eq!(got.kind, 1, "seated when asked again: {got:?}");
     }
     let (parent, slot, pos) = where_is(&w, frame);
     println!(
@@ -5480,6 +5563,10 @@ fn a_raise_into_a_slot_waits_out_another_crews_walk_and_is_never_turned_back() {
         "in upright_a"
     );
     assert!(apart_mm(pos, ua) <= 2, "where the slot is: {pos:?} {ua:?}");
+    assert!(
+        grips_of(crew).is_some_and(|h| h.phase == HELD),
+        "held by its crew"
+    );
     assert!(
         !words(crew).iter().any(|s| s.contains("raise-refused")),
         "never turned back"

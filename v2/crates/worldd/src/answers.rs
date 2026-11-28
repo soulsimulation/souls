@@ -3068,14 +3068,14 @@ impl Clock {
             });
             // A part whose walkers' maps went stale before its commit is prepared again from the world as it is then
             // (0.135 A2: a retiring holder's set-down, its body leaving; #5067: a raise's or a seating's end, bodies
-            // walking meanwhile), never refused for it: at most `RETRIES` times, a raise's or a set-in's end for as
-            // long as it takes (`Engine::retry`, FOR-FABLE 15).
+            // walking meanwhile), never refused for it: at most `RETRIES` times, a raise's or a set-in's end for the
+            // world's seat wait (`Engine::retry`, FOR-FABLE 15).
             if r.step != crate::assembly::Step::Taken
                 && done
                     .as_ref()
                     .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))
                 && let Some(e) = self.engine.as_mut()
-                && e.retry(r.clone())
+                && e.retry(r.clone(), now, self.replica.tree())
             {
                 continue;
             }
