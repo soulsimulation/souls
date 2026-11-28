@@ -535,20 +535,37 @@ export function admittedAt(detail) {
 /** The receipt's words when a put was asked again from where the slot can be reached. */
 export const PUT_MOVED = 'moved to where the slot can be reached';
 
+/** Whether crew `crew` holds a load, from a `carry list` answer: held (lifted, or a part it holds where it stands), or
+ *  set down (it holds nothing); null when the answer does not name the crew. */
+export function crewHolds(list, crew) {
+  const c = list?.ok === true && Array.isArray(list.crews) ? list.crews.find((x) => x.id === crew) : null;
+  return c ? (c.holds ?? []).length > 0 : null;
+}
+
 /**
  * `part put` refused `part.grip-out-of-reach` with where it would be admitted from (#5067 item 4): the crew is carried
  * there (`carry to <crew> x,z`, the front's walk takes the whole crew) and the put asked once more. `ask(req)` sends a
  * request and waits for its end, as the command does. The refusal is shown only when the second ask is refused too;
  * a put admitted the second time says so (`moved`).
+ * FOR-FABLE 7: a second refusal leaves the crew as it was before the first ask (a refused put moves nothing, so as
+ * `carry list` has it then): one that held nothing is set down again by the ordinary `carry set-down`, one that held
+ * its load still holds it, and the refusal says which (`retried`).
  */
 export async function putFromAdmitted(answer, req, ask) {
   if (req?.kind !== 'part' || req.do !== 'put' || answer?.code !== 'part.grip-out-of-reach') return answer;
   const at = admittedAt(answer.detail);
   if (!at) return answer;
+  const held = crewHolds(await ask({ op: 'carry', do: 'list' }), req.crew);
   const walked = await ask({ op: 'carry', do: 'to', crew: req.crew, where: `${at[0]},${at[1]}` });
   if (walked?.ok !== true) return answer;
   const again = await ask(req);
-  return again?.ok === true ? { ...again, moved: PUT_MOVED, from: at } : again;
+  if (again?.ok === true) return { ...again, moved: PUT_MOVED, from: at };
+  let state = 'still holding';
+  if (held === false && crewHolds(await ask({ op: 'carry', do: 'list' }), req.crew) !== false) {
+    const down = await ask({ op: 'carry', do: 'set-down', crew: req.crew });
+    state = down?.ok === true ? 'set down again' : `not set down again: ${down?.code ?? 'no answer'}`;
+  } else if (held === false) state = 'set down again';
+  return { ...again, retried: `moved to ${at[0]},${at[1]} and asked again; refused again: ${again?.code ?? 'no answer'}; ${state}` };
 }
 
 /** sim::activity::carry::HEIGHT: a carried load's middle above its carriers' feet, µm. */
