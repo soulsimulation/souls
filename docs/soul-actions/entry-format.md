@@ -202,6 +202,21 @@ standing reach above its feet. No carrier is exempt, at any step:
   line, so nobody can stand on it within reach of an end grip). Its two end carriers stand, 0.57 m from their holds
   when it is seated; its side carriers walk in beside it, those on the bay's side into the open bay. A side carrier's
   place is 0.45 m off the load's side, so it still stands on ground when the part is seated beside it.
+- **A long part fed over what it rests on** (`part:put`, a part that rests on others: a joist on two beams). Once a
+  bay's frames and beams stand, a joist cannot be set in from between its carriers: they would stand either side of
+  the bay, and nothing takes it there but through a frame or a beam. So when the straight set-in is not admitted, the
+  same put feeds it. The crew stands in line beside the bay, the part pointing at its slot, its near end outside what
+  it will rest on. The world raises it straight up to the slot's height, then slides it level to the slot, over the
+  top of the near beam and onto both. Both legs are checked against everything fixed on the ground at the part's own
+  height before anyone moves (`part.way-blocked`, naming where and what; sliding on a top is not meeting it). The
+  carrier behind the part walks it in. The carrier by the bay cannot follow: it holds while it reaches, then lets go
+  (`souls:carry-grips` is said again without it), which is admitted only when the part rests on a fixed part from
+  then on and another carrier holds it to the end (`part.feed-unborne`, `part.feed-unheld`). A part held across its
+  slot's line is not swung in (`part.feed-turned`), and a feed slides at most the part's length and 1 m. A put that
+  can be neither set in nor fed keeps the straight set-in's name; its detail starts with where it would work, then why
+  not from here: `it would be fed with the crew's node at x=<mm> z=<mm> mm, its crew's front|back toward its slot`.
+  A fed set-in that is stopped goes back the way it came, and the carrier who let go takes its hold again. Not fed
+  yet: a part that needs someone on the far side to receive it (a sheet, a beam into a closed bay).
 - Not checked yet: where the part is before a take. It still goes to its carriers' middle in one change of parent.
 
 While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the

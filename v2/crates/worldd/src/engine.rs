@@ -216,6 +216,9 @@ pub struct Engine {
     /// Carriers to walk back beside their crew's part on a refused seating's way back (#5067), by crew: each begun at
     /// the next tick its body is free to be carried (`Engine::tick`).
     walk_back: Vec<(Id, Id, crate::assembly::Walk)>,
+    /// The holds of each crew feeding its part in, as they were at the put (FOR-FABLE 6): a carrier who lets go on the
+    /// slide is left out of the holds said from then, and is said again if the part comes back.
+    fed_holds: BTreeMap<Id, Holds>,
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
@@ -688,6 +691,48 @@ fn way_is_ground(
     })
 }
 
+/// What a part fed into bay `bay` must not meet (FOR-FABLE 6): `ground`'s fixed geometry, and every other part
+/// seated in the bay by its kind's bounds as `loads` has them, each with the heights it spans above the ground. A
+/// beam or a joist is too low to be cut out of a walker's ground where it lies, so the ground's own geometry leaves
+/// it out; seated at knee or head height it is still there to a part slid past it. The crew's own node is not read.
+fn bay_fixed(
+    tree: &Tree,
+    loads: &BTreeMap<String, Load>,
+    ground: Id,
+    bay: Id,
+    but: Id,
+) -> Option<Fixed> {
+    let fixed = Fixed::of(tree, ground).ok()?;
+    let (mut quads, mut heights) = (fixed.quads, fixed.heights);
+    let (bh, gh) = (tree.handle(bay)?, tree.handle(ground)?);
+    for &c in tree.children(bh)?.iter() {
+        let n = tree.node(c)?;
+        if n.id() == but {
+            continue;
+        }
+        let Some(l) = loads.get(plain(n.kind().as_str())) else {
+            continue;
+        };
+        let x = sim::ground::scene::xform_to(tree, c, gh).ok()?;
+        let (m, h) = (l.middle, l.half);
+        let corner = |sx: i64, sz: i64| {
+            x.point(Vec3::new(m.x + sx * h.x, m.y, m.z + sz * h.z))
+                .ok()
+                .map(|p| [p.x, p.z])
+        };
+        let q = [
+            corner(1, 1)?,
+            corner(1, -1)?,
+            corner(-1, -1)?,
+            corner(-1, 1)?,
+        ];
+        let y = x.point(m).ok()?.y;
+        quads.push(q);
+        heights.push([y - h.y, y + h.y]);
+    }
+    Some(Fixed::with_heights(quads, heights))
+}
+
 /// How far apart two carriers stand along the ground, µm.
 fn apart(f: Vec3, k: Vec3) -> i64 {
     let (dx, dz) = (i128::from(f.x - k.x), i128::from(f.z - k.z));
@@ -883,6 +928,7 @@ impl Engine {
             grips: BTreeMap::new(),
             set_sides: BTreeMap::new(),
             walk_back: Vec::new(),
+            fed_holds: BTreeMap::new(),
             riding: Vec::new(),
             retried: BTreeMap::new(),
             seat_since: BTreeMap::new(),
@@ -1443,6 +1489,56 @@ impl Engine {
                     let walkable = |body: Id, a: Vec3, b: Vec3| {
                         !bodies.carried(body) && way_is_ground(bodies, town, ground, body, a, b)
                     };
+                    // FOR-FABLE 6: what a feed over the parts it rests on asks of the ground's fixed geometry, read
+                    // only when the straight set-in is not admitted.
+                    let load = carry.load;
+                    let floor = from.0.y - load.carried;
+                    let fixed = std::cell::OnceCell::new();
+                    let swept = tree.frozen();
+                    let loads = &self.loads;
+                    let geometry =
+                        || fixed.get_or_init(|| bay_fixed(&swept, loads, ground, to, activity));
+                    let clear = |a: (Vec3, replica::pose::Quat), b: (Vec3, replica::pose::Quat)| {
+                        match geometry() {
+                            Some(fx) => sim::activity::carry::node_way(fx, &load, floor, a, b),
+                            None => Err(refusal("carry-geometry", show(ground))),
+                        }
+                    };
+                    let bears = |at: (Vec3, replica::pose::Quat)| {
+                        geometry().as_ref().is_some_and(|fx| {
+                            sim::activity::carry::node_bears(fx, &load, floor, at).unwrap_or(false)
+                        })
+                    };
+                    // A carrier walks beside a fed part over ground, and through no part of the bay at a body's height.
+                    let walk = |body: Id, a: Vec3, b: Vec3| {
+                        walkable(body, a, b)
+                            && geometry().as_ref().is_some_and(|fx| {
+                                let r = sim::ground::HUMAN_RADIUS * 1000;
+                                let n = (apart(a, b) / WALK_STEP).max(1);
+                                (0..=n).all(|k| {
+                                    let at = |u: i64, v: i64| {
+                                        u + (i128::from(v - u) * i128::from(k) / i128::from(n))
+                                            as i64
+                                    };
+                                    let (x, z) = (at(a.x, b.x), at(a.z, b.z));
+                                    let q = [
+                                        [x - r, z - r],
+                                        [x + r, z - r],
+                                        [x + r, z + r],
+                                        [x - r, z + r],
+                                    ];
+                                    fx.hit(&q).is_none()
+                                })
+                            })
+                    };
+                    let feed = crate::assembly::Feed {
+                        most: 2 * load.half_length + crate::assembly::PUT_REACH,
+                        half_length: load.half_length,
+                        place: load.places()[1],
+                        clear: &clear,
+                        bears: &bears,
+                        walk: &walk,
+                    };
                     let (effects, walks) = asm.put(
                         &mut tree,
                         &self.activities,
@@ -1458,7 +1554,13 @@ impl Engine {
                         apart(f, k),
                         &carriers,
                         &walkable,
+                        Some(&feed),
                     )?;
+                    if asm.feeding(activity)
+                        && let Some(h) = holds_on(&tree, activity)
+                    {
+                        self.fed_holds.insert(activity, h);
+                    }
                     for w in walks {
                         if let Err(r) = c.carry(w.body, walk_track(ground, &w)) {
                             eprintln!("worldd: {} did not walk beside its part: {r}", show(w.body));
@@ -2549,20 +2651,60 @@ impl Engine {
         }
         if self.asm.as_ref().is_some_and(|s| s.setting_in()) {
             let tr = tree.get_or_insert_with(|| live.frozen());
+            // FOR-FABLE 6: a fed part's walkers set off as its slide starts.
+            for (ground, walks) in self.asm.as_mut().map(|s| s.slides(now)).unwrap_or_default() {
+                for w in walks {
+                    if let Err(r) = c.carry(w.body, walk_track(ground, &w)) {
+                        eprintln!("worldd: {} did not walk beside its part: {r}", show(w.body));
+                    }
+                }
+            }
             let tracks: Vec<_> = self
                 .asm
                 .as_ref()
                 .map(|s| {
                     s.tracks(now)
                         .into_iter()
-                        .filter(|t| !t.back)
-                        .map(|t| (t.activity, t.node, t.holding.to_vec()))
+                        .map(|t| {
+                            (
+                                t.activity,
+                                t.node,
+                                t.holding.to_vec(),
+                                t.let_go,
+                                t.back,
+                                t.by,
+                            )
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
-            for (activity, node, holding) in tracks {
+            for (activity, node, holding, let_go, back, by) in tracks {
+                // FOR-FABLE 6: a fed part's holds are said without a carrier who has let go, and with it again when
+                // the part is back within its reach.
+                if let (Some(full), Some(mut said)) =
+                    (self.fed_holds.get(&activity), holds_on(tr, activity))
+                {
+                    let holds: Vec<_> = full
+                        .holds
+                        .iter()
+                        .filter(|h| !let_go.contains(&h.body))
+                        .cloned()
+                        .collect();
+                    if holds.len() != said.holds.len() {
+                        said.holds = holds;
+                        said.since = now;
+                        self.activities.next = tr.next();
+                        let word = (now, Actor::Soul(by.1), Cause::Intent(by.0));
+                        if let Err(r) = self.activities.carry_grips(tr, activity, &said, word) {
+                            eprintln!("worldd: the grips of {} were not said: {r}", show(activity));
+                        }
+                    }
+                }
+                if back {
+                    continue;
+                }
                 let mut carriers = self.reaches(tr, c, slots, activity);
-                carriers.retain(|c| holding.contains(&c.body));
+                carriers.retain(|c| holding.contains(&c.body) && !let_go.contains(&c.body));
                 if let Err(why) = crate::assembly::out_of_reach(&carriers, node)
                     && let Some(s) = self.asm.as_mut()
                 {
@@ -2579,6 +2721,11 @@ impl Engine {
         if let Some(tr) = tree.as_mut() {
             self.stop_refused(tr, now);
             self.came_back(tr, c, now);
+        }
+        if !self.fed_holds.is_empty() {
+            let asm = self.asm.as_ref();
+            self.fed_holds
+                .retain(|a, _| asm.is_some_and(|s| s.busy(*a)));
         }
         // #5067: those who walked beside a part whose seating was refused walk back beside it, from where each is, while
         // the part is on its way back.
@@ -2656,7 +2803,11 @@ impl Engine {
                         .map(|t| t.until);
                     // Those who walked beside the part walk back beside it.
                     self.walk_back.retain(|(a, _, _)| *a != activity);
-                    let (span, ground) = (until.map_or(0, |u| u - now), walked_on);
+                    // A fed part's walkers are back when its slide is, before it is lowered.
+                    let span = asm
+                        .slide_back(activity, now)
+                        .unwrap_or(until.map_or(0, |u| u - now));
+                    let ground = walked_on;
                     self.walk_back
                         .extend(walks.iter().map(|w| (activity, ground, w.back(span))));
                     let word = (now, Actor::Soul(by.1), Cause::Intent(by.0));

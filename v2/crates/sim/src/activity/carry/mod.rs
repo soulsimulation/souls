@@ -1098,6 +1098,80 @@ pub fn way(fixed: &Fixed, load: &Load, from: (Xz, Xz), to: (Xz, Xz), but: &[Quad
     Ok(())
 }
 
+/// `load`'s outline on the plan with its carry's node at `node` (its position and turn on its ground, µm), and the
+/// heights it spans above `floor` (its carriers' feet, µm in the ground's frame): what it takes up as it is held
+/// ([`Load::held_half`]) about its middle, on a set-in's track as on a carry.
+pub fn outline_at(load: &Load, (p, q): (Vec3, Quat), floor: i64) -> R<(Quad, [i64; 2])> {
+    let e = load.held_half()?;
+    let u = q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose_refusal)?;
+    if u.x == 0 && u.z == 0 {
+        return refuse(
+            "part-pose",
+            "a load held on end has no outline along the ground",
+        );
+    }
+    let plan = Load {
+        half_length: e.x,
+        half_width: e.z,
+        ..*load
+    };
+    let middle = p.y + load.above - floor;
+    Ok((
+        outline([p.x + u.x, p.z + u.z], [p.x - u.x, p.z - u.z], &plan),
+        [middle - e.y, middle + e.y],
+    ))
+}
+
+/// Whether `load` may go from its node at `from` to its node at `to` (position in a straight line, turn blended, as
+/// [`between`] has it) without meeting fixed geometry: its outline at every [`SWEEP_STEP`] of the way, at the height
+/// it has there, against every box of `fixed` it does not pass over or under; touching is not meeting (a part slides
+/// on the top of the one it will rest on). Else `part.way-blocked`, naming where and what.
+pub fn node_way(
+    fixed: &Fixed,
+    load: &Load,
+    floor: i64,
+    from: (Vec3, Quat),
+    to: (Vec3, Quat),
+) -> R<()> {
+    let d = |a: i64, b: i64| i128::from(a - b).pow(2);
+    let far = (d(from.0.x, to.0.x) + d(from.0.y, to.0.y) + d(from.0.z, to.0.z)).isqrt();
+    // A turn moves its ends: counted as a quarter circle of its half length at most.
+    let swing = if from.1 == to.1 {
+        0
+    } else {
+        i128::from(load.half_length) * 2
+    };
+    let n = i64::try_from((far + swing) / i128::from(SWEEP_STEP) + 1).unwrap_or(i64::MAX);
+    for k in 0..=n {
+        let at = between(from, to, (0, n), k)?;
+        let (q, band) = outline_at(load, at, floor)?;
+        if let Some(f) = fixed.hit_but(&q, band, &[]) {
+            return refuse(
+                "part.way-blocked",
+                format!(
+                    "at ({}, {}) mm, {} mm up, it meets the box at ({}, {}) mm",
+                    at.0.x / 1000,
+                    at.0.z / 1000,
+                    band[0] / 1000,
+                    f[0][0] / 1000,
+                    f[0][1] / 1000
+                ),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whether `load`, its carry's node at `node`, rests on a fixed box: one under its outline whose top is where its
+/// underside is, within a millimetre (a joist on the beam it slides over).
+pub fn node_bears(fixed: &Fixed, load: &Load, floor: i64, node: (Vec3, Quat)) -> R<bool> {
+    let (q, band) = outline_at(load, node, floor)?;
+    Ok(fixed.near(bounds(&q)).into_iter().any(|k| {
+        let [lo, hi] = fixed.heights[k];
+        lo < hi && (hi - band[0]).abs() <= 1_000 && overlap(&q, &fixed.quads[k])
+    }))
+}
+
 /// One step of a carry (0.135 C7): [`way`] from carriers at `from` to `to`, passing the outlines in `but`, which then
 /// keeps only those the load still meets at `to`: what it began in is passed only until it is clear of it.
 pub fn step_way(

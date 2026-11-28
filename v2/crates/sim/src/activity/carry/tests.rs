@@ -1108,7 +1108,7 @@ mod from_entry {
 mod each_step {
     use replica::rules::json::parse;
 
-    use super::super::{Fixed, Load, Quad, SWEEP_STEP, outline, way};
+    use super::super::{Fixed, Load, Quad, SWEEP_STEP, node_bears, node_way, outline, way};
 
     const M: i64 = 1_000_000;
 
@@ -1190,6 +1190,49 @@ mod each_step {
         // With no post the same step passes; a step that does not move is checked where it stands.
         assert!(way(&Fixed::new(Vec::new()), &beam, from, to, &[]).is_ok());
         assert!(way(&fixed, &beam, at(10 * M), at(10 * M), &[]).is_err());
+    }
+
+    /// FOR-FABLE 6: a 2x4 on a set-in's track, its node at any height. Level with the top of a beam it slides over it
+    /// (touching is not meeting) and rests on it; a millimetre lower it meets it; raised beside the beam it meets
+    /// nothing; raised from under it, it meets it.
+    #[test]
+    fn a_part_slides_on_the_top_of_a_beam_and_never_through_it() {
+        let load = Load::of(
+            &parse(
+                r#"{"kind": "test:two_by_four", "geometry": {"bounds_mm": [1829, 89, 38]},
+                "points": {"a": {"role": "grip", "at_mm": [-732, 44, 0]}, "b": {"role": "grip", "at_mm": [732, 44, 0]}}}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        // A beam along z at x = 572 mm, 51 mm wide, its top 1.902 m up.
+        let beam: Quad = [
+            [546_500, -1_372_000],
+            [597_500, -1_372_000],
+            [597_500, 1_372_000],
+            [546_500, 1_372_000],
+        ];
+        let fixed = Fixed::with_heights(vec![beam], vec![[1_800_000, 1_902_000]]);
+        let half = load.held_half().unwrap().y;
+        let at = |x: i64, low: i64| {
+            (
+                replica::pose::Vec3::new(x, low + half, 0),
+                replica::pose::Quat::IDENTITY,
+            )
+        };
+        let (out, top) = (2_200_000, 1_902_000);
+        assert!(node_way(&fixed, &load, 0, at(out, 1_005_500), at(out, top)).is_ok());
+        assert!(node_way(&fixed, &load, 0, at(out, top), at(0, top)).is_ok());
+        let r = node_way(&fixed, &load, 0, at(out, top - 1_000), at(0, top - 1_000)).unwrap_err();
+        assert_eq!(r.name, "part.way-blocked");
+        let r = node_way(&fixed, &load, 0, at(0, 1_005_500), at(0, top)).unwrap_err();
+        assert_eq!(r.name, "part.way-blocked", "raised from under the beam");
+        assert_eq!(node_bears(&fixed, &load, 0, at(out, top)), Ok(false));
+        assert_eq!(node_bears(&fixed, &load, 0, at(1_400_000, top)), Ok(true));
+        assert_eq!(
+            node_bears(&fixed, &load, 0, at(1_400_000, top + 50_000)),
+            Ok(false)
+        );
     }
 
     /// Held at its carriers' height (1.05 m), a load passes over a low box (a beam seated low in a bay, and one seated

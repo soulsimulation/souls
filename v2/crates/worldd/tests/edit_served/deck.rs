@@ -578,6 +578,11 @@ const FLIGHT_OFF: i64 = 800;
 /// The stair slot's place in the bay, mm: its top at the sheets' west edge (x = -914), over `s1`, on `j2`'s line.
 const STAIR_AT: [i64; 2] = [-2_164, -572];
 
+/// Where the bay's five 2x4 slots are along it, mm from its middle (`j1` to `j5`), and how far east of its middle
+/// each 2x4 of [`Bay::serve_fed`]'s world lies, along x, level with its slot.
+const FED_Z: [i64; 5] = [-1_172, -572, -2, 578, 1_178];
+const FED_PILE: i64 = 4_700;
+
 /// N2's test world with a deck bay's parts at the site, in the test kinds `test_deck_*` (`#5258`'s sizes, with a
 /// `stair` slot and a flight that hooks onto a 2x4): the bay at the site's centre, its two 12 ft frames standing loose
 /// on their slots' places, its four beams lying outside their columns (the low ones 0.5 m out, the high ones 1 m),
@@ -585,7 +590,8 @@ const STAIR_AT: [i64; 2] = [-2_164, -572];
 /// What each part is walked on and up is its kind's (`geometry.floors`, `stairs`, `ladders`): a sheet's top, the
 /// flight's stair from the ground to the deck's top, each frame's standing places and ladders. Returns the facts and
 /// the bay's slot numbers, by name.
-fn bay_world(d: &Path) -> (String, BTreeMap<String, u64>) {
+/// With `fed`, five 2x4s lie east of the bay instead of three under it.
+fn bay_world_with(d: &Path, fed: bool) -> (String, BTreeMap<String, u64>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let entries = d.join("entries");
     std::fs::create_dir_all(&entries).unwrap();
@@ -656,8 +662,11 @@ fn bay_world(d: &Path) -> (String, BTreeMap<String, u64>) {
             [x + STAIR_AT[0] - FLIGHT_OFF, 0, z + STAIR_AT[1], 0],
         ),
     ];
-    for (k, jz) in JOISTS_Z.iter().enumerate() {
+    for (k, jz) in JOISTS_Z.iter().enumerate().filter(|_| !fed) {
         things.push((format!("joist-{}", k + 2), 3, [x, 0, z + jz, 0]));
+    }
+    for (k, jz) in FED_Z.iter().enumerate().filter(|_| fed) {
+        things.push((format!("joist-{}", k + 1), 3, [x + FED_PILE, 0, z + jz, 0]));
     }
     for (k, sz) in SHEETS_Z.iter().enumerate() {
         things.push((format!("sheet-{}", k + 1), 4, [x, 0, z + sz, 0]));
@@ -724,6 +733,8 @@ struct Bay {
     low: [Id; 2],
     high: [Id; 2],
     joists: [Id; 3],
+    /// [`Bay::serve_fed`]'s five 2x4s, `j1`'s to `j5`'s.
+    fed: Vec<Id>,
     sheets: [Id; 2],
     flight: Id,
     /// The floor each sheet holds: its top.
@@ -741,8 +752,17 @@ impl Bay {
     }
 
     fn serve(tag: &str, souls: u64) -> Bay {
+        Bay::serve_with(tag, souls, false)
+    }
+
+    /// The same bay with five 2x4s lying east of it, to be fed in ([`bay_world_with`]).
+    fn serve_fed(tag: &str, souls: u64) -> Bay {
+        Bay::serve_with(tag, souls, true)
+    }
+
+    fn serve_with(tag: &str, souls: u64, fed: bool) -> Bay {
         let d = scratch(tag);
-        let (facts, slots) = bay_world(&d);
+        let (facts, slots) = bay_world_with(&d, fed);
         let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
         let w = seed_entries(
             &d,
@@ -772,6 +792,10 @@ impl Bay {
             low: [n("beam-low-l"), n("beam-low-r")],
             high: [n("beam-high-l"), n("beam-high-r")],
             joists: [n("joist-2"), n("joist-3"), n("joist-4")],
+            fed: match fed {
+                true => (1..=5).map(|k| n(&format!("joist-{k}"))).collect(),
+                false => Vec::new(),
+            },
             sheets: [n("sheet-1"), n("sheet-2")],
             flight: n("flight"),
             decks: [n("sheet-1/floor-1"), n("sheet-2/floor-1")],
@@ -945,6 +969,100 @@ impl Bay {
             self.leave(0, c);
             self.leave(1, c);
         }
+    }
+}
+
+/// The numbers after `x=` and `z=` in a refusal's detail following `words`, mm.
+fn named_place(detail: &str, words: &str) -> (i64, i64) {
+    let rest = detail.split(words).nth(1).expect("the words");
+    let num = |key: &str| -> i64 {
+        let t = rest.split(key).nth(1).expect("a number");
+        t.split(|c: char| c != '-' && !c.is_ascii_digit())
+            .next()
+            .and_then(|n| n.parse().ok())
+            .expect("a whole number")
+    };
+    (num("x="), num("z="))
+}
+
+/// FOR-FABLE 6, in a served world by Souls' intents, each on its own connection: a 2x4 brought into a standing bay.
+///
+/// - the bay's two 12 ft frames stand on their four beams, their holders gone; five 2x4s lie east of it;
+/// - two take each 2x4 and carry it toward the bay. A put from 1 m too far off is refused by name, the refusal saying
+///   where the crew's node would feed it from and which of the crew is toward the slot;
+/// - carried there (the crew in line, the part pointing at its slot), the put is admitted: the part is raised to its
+///   slot's height and slid over the near 1.8 m beam onto both. The carrier by the bay never moves and lets go as the
+///   part passes on; the one behind walks it in. Every leg is swept by the world before anyone moves
+///   (`part.way-blocked` otherwise), so no 2x4 passes through a beam or a frame;
+/// - each 2x4 ends in its slot, resting on both 1.8 m beams, and its crew leaves.
+#[test]
+fn deck_bay_each_joist_is_fed_over_the_near_beam_into_the_standing_bay() {
+    let mut k = Bay::serve_fed("deck-bay-fed", 4);
+    k.frame();
+    let (high, fed) = (k.high, k.fed.clone());
+    // A 2x4's carriers stand 1.082 m from its middle, in line with it.
+    const PLACE: i64 = 1_082;
+    for (n, (j, slot)) in fed
+        .into_iter()
+        .zip(["j1", "j2", "j3", "j4", "j5"])
+        .enumerate()
+    {
+        let dz = FED_Z[n];
+        k.walk(
+            &[
+                (2, Bay::at(FED_PILE + PLACE, dz)),
+                (3, Bay::at(FED_PILE - PLACE, dz)),
+            ],
+            "Souls 3 and 4 to a 2x4's ends",
+        );
+        let c = k.crew(2, &[3]);
+        let got = k.act(2, "part:take", c, j);
+        k.ok(got, "a 2x4 taken");
+        // Carried 1.5 m toward the bay: still too far to feed, and the refusal says where from.
+        k.walk(
+            &[
+                (3, Bay::at(FED_PILE - 1_500 - PLACE, dz)),
+                (2, Bay::at(FED_PILE - 1_500 + PLACE, dz)),
+            ],
+            "the 2x4 carried toward the bay",
+        );
+        let got = k.put(2, c, slot, Some(&high));
+        refused_as(&got, "part.out-of-reach", "a put from too far to feed");
+        assert!(
+            got.detail.contains("not fed from here: part.out-of-reach")
+                && got.detail.contains("back toward its slot"),
+            "{slot}: the refusal says how it would be fed: {}",
+            got.detail
+        );
+        let (fx, fz) = named_place(&got.detail, "it would be fed with the crew's node at");
+        let (hx, hz) = (fx - testworld::SITE_X, fz - testworld::YARD_Z);
+        assert!(
+            (2_000..=2_400).contains(&hx) && (hz - dz).abs() <= 50,
+            "{slot}: fed from beside the bay, in line with its slot: {}",
+            got.detail
+        );
+        k.walk(
+            &[(3, Bay::at(hx - PLACE, hz)), (2, Bay::at(hx + PLACE, hz))],
+            "the 2x4 carried to where it is fed from",
+        );
+        let by_bay = body_on(&k.w, body_of(&k.w, k.w.souls[3])).1;
+        let got = k.put(2, c, slot, Some(&high));
+        k.ok(got, slot);
+        assert_eq!(joints_at(&k.w, j), 2, "{slot} rests on both 1.8 m beams");
+        let after = body_on(&k.w, body_of(&k.w, k.w.souls[3])).1;
+        assert_eq!(
+            (after.x, after.z),
+            (by_bay.x, by_bay.z),
+            "{slot}: the carrier by the bay fed it from where it stood"
+        );
+        let behind = body_on(&k.w, body_of(&k.w, k.w.souls[2])).1;
+        let want = Bay::at(PLACE, hz);
+        assert!(
+            (behind.x - want.x).abs() <= 60_000 && (behind.z - want.z).abs() <= 60_000,
+            "{slot}: the carrier behind walked it in to its end: {behind:?}"
+        );
+        k.leave(2, c);
+        k.leave(3, c);
     }
 }
 
