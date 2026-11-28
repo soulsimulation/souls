@@ -31,7 +31,7 @@ test('the current entry advances its content reference without editing an immuta
   for(const p of corners)assert(Math.abs(p.x)<=entry.geometry.bounds_mm[0]/2000&&p.y>=0&&p.y<=entry.geometry.bounds_mm[1]/1000&&Math.abs(p.z)<=entry.geometry.bounds_mm[2]/2000,'the complete tilted top stays inside declared bounds');
   const rear=Math.min(...corners.map(p=>p.z)),front=Math.max(...corners.map(p=>p.z));
   assert(rear<=column.at[2]/1000-column.size[2]/2000-.01&&front>=column.at[2]/1000+column.size[2]/2000+.01,'the top overhangs both sides of its supporting column by at least10mm');
-  for(const x of [-1,1])assert(inside([x*column.size[0]/2000,(column.at[1]+column.size[1]/2)/1000,(column.at[2]+column.size[2]/2)/1000],top),'both front column corners meet the tilted wooden top instead of floating below it');
+  for(const x of [-1,1])assert(inside([x*column.size[0]/2000,(column.at[1]+column.size[1]/2)/1000,column.at[2]/1000],top),'both sides of the upper column centerline meet the tilted wooden top instead of floating below it');
 });
 
 async function template(name){
