@@ -37,8 +37,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-/// The seconds between polls a request starts with (RFC 8628 §3.2's default).
-pub const INTERVAL: u64 = 5;
+/// The seconds between polls a request starts with (N12: 1 s, not RFC 8628 §3.2's default of 5, which kept a newly
+/// approved Soul waiting 2.5 s on average for its token). At 100 clients pairing at once that is 100 polls a second,
+/// each one indexed row read.
+pub const INTERVAL: u64 = 1;
 /// Wrong short codes one account may send in [`GUESS_WINDOW`] seconds.
 pub const GUESSES_MOST: usize = 5;
 pub const GUESS_WINDOW: u64 = 600;

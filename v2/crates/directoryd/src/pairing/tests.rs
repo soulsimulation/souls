@@ -160,17 +160,14 @@ fn a5_polling_too_soon_is_told_to_slow_down_by_5_s() {
     let (p, _) = store();
     let (secret, _) = ask(&p, "studio laptop", None, false, T0);
     assert_eq!(p.poll(&secret, T0 + INTERVAL), Poll::Pending);
-    assert_eq!(
-        p.poll(&secret, T0 + INTERVAL + 1),
-        Poll::SlowDown(INTERVAL + 5)
-    );
+    assert_eq!(p.poll(&secret, T0 + INTERVAL), Poll::SlowDown(INTERVAL + 5));
     // The interval stays grown: a poll 5 s later is still too soon.
     assert_eq!(
-        p.poll(&secret, T0 + INTERVAL + 6),
+        p.poll(&secret, T0 + INTERVAL + 5),
         Poll::SlowDown(INTERVAL + 10)
     );
     assert_eq!(
-        p.poll(&secret, T0 + INTERVAL + 6 + INTERVAL + 10),
+        p.poll(&secret, T0 + INTERVAL + 5 + INTERVAL + 10),
         Poll::Pending
     );
 }
