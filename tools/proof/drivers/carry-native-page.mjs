@@ -64,6 +64,18 @@ const SCENES = {
       joists: { names: ['two-by-four-1', 'two-by-four-2', 'two-by-four-3', 'two-by-four-4', 'two-by-four-5'], slots: ['j1', 'j2', 'j3', 'j4', 'j5'],
         turnAt: ['-26.5,22.2', '-26.5,22.8', '-26.5,23.37', '-26.5,23.95', '-26.5,24.55'], turn: '90', under: ['-24,22.2', '-24,22.8', '-24,23.37', '-24,23.95', '-24,24.55'],
         crews: [['ada', 'bo', [0, 3]], ['di', 'cy', [1, 4]], ['ed', 'fi', [2]]] } } },
+  // The climb (B5, attempt 23; CARRY_SCENE=climb; #5281's ways): the 12 ft bay built as in attempt 21 (frames carried,
+  // turned and raised into deck_bay, four deck beams, the holders let go), then Bo reads `object <deck-frame-1>` and
+  // climbs by its first `climb to` offer's name (`object <frame> climb to <name>`), stands there, and comes back down
+  // by walking onto the ground (`act <ground id>`: a Soul's walk names a thing, not a point). The world writes no
+  // rows while a body is on a ladder, so the page's drawn position of the climber is sampled every 100 ms.
+  climb: { who: ['ada', 'bo', 'cy', 'di', 'ed', 'fi'], kind: 'mars:rack_upright_12ft', entry: 'content/kinds/construction/rack_upright_12ft.json',
+    view: 'post=0&hour=12:00&eye=-17.5,5.2,31&at=-25,1.2,22',
+    third: { bay: 'deck-bay', frames: [['deck-frame-1', 'ada', 'bo', ['to -26,17', 'turn -90', 'to -24,20.095'], null, 'upright_a'],
+      ['deck-frame-2', 'di', 'cy', ['to -26,30', 'turn 90', 'to -24,26.649'], null, 'upright_b']],
+      beam: ['deck-beam-1', 'ed', 'fi', '-25.022,23.372', 'beam_low_l'], more: [['deck-beam-2', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_low_r'],
+        ['deck-beam-3', ['-25.022,23.372'], 'beam_high_l'], ['deck-beam-4', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_high_r']],
+      climb: { who: 'bo', frame: 'deck-frame-1' } } },
 };
 const SCENE = SCENES[process.env.CARRY_SCENE ?? 'beam'];
 if (!SCENE) throw Error('carry-proof.scene');
@@ -82,7 +94,7 @@ async function asked(state, who, ...words) {
   const seat = state.seats[who];
   const result = await new Promise((ok, no) => {
     const child = execFile(process.execPath, [join(state.recipe.checkout, 'v2/client/src/cli/souls.mjs'), ...words, '--soul', seat.soul],
-      { cwd: seat.folder, env: seatEnv(seat.home, state.recipe.pkg), signal: state.signal, timeout: words[0] === 'carry' && words[1] === 'grip' ? 45000 : words[0] === 'carry' && words[1] === 'to' ? 40000 : 15000, maxBuffer: 4 << 20 },
+      { cwd: seat.folder, env: seatEnv(seat.home, state.recipe.pkg), signal: state.signal, timeout: words[0] === 'carry' && words[1] === 'grip' ? 45000 : words[0] === 'carry' && words[1] === 'to' ? 40000 : words[0] === 'act' && words.includes('--wait') ? 75000 : 15000, maxBuffer: 4 << 20 },
       (error, stdout, stderr) => { const result = { who, words, stdout, stderr, code: child.exitCode, signal: child.signalCode }; save(state, `command-carry-${++state.ordinal}.json`, result); if (error) no(error); else { try { ok(JSON.parse(stdout)); } catch (e) { no(e); } } });
     state.recipe.registerCommand(child);
   });
@@ -381,6 +393,43 @@ async function raiseSurvey({ state, page, paths, signal, check, arm, root }) {
     save(state, 'survey-measurement.json', { note: 'The contact oracle on the frame\'s crew: a measurement, not a check of this scene.', observer, watch: state.watch ?? null, raises: state.raises ?? [] });
   } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
 }
+/** The drawn position of `who`'s body (`residents()`: its entity's p) every 100 ms until `until` resolves; the world
+ *  writes no rows while a body is on a ladder or a stair, so this is what the page shows meanwhile. */
+function sampled(state, page, who, until) {
+  const out = [], t0 = Date.now(), soul = state.seats[who].soul;
+  let on = true;
+  const going = (async () => { while (on) { try { const r = await page.evaluate(id => (window.__soulsEntity?.residents?.() ?? []).find(s => s.id === id) ?? null, soul); out.push({ ms: Date.now() - t0, p: r?.p ?? null, activity: r?.activity ?? null }); } catch {} await delay(100, state.signal).catch(() => { on = false; }); } })();
+  return until.finally(async () => { on = false; await going; }).then(() => out);
+}
+/** The largest drawn step of a sampled body between two samples 100 ms apart, metres, and where it was. */
+const biggestStep = rows => rows.reduce((m, r, i) => { const a = rows[i - 1]?.p, b = r.p; if (!a || !b) return m; const d = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]); return d > m.m ? { m: d, at_ms: r.ms, from: a, to: b } : m; }, { m: 0 });
+/** One Soul climbs `frame` by its own `object <frame>`'s first `climb to` offer, stands there, then walks back onto the
+ *  ground (`act <ground id>`, the bay's parent); each move is waited for (`look` until its room is the place, or the
+ *  walk's receipt). Returns the answers and the climber's sampled drawn positions. */
+async function climbed(state, page, who, frame, bay, tag) {
+  const wait = ms => delay(ms, state.signal), shot = async step => { await page.screenshot({ path: join(state.paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
+  const seen = await cli(state, who, 'object', frame), offer = (seen.offers ?? []).find(o => /^climb to /.test(o.name));
+  const record = { who, frame, places: seen.places ?? null, ways_up: seen.ways_up ?? null, offers: (seen.offers ?? []).map(o => o.name) };
+  if (!offer) return { ...record, climb: 'no climb offer' };
+  record.climbTo = offer.name;
+  const ground = (await cli(state, 'ada', 'object', bay)).parent;
+  const up = (async () => {
+    const sent = await asked(state, who, 'object', frame, ...offer.name.split(' '));
+    record.sent = { ok: sent.ok === true, code: sent.code ?? null };
+    for (let i = 0; i < 120; i++) { const l = await asked(state, who, 'look'); if (l.room?.kind === 'eden:floor') { record.up = { room: l.room.name, after_ms: i * 500 }; return; } await wait(500); }
+    record.up = { room: null };
+  })();
+  const shots = (async () => { for (let i = 1; i <= 4; i++) { await wait(1500); await shot(`${tag}-climbing-${i}`); } })();
+  record.upSamples = await sampled(state, page, who, up); await shots;
+  await wait(1500); await shot(`${tag}-on-the-standing-place`); await wait(4000); await shot(`${tag}-standing-there`);
+  const down = (async () => { const a = await asked(state, who, 'act', ground, '--wait'); record.down = { phase: a.phase ?? null, code: a.code ?? null }; })();
+  const downShots = (async () => { for (let i = 1; i <= 4; i++) { await wait(1500); await shot(`${tag}-coming-down-${i}`); } })();
+  record.downSamples = await sampled(state, page, who, down); await downShots;
+  record.after = (await asked(state, who, 'look')).room ?? null;
+  await wait(1500); await shot(`${tag}-back-on-the-ground`);
+  record.upStep = biggestStep(record.upSamples); record.downStep = biggestStep(record.downSamples);
+  return record;
+}
 /** The first third on the page (all of it after the setup gate). Its checks: every command but the beam's put accepted (a
  *  refusal for a moment asked again), no page error; the put's answer and the oracle on the first frame's crew are measured. */
 async function firstThird({ state, page, paths, signal, check, arm, root }) {
@@ -469,6 +518,7 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
       if (put2?.ok === true) {
         for (const [k, [, lift, foot]] of T.frames.entries()) for (const who of [lift, foot]) leaves.push({ who, ...(await asked(state, who, 'carry', 'leave', crews[k])) });
         await wait(3000); await shot('holders-let-go'); await wait(3000); await shot('bay-stands');
+        if (T.climb && leaves.every(l => l.ok === true)) state.climbs = [await climbed(state, page, T.climb.who, frames.find(f => f.name === T.climb.frame).id, bay, 'climb')];
         // the joists across the high beams, by three crews at once, each a few seconds behind the one before
         if (T.joists && leaves.every(l => l.ok === true)) {
           if (!js.length) for (const name of T.joists.names) js.push(await find(state, name));
@@ -492,7 +542,7 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
     check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
     const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; });
     save(state, 'survey-measurement.json', { note: 'The contact oracle on the first frame\'s crew, and the beam put\'s answer: measurements, not checks of this scene.', observer, watch: state.watch ?? null, beamPut: { ok: put.ok === true, code: put.code ?? null, detail: put.detail ?? null },
-      shortWalks: state.shortWalks ?? [], puts, joistPuts: state.joistPuts ?? [], beam2Put: put2 && { ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null }, leaves: leaves.map(l => ({ who: l.who, ok: l.ok === true, code: l.code ?? null, detail: l.detail ?? null })), raises: state.raises ?? [] });
+      shortWalks: state.shortWalks ?? [], puts, joistPuts: state.joistPuts ?? [], beam2Put: put2 && { ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null }, leaves: leaves.map(l => ({ who: l.who, ok: l.ok === true, code: l.code ?? null, detail: l.detail ?? null })), raises: state.raises ?? [], climbs: state.climbs ?? [] });
   } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
 }
 /** A load carried by two as a survey: taken, walked its legs, set down. Its checks: every command accepted, no page error;
