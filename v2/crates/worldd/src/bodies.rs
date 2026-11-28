@@ -2158,14 +2158,20 @@ impl Bodies {
                 {
                     {
                         let g = self.runner.granted.get(&body).copied();
-                        let tb = self.town.spots.table(&sim::spots::Target::new(t, p));
+                        let from = self.pose(body).unwrap();
+                        let (sn, sr, fine) = match self.town.view_for(body) {
+                            Ok(v) => (v.stand_near(t, p, 0, None), v.stand_reached(t, p, from), v.stand_near(t, p, 700_000, None)),
+                            Err(_) => (None, None, None),
+                        };
+                        let tb: Option<&sim::spots::Table> = None;
+                        let _ = (&sn, &sr, &fine);
                         use std::io::Write as _;
                         let mut f = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/n4diag.log").unwrap();
                         let _ = writeln!(
                             f,
-                            "worldd: N4DIAG walk {} of {} to {:?} on {}: {mm} mm short; granted {:?} (there {:?}); passage_at {:?}; table clear {:?} places {:?}; pose {:?}",
+                            "worldd: N4DIAG walk {} of {} to {:?} on {}: {mm} mm short; granted {:?} (there {:?}); passage_at {:?}; table clear {:?} places {:?}; pose {:?}; stand_near0 {:?} stand_reached {:?} near700 {:?}",
                             replica::world_model::show(id), replica::world_model::show(body), p, replica::world_model::show(t), g, g.and_then(|g| self.gap_to(body, t, g)),
-                            self.town.passage_at(t, p), tb.map(|x| x.clear), tb.map(|x| x.places.len()), self.pose(body)
+                            self.town.passage_at(t, p), tb.map(|x| x.clear), tb.map(|x| x.places.len()), self.pose(body), sn, sr, fine
                         );
                     }
                     let crowd = self.short.contains(&id);
