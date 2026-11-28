@@ -68,14 +68,22 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   the fault named; no restart is needed. A degraded world does not sleep, and the records it makes meanwhile wait
   for the stream as below. A stream that ends after serving (a local fault, such as the disk) says
   `"state":"stopped"` with its fault; a restart starts it again.
-- **A public stream behind the world.** The stream writes each half second of the world as a part, with several
-  syncs to the disk, on its own thread. When that is slower than the world makes records (a disk busy under other
+- **A public stream behind the world.** The stream writes each half second of the world as a part on its own thread:
+  the part's files (its recovery objects, the chain's head, the part and its words, the pointer) are written, synced
+  together with one wait on the disk, then named, each after the files it names (until late November 2026, four waits
+  a part one after another; on a disk shared with other writers that put the stream minutes behind). When that is slower than the world makes records (a disk busy under other
   writers, a recovery that takes minutes, a degraded stream), viewers see the world late, and the records wait for
   the stream: up to 64 MiB of them and one record more in memory, the rest in the log on the disk, where every record already is and
   which the compactor keeps until the stream has published it. The stream reads them from there, in order, once it
   has taken those in memory. Being behind by any time costs at most that memory, and nothing is dropped.
   `health.json` has `"stream_queue":{"queued":<records>,"queued_bytes":<bytes>,"in_log":<records>}`: `in_log` that
-  stays above 0 is a stream behind the world, and how far is the pointer's newest part against the world's time.
+  stays above 0 is a stream behind the world. `"stream_behind_ms":<ms>` is how far: the wall time now less the one at
+  which the newest world time the pointer names fell (about 0.4 to 1.1 s for a world that keeps up: a part is half a
+  second, written 0.1 s after its end). `"stream_io":{"parts":…,"part_syncs":…,"part_waits":…,"syncs":…,"waits":…,
+  "bytes":…}` counts what the stream's thread wrote and synced since the start: one wait a part, at most eight files
+  synced (a part that starts a new generation, one in 240, writes its pointer after the generation's baseline,
+  a few more).
+  `STREAM_PROFILE=1` prints each stage's time, bytes, syncs and waits every 10 s to the journal.
   Before this (November 2026) every waiting record was held in memory: at 1,000 agents on a busy disk that was
   about 2 GB an hour.
 - **A store that stalls after the stream serves** (R15). Viewers read the stream from the machine's disk. Each part,
