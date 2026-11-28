@@ -5218,7 +5218,7 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
         audience: Audience::Everyone,
         fields: BTreeMap::new(),
     };
-    let got = creator_edit(place("mars:rack_bay@", Vec3::new(56 * M, 0, -24 * M), Quat::IDENTITY));
+    let got = creator_edit(place("mars:rack_bay@", Vec3::new(56 * M, 0, -30 * M), Quat::IDENTITY));
     assert_eq!(got.kind, 1, "a bay: {got:?}");
     let bay = got.names[&1];
     let (copy, _) = served_copy(&w);
@@ -5235,7 +5235,7 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
     let half = 759_250_125;
     let face_up = Quat::new(half, -half, 0, 0).unwrap();
     let lie = Quat::from_yaw_mdeg(90_000).unwrap().then(face_up).unwrap();
-    let pile = Vec3::new(62 * M, spec.half_thick, -24 * M);
+    let pile = Vec3::new(62 * M, spec.half_thick, -30 * M);
     let got = creator_edit(place("mars:rack_upright@", pile, lie));
     assert_eq!(got.kind, 1, "a frame on the pile: {got:?}");
     let frame = got.names[&1];
@@ -5301,8 +5301,9 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
     let h0 = nq.rotate(Vec3::new(M, 0, 0)).unwrap();
     // The turn that takes its length to -z, applied to the carry's heading.
     let a = (-(len.z as f64)).atan2(len.x as f64);
-    let want = -std::f64::consts::FRAC_PI_2 * -1.0;
-    let turn = want - a;
+    let want = std::f64::consts::FRAC_PI_2;
+    // The shorter way round (the world takes it so too).
+    let turn = (want - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
     let (c, sn) = (turn.cos(), turn.sin());
     let heading = [(h0.x as f64 * c + h0.z as f64 * sn) as i64, (-(h0.x as f64) * sn + h0.z as f64 * c) as i64];
     let got = hands[1].act(
