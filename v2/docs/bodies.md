@@ -81,9 +81,9 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    taken in turns: a waiter passed over by later ones twice (six times at a narrow link) goes next. A walk held near its goal by a body at rest nearer it sets field 49 (1)
    on its own body and is done short of it; the world writes its `souls:move-ended` as
    `done.as-near-as-the-crowd-allows` and takes the field off; so does a walk that reached the place it was granted
-   off a point it may stand on and reach clear of every doorway and stair, a body standing in that point's room when
-   it was granted (#5279 follow-up). Such an end carries field 7 (how far short, mm) and field 11, the other body
-   nearest the point (within 1.4 m), which held it off. A walk to its own granted spot ends so only when a
+   off a point it may stand on and reach clear of every doorway and stair while another body stands within 1.4 m of
+   the point (#5279 follow-up). Such an end carries field 7 (how far short, mm) and field 11, the other body nearest
+   the point then (within 1.4 m). A walk to its own granted spot ends so only when a
    body at rest stands on that spot, or once held there past a way round's ticks; its spot is then released. A
    place whose own standing spots its walk reaches are all held overflows (A2-5): the next sent there is granted the
    nearest free standing point round it on the open ground (never in a room), out to 15 m, a body's room from every
