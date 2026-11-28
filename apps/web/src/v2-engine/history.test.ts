@@ -309,3 +309,29 @@ test('#3358: a read ahead asks the worker for the window\'s first bundle, from t
     globalThis.fetch = realFetch; (globalThis as { location?: unknown }).location = realLocation;
   }
 });
+
+test('recorded carry windows retain full pose, independent membership and exact contact phases for seek playback',async()=>{
+ const [{CarriedParts,bundledEntries},{carryPageAt}]=await Promise.all([import('./take-parts.ts'),import('./carry-page.ts')]);
+ (globalThis as{location?:unknown}).location??={href:'http://fixture.invalid/w/history/'};
+ const crew={...place,id:'crew',kind:'mars:carry',parent:'w.0',slots:[[1,0,0,0]]},load={...place,id:'load',kind:'fixture:load',parent:'crew',slot:1},member={body:'b.7',role:'souls:front',soul:'s',link:'l',intent:'i'},grips={crew:'crew',load:'load',phase:'souls:carry',sinceUs:T0,holds:[{body:'b.7',grip:'point:g',gripUm:[0,0,0]as[number,number,number],handsUm:[[0,0,-200000],[0,0,200000]]as[[number,number,number],[number,number,number]]}]};
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){const s:Seeked={seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[place,body(0),crew,load],samples:[['crew','w.0',null,T0,0,0,0,[Q,0,0,0]],['crew','w.0',null,T0+2e6,0,0,0,[0,0,Q,0]]],carryChanges:[{at:T0,node:'crew',members:[member]},{at:T0,node:'crew',grips}],timeline:{from:T0,transitions:[{at:T0+2e6,nodes:[{...crew,at:T0+2e6,rot:[0,0,Q,0]}],removed:[],samples:[['crew','w.0',null,T0+2e6,0,0,0,[0,0,Q,0]]]}]}};queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s}}as MessageEvent));},terminate(){}};
+ const parts=new CarriedParts({apply:()=>{}},bundledEntries({load:{kind:'fixture:load',points:{g:{at_mm:[0,0,0]}},geometry:{bounds_mm:[1000,1000,3000]}}})),h=new V2History('/history/',()=>w as unknown as Worker,{rulesVersion:'fixture'},undefined,parts),from=T0/TICK_US;await h.chunks(from,from+2*TICKS,2);const recorded=h.carry(T0+1e6)!;assert(recorded);const f=carryPageAt(T0+1e6,recorded.bodies,recorded.parts)!;assert.deepEqual(f.errors,[]);assert.equal(Object.keys(f.bodies).length,1);assert.equal(f.observations[0].members?.[0].body,'b.7');assert(Math.abs(f.observations[0].pose!.q[2]-Math.SQRT1_2)<1e-8);h.stop();
+});
+
+test('validated timeline preserves within-bundle birth, reparent/full rotation and removal at native times',async()=>{
+ const {CarriedParts,bundledEntries}=await import('./take-parts.ts');
+ (globalThis as{location?:unknown}).location??={href:'http://fixture.invalid/w/history/'};
+ const born=T0+10e6,moved=T0+12e6,gone=T0+15e6;
+ const actor={...body(0),at:born},frame={...place,id:'frame',parent:'w.0',slot:null,pos:[2e6,0,0]as[number,number,number],rot:[0,0,Q,0]as[number,number,number,number]},load={...place,id:'load',kind:'fixture:load',parent:'w.0',pos:[1e6,0,0]as[number,number,number]};
+ const w={onmessage:null as null|((e:MessageEvent)=>void),postMessage(m:{seq:number;at:number}){const s:Seeked={seq:m.seq,at:m.at,start:T0,length:BUNDLE,next:null,nodes:[place,load],samples:[],timeline:{from:T0,transitions:[{at:born,nodes:[actor,frame],removed:[],samples:[]},{at:moved,nodes:[{...load,parent:'frame',pos:[0,0,1e6],rot:[0,0,0,Q]}],removed:[],samples:[]},{at:gone,nodes:[],removed:['b.7','load','frame'],samples:[]}]}};queueMicrotask(()=>w.onmessage?.({data:{t:'seeked',s}}as MessageEvent));},terminate(){}};
+ const parts=new CarriedParts({apply:()=>{}},bundledEntries({load:{kind:'fixture:load',points:{g:{at_mm:[0,0,0]}},geometry:{bounds_mm:[1000,1000,3000]}}}));
+ const h=new V2History('/history/',()=>w as unknown as Worker,{rulesVersion:'fixture'},undefined,parts),from=T0/TICK_US;
+ const chunks=await h.chunks(from,from+100*TICKS,100);assert.equal(chunks.length,100);
+ const sample=(age:number)=>sampleTake(chunks.find(c=>c.fromTick===from+age*TICKS)!.take as unknown as Take,0);
+ assert.equal(sample(8).entities[E],undefined,'later body must not leak backward into the baseline');
+ assert(sample(11).entities[E],'actual birth becomes visible');assert.equal(sample(17).entities[E],undefined,'actual removal stops depiction');
+ const window=h.carry(T0+13e6)!;assert(window);assert(window.bodies.has('b.7'),'early binding survives final bridge pruning over a long window');assert.equal(window.parts.recorded.pose('frame',T0+9e6),null);
+ assert.deepEqual(window.parts.recorded.pose('load',T0+11e6)?.p,[1,0,0]);
+ const transformed=window.parts.recorded.pose('load',T0+13e6)!;assert.deepEqual(transformed.p,[2,0,-1]);assert(Math.abs(transformed.q[1])===1);
+ assert.equal(window.parts.recorded.pose('load',T0+16e6),null);h.stop();
+});

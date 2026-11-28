@@ -7,7 +7,8 @@
 // place's name (import-eden's field 4, a SHA-256 of its words) is a `[hash, words]` row of the same files (#3574).
 import init, { StreamPlayer, readPointer } from 'replica';
 import * as replica from 'replica';
-import { decode, encode } from 'cborg';
+import { decode } from 'cborg';
+import { encode } from './profile.ts';
 import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from './sound-record.ts';
 import { readChanged } from './changed.ts';
@@ -16,6 +17,7 @@ import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
 import { courseLeaves, coursePlaces, type CoursePlaces } from '../course-samples.ts';
 import { unreadFormat } from '../stream-format.ts';
+import {nativeId as key,carryFields,carryChangesInPart} from './carry-record.ts';
 import { moveRec } from './move-record.ts';
 import { backoffMs } from './backoff.ts';
 
@@ -41,7 +43,6 @@ const post = (m: Msg, transfer: Transferable[] = []) => scope.postMessage(m, tra
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 type IdValue = [Uint8Array, number];
-const key = (id: IdValue) => `${hex(id[0])}.${num(id[1])}`;
 const rows = (v: unknown) => (v as unknown[][] | undefined)?.map((r) => r.map(num));
 
 /** How long a pointer or part read may take before it is given up (25 Nov): a read that never answers would hold the
@@ -138,6 +139,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   const tint = f.get(145);
   const text = (t: unknown) => (typeof t === 'string' ? t : t instanceof Uint8Array ? new TextDecoder().decode(t) : null);
   if (Array.isArray(tint)) rec.tint = tint.flatMap((r) => (Array.isArray(r) && r.length === 2 && text(r[0]) !== null ? [[text(r[0])!, num(r[1])] as [string, number]] : []));
+  carryFields(rec,f); // membership, holds and (#5134) where an activity's node holds its slots' riders
   const fields = fieldsOf(f); // #3871: its kind's state, by field number
   if (fields) rec.fields = fields;
   const sky = skyFields(f); // V19: the world node's day, night and weather
@@ -386,7 +388,9 @@ async function run(stream: URL) {
     else fetching.delete(path(p, `${n}.text`));
     for (const x of said) if (!x.private) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
-    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds });
+    let carryChanges:PartRec['carryChanges']=[],carryError:string|undefined;
+    try{carryChanges=carryChangesInPart(bytes);}catch(error){carryError=String(error);}
+    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds, carryChanges, ...(carryError?{carryError}:{}) });
     return true;
   };
   const tell = () => {
