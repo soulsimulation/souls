@@ -5429,7 +5429,9 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
         audience: Audience::Everyone,
         fields: BTreeMap::new(),
     };
-    let got = creator_edit(place("mars:rack_bay@", Vec3::new(56 * M, 0, -30 * M), Quat::IDENTITY));
+    // 2 m north of the pile's line: the frame's middle, set down south of upright_a, stays on the test world's ground
+    // (cut only in its 16 m squares that hold something: it ends at z -32 m).
+    let got = creator_edit(place("mars:rack_bay@", Vec3::new(56 * M, 0, -28 * M), Quat::IDENTITY));
     assert_eq!(got.kind, 1, "a bay: {got:?}");
     let bay = got.names[&1];
     let (copy, _) = served_copy(&w);
