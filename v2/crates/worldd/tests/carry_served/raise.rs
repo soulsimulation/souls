@@ -420,3 +420,107 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     }
     drop(served);
 }
+
+/// #5067 (orienting): two Souls carry the loose rack upright lying, then turn it a quarter turn about its middle
+/// (`carry:turn`): the world walks both round with it, the load turns a motion sample a tick at most 1.6 degrees a
+/// tick, its middle stays put, the world says `souls:carry-track` `souls:turn`, and the carry goes on at its new
+/// heading: set down, it lies turned a quarter. A heading of zero is refused by name.
+#[tokio::test(flavor = "multi_thread")]
+async fn turn_two_souls_turn_a_lying_frame_a_quarter_turn_about_its_middle() {
+    let d = scratch("cturn");
+    let facts = world(&d);
+    let socket = d.join("s");
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, frame) = (im.nodes["ground"], im.nodes["loose-upright"]);
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &ids).await;
+    let mut souls = Vec::new();
+    for (s, t) in ids.iter().zip(&tokens) {
+        souls.push(Soul::connect(&url, *s, lineage, t).await);
+    }
+    for (j, s) in souls.iter_mut().enumerate() {
+        s.act("eden:walk", ground, point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)))
+            .await
+            .expect("born");
+    }
+    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
+    let l = Load::of(&construction("rack_upright.json")).unwrap();
+    let at = upright_at();
+    let [back, front] = l.places();
+    let places = [spot(at, front, false), spot(at, back, false)];
+    for (k, p) in places.iter().enumerate() {
+        souls[k].send("eden:walk", ground, point(*p)).await;
+    }
+    for s in souls.iter_mut() {
+        s.answer().await.expect("walks to its end");
+    }
+    together(&dir, &bodies, &places, 60).await;
+    let offered = souls[0]
+        .act(
+            "activity:offer",
+            ground,
+            BTreeMap::from([
+                (1, carry_kind(&dir)),
+                (2, Value::Text(Name::new(FRONT).unwrap())),
+                (3, Value::Array(vec![bodies[1].to_value()])),
+            ]),
+        )
+        .await
+        .expect("the carry offered");
+    let carry = carry_made(&dir, &offered);
+    souls[1].act("activity:accept", carry, BTreeMap::new()).await.expect("accepts");
+    souls[0]
+        .act("carry:lift", carry, BTreeMap::from([(1, frame.to_value())]))
+        .await
+        .expect("lifted, laid flat between them");
+    said(&dir, &served, carry, "souls:lifted", 1, 20).await;
+    let before = samples(&dir, carry);
+    let (p0, q0) = *before.last().unwrap();
+    let dir_of = |q: replica::pose::Quat| q.rotate(Vec3::new(M, 0, 0)).unwrap();
+    let h0 = dir_of(q0);
+    // A heading of nothing is no turn.
+    let none = souls[1]
+        .act("carry:turn", carry, BTreeMap::from([(3, point(Vec3::ZERO).remove(&1).unwrap())]))
+        .await;
+    assert_eq!(none.map(|_| ()), Err("carry-turn-heading".to_owned()));
+    // A quarter turn, from east toward north: its heading now turned about +y.
+    let want = Vec3::new(h0.z, 0, -h0.x);
+    souls[1]
+        .act("carry:turn", carry, BTreeMap::from([(3, point(want).remove(&1).unwrap())]))
+        .await
+        .expect("the turn begins");
+    said(&dir, &served, carry, "souls:turn", 1, 10).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let all = samples(&dir, carry);
+    let turn = &all[before.len() - 1..];
+    let (p1, q1) = *turn.last().unwrap();
+    let h1 = dir_of(q1);
+    let cos = (i128::from(h1.x) * i128::from(want.x) + i128::from(h1.z) * i128::from(want.z)) * 1000
+        / (i128::from(M) * (i128::from(want.x).pow(2) + i128::from(want.z).pow(2)).isqrt().max(1));
+    let step = turn
+        .windows(2)
+        .map(|w| {
+            let (a, b) = (dir_of(w[0].1), dir_of(w[1].1));
+            (i128::from(a.x - b.x).pow(2) + i128::from(a.z - b.z).pow(2)).isqrt()
+        })
+        .max()
+        .unwrap_or(0);
+    let moved = (i128::from(p1.x - p0.x).pow(2) + i128::from(p1.z - p0.z).pow(2)).isqrt();
+    println!(
+        "turned: {} samples, heading {h0:?} to {h1:?} ({cos} thousandths of the one asked), at most {step} µm of its \
+         direction a tick, its middle {moved} µm off",
+        turn.len()
+    );
+    assert!(cos >= 990, "a quarter turn: {cos}");
+    assert!(turn.len() >= 50, "a track, not a step: {}", turn.len());
+    assert!(step <= 30_000, "at most about 1.6 degrees a tick: {step}");
+    assert!(moved <= 150_000, "about its middle: {moved} µm");
+    // The carry goes on at its new heading: set down, it lies turned.
+    souls[0].act("carry:set-down", carry, BTreeMap::new()).await.expect("set down");
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    let laid = moves_of(&dir, frame).last().cloned().expect("laid");
+    assert_eq!(laid.frame.node, ground);
+    drop(served);
+}
