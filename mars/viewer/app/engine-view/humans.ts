@@ -106,7 +106,7 @@ export type ClipOrigin = {
   /** Internal collapsed pose, used only by the isolated iterative evaluator. */
   drawn?: DrawnOrigin;
 };
-export type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion; feet?: THREE.Vector3[]; arms?: { name: string; p: THREE.Vector3; q: THREE.Quaternion }[] };
+export type DrawnOrigin = { bones: { p: THREE.Vector3; q: THREE.Quaternion }[]; offset: THREE.Vector3; q: THREE.Quaternion; feet?: THREE.Vector3[]; arms?: { name: string; p: THREE.Vector3; q: THREE.Quaternion }[]; palms?: THREE.Vector3[] };
 function poseBones(model:THREE.Object3D) {
   const joints:THREE.Object3D[]=[];model.traverse(o=>{if((o as THREE.Bone).isBone)joints.push(o);});return joints;
 }
@@ -1962,6 +1962,8 @@ export class HumanViews {
 
   private blendClipOrigin(v: View, c: ClipOrigin, time: number, sourcePose: boolean) {
     const h=v.rig.holder, root=new THREE.Vector3(...v.cur.p), nativeQ=new THREE.Quaternion().setFromAxisAngle(UP,-v.cur.yaw);
+    const localPalm=(arm:Arm)=>palm(arm,V()).sub(root).applyQuaternion(nativeQ.clone().invert());
+    const palms=v.seatSample?undefined:v.arms.map(localPalm);
     const joints=poseBones(v.rig.model);
     const target={bones:joints.map(o=>({p:o.position.clone(),q:o.quaternion.clone()})),p:h.position.clone(),q:h.quaternion.clone()};
     if(v.clipContext!==c.context){v.clipOrigins?.clear();v.clipContext=c.context;}
@@ -1987,6 +1989,7 @@ export class HumanViews {
             if(v.seatSample&&(v.cur.hands.left||v.cur.hands.right||v.formPress?.length))evaluator.pose(evaluator.views.get(h.name)!,1,undefined,true);else evaluator.render(1);
             const old=evaluator.bodyObject(h.name)!;origin=drawnOrigin(old,old,root,nativeQ);
             if(v.seatSample){const view=evaluator.views.get(h.name)!;origin.feet=seatFootOffsets(view);origin.arms=view.ownerArmBase;}
+            else origin.palms=evaluator.views.get(h.name)!.arms.map(localPalm);
             if(!sourcePose){if(cache.size>=32)cache.delete(cache.keys().next().value!);cache.set(key(i),origin);}
           }
         } finally {evaluator.clear();}
@@ -1994,7 +1997,17 @@ export class HumanViews {
     }
     if(!origin)return;
     const k=smooth(c.age/CLIP_FADE);
-    if(v.seatSample)blendSeatDrawn(v,joints,target,origin,k,root,nativeQ);else blendDrawn(h,joints,target,origin,k,root,nativeQ);
+    if(v.seatSample)blendSeatDrawn(v,joints,target,origin,k,root,nativeQ);else{
+      blendDrawn(h,joints,target,origin,k,root,nativeQ);
+      // Bone slerp can bow a free hand into nearby scenery even when both endpoint poses clear it.
+      // Keep the immutable palm chord; the existing fixed-length solver retains its bend/reach policy.
+      if(palms&&origin.palms?.length===v.arms.length)v.arms.forEach((arm,i)=>{
+        const goal=origin.palms![i].clone().lerp(palms[i],k).applyQuaternion(nativeQ).add(root);
+        if(goal.distanceToSquared(palm(arm,V()))<1e-16)return;
+        const pole=arm.lower.getWorldPosition(V()).sub(arm.upper.getWorldPosition(V()));
+        armTo(arm,goal,1,BODY_MODEL.maxExtension,h,pole);
+      });
+    }
   }
 
   private blendPostureOrigin(v: View, pc: PostureChange, time: number, alpha: number, reach: Reach | undefined, sourcePose: boolean, phase: number) {

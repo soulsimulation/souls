@@ -87,11 +87,11 @@ test('representative production shoes clear the lectern base and stay over the a
 // public fixture uses synthetic identities; no recorded Soul/body identifier belongs in a test.
 // The production casual fit supplies its normal .9549596 scale; no model/pose override is used.
 const STORY_END=4.8,STORY_END_PHASE=.07647228240966797;
-function storyReturnTake(id){
+function storyReturnTake(id,fromTick=1000*1e6/TICK_US,ticks=120){
   const epoch=1000,at=s=>(epoch+s)*1e6,root=metre(entry.slots.lectern.at_mm),p=[-root[0]*1000,root[1]*1000,(4-root[2])*1000];
   return chunkOf([{entity:id,soul:'synthetic-story-presenter',name:'Presenter',heading:-Math.PI/2,
     standing:[{at:at(0),heading:-Math.PI/2,from:-Math.PI/2}],samples:[{at:at(0),p},{at:at(6),p}],
-    gestures:[{start:at(.8),end:at(STORY_END),activity:'tell-story'}]}],epoch*1e6/TICK_US,{rulesVersion:'story-return/1',datetime:null},120).take;
+    gestures:[{start:at(.8),end:at(STORY_END),activity:'tell-story'}]}],fromTick,{rulesVersion:'story-return/1',datetime:null},ticks).take;
 }
 function submittedArmSkin(views,id){
   const rows=[],root=views.bodyObject(id);root.updateMatrixWorld(true);
@@ -121,15 +121,29 @@ test('immutable story return keeps complete submitted hands and forearms outside
     // activityFrame's .23Hz three-phrase clock; an explicit phase, not a searched pose amplitude.
     const clockEnd=300/23*100+STORY_END_PHASE/.23-idPhase(id)*7;
     let sampled;const set=people.humans.setFrame.bind(people.humans);people.humans.setFrame=(samples,...args)=>{sampled=samples[0];return set(samples,...args);};
-    let maxInside=0,worst=null;
+    let maxInside=0,worst=null,lengths;
+    const skinAt=(player,age,offset=0)=>{player.show(STORY_END+age-offset,clockEnd+age);return submittedArmSkin(player.humans,id);};
     try{for(const age of [0,...Array.from({length:18},(_,i)=>(i+1)*.02),.35]){
       people.show(STORY_END+age,clockEnd+age);
       assert.equal(sampled.activity,'idle');assert.equal(sampled.prevActivity,'tell-story');
       assert(Math.abs(sampled.activityAge-age)<1e-5,'native return age is preserved');
       assert.deepEqual(sampled.p,[0,.1,4.52],'the authored native root is unchanged');
+      const root=people.humans.bodyObject(id);assert.deepEqual(root.position.toArray(),sampled.p,'palm IK does not move the native holder');
+      const segments=['L','R'].flatMap(side=>{
+        const points=['UpperArm','LowerArm','Wrist'].map(name=>root.getObjectByName(name+side).getWorldPosition(new THREE.Vector3()));
+        return [points[0].distanceTo(points[1]),points[1].distanceTo(points[2])];
+      });
+      // Translation tracks are Float32;1micrometre covers accumulated roundoff, not anatomical stretching.
+      if(!lengths)lengths=segments;else segments.forEach((length,i)=>assert(Math.abs(length-lengths[i])<1e-6,'fixed anatomical upper/forearm lengths are preserved '+JSON.stringify({age,i,length,before:lengths[i],delta:length-lengths[i]} )));
       const skin=submittedArmSkin(people.humans,id),hits=skin.filter(v=>inside([-v.p[0],v.p[1],4-v.p[2]],entry.looks.shape.shapes[3]));
       if(hits.length>maxInside){maxInside=hits.length;worst={age,point:hits[0]};}
     }
+    for(const age of [.12,.18,.2,.34]){
+      const warm=skinAt(people,age),cold=new TakePeople(take);cold.setTemplates([source]);
+      try{assert(separation(warm,skinAt(cold,age))<1e-8,'cold/backward seeks preserve the same complete hand skin');}finally{cold.dispose();}
+    }
+    const chunks=[storyReturnTake(id,20000,95),storyReturnTake(id,20095,25)],adjacent=new TakePeople(chunks[0]);adjacent.setTemplates([source]);adjacent.setWaterHistory(chunks);
+    try{adjacent.show(4.7,clockEnd-.1);adjacent.setTake(chunks[1]);adjacent.setWaterHistory(chunks);assert(separation(skinAt(people,.2),skinAt(adjacent,.2,4.75))<1e-8,'adjacent chunks retain the same immutable palm origin');}finally{adjacent.dispose();}
     t.diagnostic(JSON.stringify({name,maxInside,worst}));assert.equal(maxInside,0,'every complete story-return hand/forearm draw clears the unchanged tabletop');
     }finally{people.dispose();}
   });}finally{setHumanGround(null);}
