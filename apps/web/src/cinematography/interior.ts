@@ -67,10 +67,12 @@ export class InteriorView{
   // Destination validity is separate from the still-occluded transit view. Keep
   // one target through a safe approach; never restart selection every search tick.
   if(this.anchor){const r=radius(this.anchor);d.visibility=sight(this.anchor);if(r===null||d.visibility==='unknown'){d.status='anchor-unknown';return;}const envelope=d.visibility==='clear'?geometry.segmentAuthored(this.anchor,this.anchor,r):'blocked';if(envelope==='unknown'){d.status='anchor-unknown';return;}if(d.visibility==='clear'&&envelope==='clear'&&this.anchor.distanceTo(points[0])>=2){d.status='holding';d.anchor=this.anchor.toArray();return;}this.anchor=null;this.retreatPlan=null;d.anchor=null;}
-  // Keep a readable exterior or previously selected room-world eye. This is the
-  // actual eye, not the old outdoor root-relative goal.
-  d.visibility=sight(eye);if(d.visibility==='unknown'){d.status='visibility-unknown';return;}
-  if(!this.approaching&&d.visibility==='clear'&&eye.distanceTo(points[0])>=2){this.retried=false;if(!this.anchor)this.anchor=eye.clone();d.anchor=this.anchor.toArray();d.status='holding';return;}
+  // Only enclosed mode can retain the actual eye. An unanchored approach must
+  // spend its shared query budget on the candidate's complete admission instead.
+  if(!this.approaching){
+   d.visibility=sight(eye);if(d.visibility==='unknown'){d.status='visibility-unknown';return;}
+   if(d.visibility==='clear'&&eye.distanceTo(points[0])>=2){this.retried=false;this.anchor=eye.clone();d.anchor=this.anchor.toArray();d.status='holding';return;}
+  }
   this.anchor=null;d.anchor=null;if(!this.proposals.length){d.status='no-proposals';return;}
   const proposal=this.proposals[this.cursor%this.proposals.length],advance=()=>{this.cursor++;this.retried=false;},unknown=()=>{if(this.retried)advance();else this.retried=true;};d.proposal=proposal.toArray();d.tested=1;
   if(this.approaching&&(!frame||!frame(proposal))){d.status='approach-framing-unavailable';advance();return;}

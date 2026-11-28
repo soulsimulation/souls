@@ -42,6 +42,32 @@ test('invalid or discontinuous travel discards retreat preparation and refused d
 });
 
 test('approaching opening admits only a full-framed checked continuous target and retains it across membership',()=>{
- for(const refusal of['frame','passage','none']){const p=new InteriorView(),base=context(),c={...base,status:'approaching',openingProposals:[{kind:'door' as const,floor:0,at:[0,-4] as const,width:1.5,height:2,sill:0,from:'room',to:null}]},q=new FollowGeometry(),eye=v(6,3,-8),points=[v(-3,1,-5),v(-3,1.6,-5)];q.segmentAuthored=(from,to,r=0)=>refusal==='passage'&&r>0&&from.distanceTo(to)>0?'blocked':'clear';p.sync(c,false,0);p.search(0,eye,points,q,()=>.2,()=>0,()=>refusal!=='frame');if(refusal==='none'){assert.equal(p.diagnostic.status,'selected');assert.deepEqual(p.destination()?.eye.toArray(),[0,1.6,-8]);const anchor=p.destination()!.eye.toArray();assert.deepEqual(p.sync({...c,status:'enclosed'},false,0)?.toArray(),anchor);p.sync(c,true,0);assert.equal(p.destination(),null);}else{assert.equal(p.destination(),null);assert.equal(p.diagnostic.status,refusal==='frame'?'approach-framing-unavailable':'readable-proposal-unreachable');}}
+ const refusals={frame:'approach-framing-unavailable',radius:'proposal-unavailable',ground:'proposal-unavailable',envelope:'proposal-surface-overlap','envelope-unknown':'proposal-unknown',sight:'proposal-occluded','sight-unknown':'proposal-unknown',passage:'readable-proposal-unreachable','passage-unknown':'passage-unknown',none:'selected'};
+ for(const [refusal,status]of Object.entries(refusals)){
+  const p=new InteriorView(),c={...context(),status:'approaching',openingProposals:[{kind:'door' as const,floor:0,at:[0,-4] as const,width:1.5,height:2,sill:0,from:'room',to:null}]},q=new FollowGeometry(),eye=v(6,3,-8),points=[v(-3,1,-5),v(-3,1.6,-5)];
+  q.segmentAuthored=(from,to,r=0)=>{const check=r===0?'sight':from.equals(to)?'envelope':'passage';return refusal===check?'blocked':refusal===check+'-unknown'?'unknown':'clear';};
+  p.sync(c,false,0);p.search(0,eye,points,q,()=>refusal==='radius'?null:.2,()=>refusal==='ground'?null:0,()=>refusal!=='frame');assert.equal(p.diagnostic.status,status,refusal);
+  if(refusal==='none'){assert.deepEqual(p.destination()?.eye.toArray(),[0,1.6,-8]);const anchor=p.destination()!.eye.toArray();q.segmentAuthored=()=> 'unknown';p.sync(c,false,0);p.search(.3,eye,points,q,()=>.2,()=>0,()=>true);assert.equal(p.diagnostic.status,'anchor-unknown');assert.deepEqual(p.destination()?.eye.toArray(),anchor,'retained approaching anchor still validates sight before reuse');assert.deepEqual(p.sync({...c,status:'enclosed'},false,0)?.toArray(),anchor);p.sync(c,true,0);assert.equal(p.destination(),null);}
+  else assert.equal(p.destination(),null,refusal);
+ }
 });
 test('opening switches invalidate intent and membership restores ordinary recovery proposals without losing a validated anchor',()=>{for(const selected of[false,true]){const p=new InteriorView(),c={...context(),status:'approaching',openingProposals:[{kind:'door' as const,floor:0,at:[0,-4] as const,width:1.5,height:2,sill:0,from:'room',to:null}]},q=new FollowGeometry(),eye=v(6,3,0),points=[v(0,1,0),v(0,1.6,0)];q.segmentAuthored=(from,_to,r=0)=>r>0||!from.equals(eye)?'clear':'blocked';p.sync(c,false,0);p.search(0,eye,points,q,()=>.2,()=>0,()=>selected);const anchor=p.destination()?.eye.toArray();p.sync({...c,status:'enclosed'},false,0);assert.deepEqual(p.destination()?.eye.toArray(),anchor);q.segmentAuthored=(from,_to,r=0)=>r>0||!from.equals(eye)&&from.z!==-8?'clear':'blocked';p.search(1,eye,points,q,()=>.2,()=>0);assert.equal(p.diagnostic.status,'selected');assert.deepEqual(p.destination()?.eye.toArray(),[0,1.6,-5.2]);p.sync(c,false,0);p.sync({...c,openingProposals:[{...c.openingProposals[0],at:[2,-4]}]},false,0);assert.equal(p.destination(),null);}});
+
+
+test('unanchored approach completes candidate admission in the real shared terrain budget and refuses exhaustion',()=>{
+ const root=new Group(),terrain=new PlaneGeometry(128,128,256,128);terrain.rotateX(-Math.PI/2);terrain.attributes.position.setY(0,20);terrain.attributes.position.needsUpdate=true;root.add(new Mesh(terrain,new MeshBasicMaterial()));root.updateMatrixWorld(true);
+ const q=new FollowGeometry(),eye=v(70,3,-8),points=[v(-3,1,-5),v(-3,1.6,-5)],proposal=v(0,1.6,-8),c={...context(),status:'approaching',openingProposals:[{kind:'door' as const,floor:0,at:[0,-4] as const,width:1.5,height:2,sill:0,from:'room',to:null}]};
+ // Prewarm the real 65,536-triangle terrain. Every overlapping query must visit
+ // its 1,024 retained blocks; the distant raised vertex keeps bounds relevant.
+ for(let i=0;i<160;i++){q.prepare([root],'r');q.segmentAuthored(proposal,points[0]);}
+ assert.equal(q.stats.retainedBlocks,1024);
+ for(const exhausted of[false,true]){
+  const p=new InteriorView();q.prepare([root],'r');assert.equal(q.stats.complete,true);
+  assert.equal(q.segmentAuthored(eye,eye.clone().add(v(.01,0,0)),.2),'clear','mandatory actual movement is checked first');assert.equal(q.stats.blockVisits,0);
+  if(exhausted)assert.equal(q.segmentAuthored(proposal,points[0],0,true),'clear');
+  p.sync(c,false,q.generation);p.search(0,eye,points,q,()=>.2,()=>0,()=>true);
+  assert.equal(q.stats.blockVisits,FOLLOW_LIMITS.blockVisits);
+  if(exhausted){assert.equal(p.diagnostic.status,'passage-unknown');assert.equal(q.stats.unknown,'block-query-cap');assert.equal(p.destination(),null);}
+  else{assert.equal(p.diagnostic.status,'selected');assert.equal(p.diagnostic.visibility,'clear');assert.equal(p.diagnostic.passage,'clear');assert.deepEqual(p.destination()?.eye.toArray(),proposal.toArray());assert.equal(q.stats.unknown,null);assert.equal(q.stats.queries,5,'actual sweep, envelope, two candidate sight anchors and full passage');}
+ }
+});
