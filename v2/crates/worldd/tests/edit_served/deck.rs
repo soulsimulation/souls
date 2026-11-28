@@ -596,7 +596,9 @@ fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_un
         "Souls 1 and 2 step away",
     );
 
-    // Soul 5 walks up onto the deck, to a place in the sheet's own frame, then across it.
+    // Soul 5 walks up onto the deck, to a place in the sheet's own frame, then across it. Its first walk gives it its
+    // body.
+    k.walk(&[(4, Deck::at(6_000, 3_000))], "Soul 5 to the flight's foot");
     let walker = body_of(&k.w, k.w.souls[4]);
     let up = |k: &mut Deck, node: Id, p: Vec3, what: &str| {
         let to = BTreeMap::from([(1, Value::Array(vec![int(p.x), int(p.y), int(p.z)]))]);
@@ -674,6 +676,7 @@ fn deck_a_soul_climbs_the_frame_to_a_standing_place_on_the_rail_and_the_rail_sta
     let g = k.w.ground;
     let perch = k.perch.expect("the left rail's standing place");
     let rail = k.rails[0];
+    k.walk(&[(4, Deck::at(-850, -4_000))], "Soul 5 to the ladder's foot");
     let walker = body_of(&k.w, k.w.souls[4]);
     let before = body_rows(&k.w, walker).len();
     let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(100_000), int(0)]))]);
