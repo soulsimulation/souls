@@ -428,6 +428,22 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
         .expect("the sheet's top, a floor")
         .0;
     let g = site.w.ground;
+    {
+        // A town built afresh from the served tree stands a body on the sheet's top (the tree holds the way).
+        let (copy, rules) = served_copy(&site.w);
+        let tree = copy.tree().frozen();
+        let header = import_eden::header(site.w.root, &rules).unwrap();
+        let next = tree.to_state().next;
+        let mut town = sim::walk::town::Town::new_on(
+            tree,
+            g,
+            sim::links::Doors::new(header, rules.clone(), next),
+            4,
+        )
+        .unwrap();
+        let fresh = town.view().stand_near(deck, v3(-400_000, 19_000, 0), 0, None);
+        println!("a fresh town on the deck: {fresh:?}");
+    }
     let mut hands: Vec<Hand> = site
         .w
         .souls
