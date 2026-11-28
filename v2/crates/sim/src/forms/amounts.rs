@@ -348,6 +348,8 @@ pub(crate) struct Cx<'a> {
     /// The actor's Soul (the body, when the actor is not a Soul): a link `from: soul` ends at it (F15).
     pub soul: Id,
     pub hands: &'a [u64],
+    /// The bodies and their families: a thing in another body's hand is not taken (#5275).
+    pub controller: &'a crate::controller::Controller,
     pub node: Id,
     /// The things other runs reserve: none is removed, nor anything holding one.
     pub reserved: &'a [Id],
@@ -705,6 +707,12 @@ impl Cx<'_> {
             }
             Bound::Take { what } => {
                 let thing = self.of(*what);
+                crate::slots::hands::not_held_by_another(
+                    self.controller,
+                    self.view.at(thing),
+                    self.body,
+                    thing,
+                )?;
                 self.not_in_use(thing)?;
                 let to = self.free_hand()?;
                 self.transfer(m, thing, to)

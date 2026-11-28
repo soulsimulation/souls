@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { decode, encode } from 'cborg';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, prayerRefusal, refusalText, ticketOf, weatherSets, lightningSets, VERB } = await import('./creator-socket.ts');
+const { CLOSED, CreatorSession, V2Creator, creatorGrant, creatorToken, idOf, mayCreate, prayerRefusal, settledRefusal, refusalText, ticketOf, weatherSets, lightningSets, VERB } = await import('./creator-socket.ts');
 const { shownPrayer, soulIdOf } = await import('../god-ui/Prayers.tsx');
 const { MailBox, NothingOwned, V2OwnerMailbox } = await import('./owner-mailbox.ts');
 
@@ -153,6 +153,11 @@ test('the exchange is asked only for an account the directory lists a creator gr
   assert.equal(await mayCreate(place, owning(`soul-${'ab'.repeat(16)}-1`)), false, 'an owner of Souls only is not');
   assert.equal(await mayCreate(place, async () => { throw new NothingOwned(); }), false, 'a new person, owning nothing, is not');
   assert.equal(await mayCreate(place, async () => { throw new Error('no view: the directory said 500'); }), true, 'a view the directory cannot give leaves it to the exchange');
+});
+
+test('27 Nov: a refusal that can pass is asked again, so a new world\'s creator gets God Mode once its gateway knows them', () => {
+  for (const r of ['not-the-creator', 'no-creator', 'no-gateway', 'session-refused']) assert.equal(settledRefusal(r), true, r);
+  for (const r of ['creator-authority-unavailable', 'creator-authority-changing', 'directory-unreachable', 'the gateway said 502']) assert.equal(settledRefusal(r), false, r);
 });
 
 test('#5006: the panel\'s inbox says the creator\'s agent is connected only while the gateway says so', async () => {
