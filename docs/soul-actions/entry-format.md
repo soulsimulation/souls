@@ -85,7 +85,9 @@ the floor at its top. A thing whose facts give their own `floors` or `stairs` ke
   part's own height (its walk boxes'; with none, exactly). It is also ground only while nothing else in that parent
   lies over it within a standing body's height (1.8 m): another part's walk box, or another part's floor (a sheet's
   top). So a frame's standing place is there while a beam braces the frame at that level, and gone once the beam comes
-  out. One on a frame's inner face, under a deck, is never there.
+  out. One on a frame's inner face, under a deck, is never there. A standing place is declared only 1.8 m or more
+  above the ground or the thing's floor under it, so nobody walks under a floor they cannot fit beneath; a ladder may
+  still reach a lower level (a step stood on from the ladder).
 - `stairs`: `[{"from_mm": [x, z], "to_mm": [x, z], "bottom_mm", "top_mm", "width_mm"}]`, a flight from its foot to its
   top. A top with no floor of the thing at its height lands on the floor it meets there (a deck's sheet), as a roof
   stair's does.

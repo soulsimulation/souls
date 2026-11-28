@@ -164,18 +164,6 @@
     ],
     "floors": [
       {
-        "top_mm": 500,
-        "size_mm": [
-          1144,
-          900
-        ],
-        "at_mm": [
-          0,
-          -488
-        ],
-        "while_joined": true
-      },
-      {
         "top_mm": 1800,
         "size_mm": [
           1144,
@@ -184,18 +172,6 @@
         "at_mm": [
           0,
           -488
-        ],
-        "while_joined": true
-      },
-      {
-        "top_mm": 500,
-        "size_mm": [
-          1144,
-          900
-        ],
-        "at_mm": [
-          0,
-          488
         ],
         "while_joined": true
       },
@@ -215,7 +191,7 @@
     "ladders": [
       {
         "face": "back",
-        "at_mm": -150,
+        "at_mm": -400,
         "bottom_mm": 0,
         "top_mm": 500,
         "width_mm": 300,
@@ -223,15 +199,15 @@
       },
       {
         "face": "back",
-        "at_mm": 150,
+        "at_mm": 100,
         "bottom_mm": 0,
         "top_mm": 1800,
-        "width_mm": 300,
+        "width_mm": 400,
         "run_mm": 1400
       },
       {
         "face": "front",
-        "at_mm": -150,
+        "at_mm": -400,
         "bottom_mm": 0,
         "top_mm": 500,
         "width_mm": 300,
@@ -239,10 +215,10 @@
       },
       {
         "face": "front",
-        "at_mm": 150,
+        "at_mm": 100,
         "bottom_mm": 0,
         "top_mm": 1800,
-        "width_mm": 300,
+        "width_mm": 400,
         "run_mm": 1400
       }
     ]

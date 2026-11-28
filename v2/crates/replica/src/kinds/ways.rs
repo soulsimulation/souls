@@ -7,7 +7,8 @@
 //! - **A floor** `{top_mm, size_mm: [x, z], at_mm: [x, z], while_joined}`: a rectangle `size_mm` about `at_mm` (the
 //!   thing's origin when left out) at height `top_mm`. With `while_joined: true` it is ground only while a part
 //!   joined to the thing sits at its height (a frame's standing place, there while a beam braces the frame at that
-//!   level): read by `sim::ground::scene::braced`.
+//!   level): read by `sim::ground::scene::braced`. A standing place is declared only [`STANDING_HEIGHT_MM`] or more
+//!   above the ground or the thing's floor under it (a body fits under it); a ladder may still reach a lower level.
 //! - **A stair** `{from_mm: [x, z], to_mm: [x, z], bottom_mm, top_mm, width_mm}`: a flight from its foot to its top.
 //! - **A ladder** `{face, at_mm, bottom_mm, top_mm, width_mm, run_mm}`: a ladder up the thing's `front` (+z) or `back`
 //!   (-z) face, `at_mm` along x (0 when left out), from `run_mm` (600 when left out) out from that face to the face;
@@ -65,6 +66,10 @@ pub struct Ways {
     pub ladders: Vec<Ladder>,
 }
 
+/// A standing body's height, mm (`sim::ground::BODY_HIGH`): a standing place's floor is at least this far above the
+/// ground or the thing's floor under it, so nobody walks under a floor they cannot fit beneath.
+pub const STANDING_HEIGHT_MM: i64 = 1_800;
+
 const DEFAULT_WIDTH: i64 = 600;
 const DEFAULT_RUN: i64 = 600;
 
@@ -108,6 +113,31 @@ impl Ways {
                 },
                 while_joined: f.get("while_joined").is_some_and(Value::truthy),
             });
+        }
+        // A standing place only where a body fits under it: its top this far above the ground (the thing's origin)
+        // or above the highest of the thing's floors under it.
+        for (k, f) in w.floors.iter().enumerate() {
+            if !f.while_joined {
+                continue;
+            }
+            let over = |o: &Floor| {
+                (o.at[0] - f.at[0]).abs() * 2 < o.size[0] + f.size[0]
+                    && (o.at[1] - f.at[1]).abs() * 2 < o.size[1] + f.size[1]
+            };
+            let below = w
+                .floors
+                .iter()
+                .filter(|o| o.top < f.top && over(o))
+                .map(|o| o.top)
+                .max()
+                .unwrap_or(0);
+            if f.top - below < STANDING_HEIGHT_MM {
+                return Err(format!(
+                    "geometry.floors row {k}: a standing place (while_joined) is {} mm above what is under it; one is \
+                     declared only {STANDING_HEIGHT_MM} mm or more up, so a body fits under it",
+                    f.top - below
+                ));
+            }
         }
         for (k, s) in rows(g, "stairs").iter().enumerate() {
             let what = |p: &str| format!("geometry.stairs row {k}: {p}");
@@ -222,6 +252,16 @@ mod tests {
         assert_eq!(f.as_deref(), Some("[[1800, 1144, 700, 0, -388, 1]]"));
         assert_eq!(s, None);
         assert_eq!(l.as_deref(), Some("[[-1, 0, 0, 1800, 600, 600]]"));
+    }
+
+    #[test]
+    fn a_standing_place_a_body_cannot_walk_under_is_refused() {
+        let e = parse(
+            r#"{"geometry": {"floors": [{"top_mm": 500, "size_mm": [1144, 900], "while_joined": true}]}}"#,
+        )
+        .unwrap();
+        let why = Ways::read(&e).unwrap_err();
+        assert!(why.contains("1800 mm or more up"), "{why}");
     }
 
     #[test]

@@ -610,11 +610,7 @@ pub fn braced(tree: &Tree, floor: Handle) -> bool {
     if !marked {
         return true;
     }
-    let (j, h) = (joined_at(tree, floor), headroom(tree, floor));
-    if let Some(n) = tree.node(floor) {
-        eprintln!("worldd: DEBUG braced {}: joined {j} headroom {h}", replica::world_model::show(n.id()));
-    }
-    j && h
+    joined_at(tree, floor) && headroom(tree, floor)
 }
 
 /// A floor's rectangle in the frame of its thing's parent: [x0, z0, x1, z1] and its height, µm (none for a floor with
@@ -651,11 +647,7 @@ fn headroom(tree: &Tree, floor: Handle) -> bool {
         return false;
     };
     let over = |r: [i64; 4], y0: i64| {
-        let o = y0 > y && y0 < y + BODY_HIGH * 1000 && r[0] < bb[2] && r[2] > bb[0] && r[1] < bb[3] && r[3] > bb[1];
-        if o {
-            eprintln!("worldd: DEBUG over {r:?} at {y0} over {bb:?} at {y}");
-        }
-        o
+        y0 > y && y0 < y + BODY_HIGH * 1000 && r[0] < bb[2] && r[2] > bb[0] && r[1] < bb[3] && r[3] > bb[1]
     };
     for &sib in tree.children(parent).unwrap_or(&[]) {
         if sib == thing {
@@ -750,13 +742,6 @@ fn joined_at(tree: &Tree, floor: Handle) -> bool {
                     / 2
             })
             .unwrap_or(0);
-        eprintln!(
-            "worldd: DEBUG joined {}: part {} at {} level {} half {half}",
-            replica::world_model::show(thing),
-            replica::world_model::show(other),
-            at.pos.y,
-            level.y
-        );
         (at.pos.y - level.y).abs() <= half
     })
 }

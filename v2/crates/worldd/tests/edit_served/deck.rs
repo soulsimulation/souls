@@ -684,8 +684,8 @@ struct Bay {
     flight: Id,
     /// The floor each sheet holds: its top.
     decks: [Id; 2],
-    /// Each frame's standing places, as its kind declares them: back 0.5 m, back 1.8 m, front 0.5 m, front 1.8 m.
-    places: [[Id; 4]; 2],
+    /// Each frame's standing places at 1.8 m, as its kind declares them: its back face's, then its front's.
+    places: [[Id; 2]; 2],
 }
 
 impl Bay {
@@ -728,7 +728,7 @@ impl Bay {
             sheets: [n("sheet-1"), n("sheet-2")],
             flight: n("flight"),
             decks: [n("sheet-1/floor-1"), n("sheet-2/floor-1")],
-            places: ["frame-1", "frame-2"].map(|f| [1, 2, 3, 4].map(|l| n(&format!("{f}/floor-{l}")))),
+            places: ["frame-1", "frame-2"].map(|f| [1, 2].map(|l| n(&format!("{f}/floor-{l}")))),
             w,
             _s: s,
             hands,
@@ -956,8 +956,8 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
 /// Racks T6, the brief's task 4, in a served world by Souls' intents: a Soul climbs a frame to its 1.8 m standing place.
 ///
 /// - the bay's frames stand on four beams. Each frame's kind declares, on each face, a ladder from the ground to each
-///   beam level and a standing place there, 0.9 m deep and as wide as the frame, that exists only while a part joined
-///   to the frame sits at its level (a beam braces it) and nothing lies over it within a body's height;
+///   1.8 m beam level and a standing place there, 0.9 m deep and as wide as the frame, that exists only while a part
+///   joined to the frame sits at its level (a beam braces it) and nothing lies over it within a body's height;
 /// - a fifth Soul walks to frame 1's outer standing place at 1.8 m: its way is the ladder, climbed as a track (its
 ///   body's rows rise from the ground, none a jump), and it stands on the place at its height;
 /// - a step off the place's outer edge is refused, and the body stays where it was;
@@ -969,15 +969,14 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     k.frame();
     let g = k.w.ground;
     let frame = k.frames[0];
-    // Frame 1's floors by level, as its kind declares them: back 0.5 m, back 1.8 m, front 0.5 m, front 1.8 m. Its back
-    // face is its outer one (it stands at the bay's -z end).
-    let perch = k.places[0][1];
+    // Frame 1's back face is its outer one (it stands at the bay's -z end).
+    let perch = k.places[0][0];
     let walker = {
-        k.walk(&[(4, Bay::at(150, -3_200))], "Soul 5 to the ladder's foot");
+        k.walk(&[(4, Bay::at(0, -3_200))], "Soul 5 to the ladder's foot");
         body_of(&k.w, k.w.souls[4])
     };
     let before = body_rows(&k.w, walker).len();
-    let to = BTreeMap::from([(1, Value::Array(vec![int(150_000), int(1_800_000), int(-488_000)]))]);
+    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
     k.hands[4].send("eden:walk", perch, to);
     let got = socket_end(&mut k.hands[4].s);
     println!("Soul 5 climbs to the 1.8 m standing place: {got:?}");
@@ -1010,7 +1009,7 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     assert!(most <= 300_000, "no jump on the way: {most}");
 
     // A second step, off the place's outer edge (0.9 m from the face), is refused.
-    let off = BTreeMap::from([(1, Value::Array(vec![int(150_000), int(1_800_000), int(-1_300_000)]))]);
+    let off = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-1_300_000)]))]);
     k.hands[4].send("eden:walk", perch, off);
     let got = socket_end(&mut k.hands[4].s);
     println!("Soul 5 steps off the edge: {got:?}");
@@ -1031,7 +1030,7 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     k.leave(1, c);
 
     // Down again.
-    let down = Bay::at(150, -3_500);
+    let down = Bay::at(0, -3_500);
     let to = BTreeMap::from([(1, Value::Array(vec![int(down.x), int(0), int(down.z)]))]);
     k.hands[4].send("eden:walk", g, to);
     let got = socket_end(&mut k.hands[4].s);
