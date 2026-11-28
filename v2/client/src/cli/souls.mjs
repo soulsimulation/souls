@@ -381,7 +381,6 @@ export function requestOf(argv) {
     if (n >= 0 && !/^\d+$/.test(String(rest[n + 1]))) return { refused: 'start-usage', detail: '--within <seconds>: how long start waits here for the answer, 0 to 600' };
     if (n >= 0) req.within = Number(rest[n + 1]);
   }
-
   if (op === 'pray') req.words = rest.join(' ');
   if (op === 'say' || op === 'shout') {
     // C26: a shout is a say at a raised voice; --to names whom it is for, --gesture what the body does toward them.
