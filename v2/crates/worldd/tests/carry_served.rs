@@ -2312,3 +2312,5 @@ mod hoist;
 mod raise;
 #[path = "carry_served/slot_points.rs"]
 mod slot_points;
+#[path = "carry_served/walk_goal.rs"]
+mod walk_goal;

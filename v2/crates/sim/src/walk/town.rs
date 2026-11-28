@@ -1728,6 +1728,20 @@ impl Town {
             .is_ok_and(|(m, ..)| sealed_on(m, Some(from), node, at))
     }
 
+    /// The doorway or stair whose passage `p` (µm, `node`'s frame) lies in, as the spot tables keep walkers out of it
+    /// ([`passage_named`] with [`CLEAR`]): the thing it belongs to and the link's kind (#5254).
+    pub fn passage_at(&self, node: Id, p: Vec3) -> Option<(Id, Kind)> {
+        passage_named(
+            &self.buildings,
+            &self.passages,
+            self.ground,
+            node,
+            p,
+            None,
+            CLEAR,
+        )
+    }
+
     /// The world's entry as [`Town::set_entry`] took it, on dry ground: where the main ground is judged from. `None`:
     /// none known, and no ground is sealed.
     pub fn entry(&self) -> Option<(Id, Vec3)> {
@@ -2475,7 +2489,7 @@ pub fn in_passage_but(
         }
         b.links
             .iter()
-            .any(|l| link_passage(b, l, ground, node, p, door, false) != Lies::Clear)
+            .any(|l| link_passage(b, l, ground, node, p, door, false, CLEARS) != Lies::Clear)
     })
 }
 
@@ -2536,12 +2550,52 @@ fn passage_indexed(
             p,
             door,
             mouths,
+            CLEARS,
         ));
         if most == Lies::In {
             break;
         }
     }
     most
+}
+
+/// The passage's clearances [`in_passage_but`] tests (µm): [`CLEAR`] round a link's end on a floor, and half
+/// [`CLEAR`] past its width along its line.
+const CLEARS: (i64, i64) = (CLEAR, CLEAR / 2);
+
+/// The first link of `buildings` with an end on `node` whose passage `p` lies in, read with clearance `clear` (µm)
+/// round its ends and past its width instead of [`CLEAR`] (#5254): the thing it belongs to and the link's kind. With
+/// [`CLEAR`] it is the passage [`in_passage_indexed`] finds (its band then half [`CLEAR`]); with a body's radius and
+/// margin it is the passage itself, which a body standing there would be in.
+pub fn passage_named(
+    buildings: &[Building],
+    passages: &Passages,
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+    clear: i64,
+) -> Option<(Id, Kind)> {
+    let clears = if clear == CLEAR {
+        CLEARS
+    } else {
+        (clear, clear)
+    };
+    for &(bi, li) in passages.on.get(&node).map_or(&[][..], |v| &v[..]) {
+        let i = bi as usize;
+        if node == ground
+            && let Some(bx) = passages.boxes.get(i)
+            && bx.is_none_or(|r| p.x < r[0] || p.z < r[1] || p.x > r[2] || p.z > r[3])
+        {
+            continue;
+        }
+        let b = &buildings[i];
+        let l = &b.links[li as usize];
+        if link_passage(b, l, ground, node, p, door, false, clears) != Lies::Clear {
+            return Some((b.thing, l.kind));
+        }
+    }
+    None
 }
 
 /// How a point lies in one link's passage ([`link_passage`]): clear of it, only at its mouth (a doorway's, on the
@@ -2554,7 +2608,9 @@ enum Lies {
 }
 
 /// How `p` lies in link `l`'s doorway or on its flight ([`in_passage_but`]'s test of one link of `b`). With `mouths`
-/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line.
+/// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line. `(end, band)` is how far round
+/// its ends and past its width along its line it reaches, µm: [`CLEARS`] for a walker's passage (#5254).
+#[allow(clippy::too_many_arguments)]
 fn link_passage(
     b: &Building,
     l: &crate::links::Link,
@@ -2563,6 +2619,7 @@ fn link_passage(
     p: Vec3,
     door: Option<Id>,
     mouths: bool,
+    (end, band): (i64, i64),
 ) -> Lies {
     if door.is_some() && l.door == door {
         return Lies::Clear;
@@ -2586,7 +2643,7 @@ fn link_passage(
     let (mut on, mut at_end) = (false, false);
     for e in ends {
         on = true;
-        if to_segment(p, e.a, e.b) < CLEAR {
+        if to_segment(p, e.a, e.b) < end {
             if !(mouths && doorway) {
                 return Lies::In;
             }
@@ -2619,13 +2676,13 @@ fn link_passage(
     // Between a doorway's ends its band is as wide as they are (the passage where it meets each floor), and half CLEAR;
     // past them only half CLEAR, so an opening's width is no disc round its ends.
     let reach = match l.kind {
-        Kind::Step => CLEAR / 2,
+        Kind::Step => band,
         Kind::Doorway if between => {
             let held = l.ends.iter().flatten().map(|e| flat(e.a, e.b) / 2).max();
-            held.unwrap_or(0) + CLEAR / 2
+            held.unwrap_or(0) + band
         }
-        Kind::Doorway => CLEAR / 2,
-        _ => l.width / 2 + CLEAR / 2,
+        Kind::Doorway => band,
+        _ => l.width / 2 + band,
     };
     let on_line = read
         && l.line.windows(2).any(|s| {
@@ -2724,6 +2781,11 @@ impl ClassGround for ClassGrounds<'_> {
     fn passage(&self, size: Size, node: Id, p: Vec3) -> bool {
         self.0.get(&size).is_none_or(|g| g.passage(node, p))
     }
+    fn in_passage_itself(&self, size: Size, node: Id, p: Vec3) -> bool {
+        self.0
+            .get(&size)
+            .is_none_or(|g| g.passage_within(node, p, size))
+    }
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         self.0.get_mut(&size)?.walk(an, a, bn, b)
     }
@@ -2738,6 +2800,26 @@ impl ClassGround for ClassGrounds<'_> {
     }
     fn start(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
         self.0.get(&size)?.start(node, p)
+    }
+}
+
+impl Grounds<'_> {
+    /// Whether a body of class `size` standing at `p` (µm, `node`'s frame) would be in a doorway or on a stair itself:
+    /// within its radius and margin of a link's end or of its width along its line (#5254), not [`CLEAR`].
+    fn passage_within(&self, node: Id, p: Vec3, size: Size) -> bool {
+        // Never wider than a walker's clearance: a body wider than that (a giant's) is in the passage wherever the
+        // walkers' rule says it is, and the buildings' boxes reach no further.
+        let clear = ((size.radius_mm() + crate::ground::MARGIN) * 1000).min(CLEAR);
+        passage_named(
+            self.buildings,
+            self.passages,
+            self.ground,
+            node,
+            p,
+            self.door,
+            clear,
+        )
+        .is_some()
     }
 }
 
@@ -2771,6 +2853,10 @@ impl Ground for Grounds<'_> {
             p,
             self.door,
         )
+    }
+
+    fn in_passage_itself(&self, node: Id, p: Vec3) -> bool {
+        self.passage_within(node, p, Size::Standard)
     }
 
     fn mouth(&self, node: Id, p: Vec3) -> bool {

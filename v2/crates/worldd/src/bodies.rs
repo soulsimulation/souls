@@ -245,8 +245,9 @@ pub struct Bodies {
     /// held it off, until its answer is written: it answers `walk.stopped-short`, never as an arrival.
     pub stopped_short: BTreeMap<Id, (u64, bool)>,
     /// #5254: each walk done at a place moved off the point it was sent to (that point in a passage's clearance or off
-    /// its ground), how far, mm, until its answer is written.
-    pub goal_moved: BTreeMap<Id, u64>,
+    /// its ground), how far, mm, and the passage it cleared (the thing it belongs to and its kind; none off the
+    /// ground), until its answer is written.
+    pub goal_moved: BTreeMap<Id, (u64, Option<(Id, sim::links::Kind)>)>,
     /// How many times each such walk was sent again while bodies moved round its goal ([`WALK_AGAIN`]).
     walked_again: BTreeMap<Id, u8>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
@@ -2128,21 +2129,34 @@ impl Bodies {
                 };
                 // #5254: a walk to a point that ended short of it is sent again while bodies may be moving off its way,
                 // [`WALK_AGAIN`] times (some three seconds); then it answers how far short it stopped, and why.
-                // #5254: one that came to the place it was granted, nearer than a walker's goal tolerance to the point it
-                // was sent to (that point in a doorway's or a stair's clearance, or off its ground), is done there and
-                // says so (`goal_moved`).
+                // #5254: one that came to the place it was granted off the point it was sent to is done there and says
+                // so (`goal_moved`): that point in a doorway's or a stair's clearance, moved only as far as clears the
+                // passage itself, however far that is; or off its ground, nearer than a walker's goal tolerance. Never
+                // one a crowd held off (A2-4, A2-5: done as near as the crowd allows), nor one granted a place outside
+                // the passage's clearance (the full rings' or an overflow point): the spot tables admit a place in the
+                // clearance only as one that clears the passage itself, nearest first.
                 if how.is_ok()
+                    && !self.short.contains(&id)
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(g) = self.runner.granted.get(&body).copied()
                     && let (Some(asked), Some(there)) =
                         (self.gap_to(body, t, p), self.gap_to(body, t, g))
                     && asked > 50
-                    && asked <= STOPPED_SHORT_MM
                     && there <= 50
                 {
-                    self.goal_moved.insert(id, asked);
+                    match self.town.passage_at(t, p) {
+                        Some(why) if self.town.passage_at(t, g).is_some() => {
+                            self.goal_moved.insert(id, (asked, Some(why)));
+                        }
+                        Some(_) => {}
+                        None if asked <= STOPPED_SHORT_MM => {
+                            self.goal_moved.insert(id, (asked, None));
+                        }
+                        None => {}
+                    }
                 }
                 if how.is_ok()
+                    && !self.goal_moved.contains_key(&id)
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(mm) = self.gap_to(body, t, p).filter(|mm| *mm > STOPPED_SHORT_MM)
                 {
