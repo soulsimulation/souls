@@ -3429,6 +3429,57 @@ impl<'a> View<'a> {
         (!passage && self.map.may_reach(start.piece, to.piece)).then_some(p)
     }
 
+    /// Where `body` would stand at point `p` of the open ground (µm, the ground's frame; its height is not read): of
+    /// the ground a body may stand on at that point on the plan, the open ground's own and each floor's (a deck's top,
+    /// a frame's standing place, a room), the one whose height is nearest the body's own level. The node and the
+    /// point in its frame, or `None` when no ground a body may stand on lies there (a walk to a point, FOR-FABLE 14).
+    pub fn level_under(&self, body: &Body, p: Vec3) -> Option<(Id, Vec3)> {
+        let ground = self.tree.handle(self.ground)?;
+        let height = |node: Id, at: Vec3| -> Option<i64> {
+            let x = xform_to(self.tree, self.tree.handle(node)?, ground).ok()?;
+            Some(x.point(at).ok()?.y)
+        };
+        let own = height(node_of(body), body.pose.position)?;
+        let (has, _) = self.wet(body);
+        let mut best: Option<(i64, Id, Vec3)> = None;
+        let mut keep = |node: Id, s: Spot| {
+            let w = self.map.world(s.piece, s.at);
+            let gap = (w[1] * 1000 - own).abs();
+            let at = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
+            if best.is_none_or(|(g, ..)| gap < g) {
+                best = Some((gap, node, at));
+            }
+        };
+        if let Some(s) = self.map.spot_for(self.ground, Vec3::new(p.x, 0, p.z), has) {
+            keep(self.ground, s);
+        }
+        for &node in self.surfaces.keys() {
+            if node == self.ground || !self.map.is_floor(node) {
+                continue;
+            }
+            let Some(x) = self
+                .tree
+                .handle(node)
+                .and_then(|h| xform_to(self.tree, h, ground).ok())
+            else {
+                continue;
+            };
+            // The point in the floor's frame: the inverse of its move to the ground's frame.
+            let [w, qx, qy, qz] = x.rot.parts();
+            let Some(local) = Quat::new(w, -qx, -qy, -qz)
+                .or_else(|_| Quat::new(-w, qx, qy, qz))
+                .ok()
+                .and_then(|back| back.rotate(Vec3::new(p.x, 0, p.z).minus(x.pos).ok()?).ok())
+            else {
+                continue;
+            };
+            if let Some(s) = self.map.spot(node, local) {
+                keep(node, s);
+            }
+        }
+        best.map(|(_, node, at)| (node, at))
+    }
+
     /// [`View::stand_near`] for a move at thing `door`: when it is a doorway's door, a place in that doorway counts
     /// (#3688), so a knock from a room whose floor stops short of the door reaches its panel.
     pub fn stand_near_door(
