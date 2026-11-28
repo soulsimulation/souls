@@ -2337,6 +2337,9 @@ async fn a_seated_soul_stretches_and_slumps_from_its_seat_and_its_jump_is_refuse
     assert_eq!(rose.kind, 1, "still seated, so it rises: {rose:?}");
 }
 
+#[path = "edit_served/body_family.rs"]
+mod body_family;
+
 #[path = "edit_served/deck_kinds.rs"]
 mod deck_kinds;
 

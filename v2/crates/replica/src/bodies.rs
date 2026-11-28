@@ -41,6 +41,56 @@ impl Class {
             _ => refuse("class-unknown", format!("class {n}")),
         }
     }
+
+    /// The class's number (rule 1), as [`Class::from_number`] reads it.
+    pub fn number(self) -> u64 {
+        match self {
+            Class::Locomotion => 1,
+            Class::Manipulator => 2,
+            Class::Gaze => 3,
+            Class::Voice => 4,
+        }
+    }
+}
+
+/// The world's root node's field that says what the default body is made of (#5068): the family the world gives a
+/// body that wears no catalogue body (`skills::wear::BODY` unset), as [`default_family`] writes it. The world writes
+/// it itself, at the first tick of a start whenever the root does not hold exactly what this start gives bodies; an
+/// edit that sets it is refused [`DEFAULT_FAMILY_REFUSED`]. It is public like the rest of the root, so a view learns
+/// which slot of a default body is which hand from the world, never from a guess.
+pub const F_DEFAULT_FAMILY: u64 = 146;
+/// The refusal of an edit that sets [`F_DEFAULT_FAMILY`].
+pub const DEFAULT_FAMILY_REFUSED: &str = "edit.body-family";
+
+/// [`F_DEFAULT_FAMILY`]'s value: `{1: kind, 2: [{1: name, 2: class, 3: slot}, ...]}`, `kind` the default body node's
+/// kind by its full pinned name (`namespace:name@revision`) and the resources those of `family`, in its order, as a
+/// family kind's section 13 lists them (rule 1; 3 for a manipulator only).
+pub fn default_family(kind: &Name, family: &Family) -> Value {
+    let resources = family
+        .resources
+        .iter()
+        .map(|r| {
+            let mut m = BTreeMap::from([
+                (1, Value::Text(r.name.clone())),
+                (2, Value::Uint(r.class.number())),
+            ]);
+            if let Some(slot) = r.slot {
+                m.insert(3, Value::Uint(slot));
+            }
+            Value::Map(m)
+        })
+        .collect();
+    Value::Map(BTreeMap::from([
+        (1, Value::Text(kind.clone())),
+        (2, Value::Array(resources)),
+    ]))
+}
+
+/// Reads [`F_DEFAULT_FAMILY`]'s value: the default body's kind and its resources. Anything else is `not-a-family`
+/// (or the resource refusal [`Family::from_value`] names).
+pub fn read_default_family(v: &Value) -> R<(Name, Vec<Resource>)> {
+    let f = Family::from_value(v)?;
+    Ok((f.name, f.resources))
 }
 
 /// One resource of a family (rule 1): a name, a class and, for a manipulator, the body's slot that holds what it holds

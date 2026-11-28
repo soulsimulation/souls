@@ -565,6 +565,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         "owned geometry is written only by the doorway operation",
                     );
                 }
+                if *field == crate::bodies::F_DEFAULT_FAMILY {
+                    return refuse(
+                        here,
+                        crate::bodies::DEFAULT_FAMILY_REFUSED,
+                        "what the default body is made of is written only by the world",
+                    );
+                }
                 let (k, _) = named(*node)?;
                 if defined::is_definition(&k) {
                     return refuse(
@@ -632,6 +639,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         here,
                         crate::arrival::UNKNOWN,
                         "the arrival is set whole, a place's id or none, never in rows",
+                    );
+                }
+                if *field == crate::bodies::F_DEFAULT_FAMILY {
+                    return refuse(
+                        here,
+                        crate::bodies::DEFAULT_FAMILY_REFUSED,
+                        "what the default body is made of is written only by the world",
                     );
                 }
                 if *field == DOOR_GEOMETRY || *field == 7 {

@@ -1506,6 +1506,8 @@ struct Clock {
     sky: Option<Heavens>,
     /// The kinds this start defines at its first tick ([`Config::define`]), and the minter of their nodes' ids.
     define: Option<(Definitions, Minter)>,
+    /// Whether this start has seen to the default body's family on the world's root ([`Clock::put_family`]).
+    family_put: bool,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
     /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
@@ -4706,6 +4708,39 @@ impl Clock {
         println!("kinds defined: {} [{}]", written.len(), written.join(", "));
     }
 
+    /// Step 1, at this start's first tick (#5068): what the world's default body is made of, on the world's root
+    /// ([`replica::bodies::F_DEFAULT_FAMILY`]): the kind and the family this start gives a joining Soul's body
+    /// ([`Join`]), so a view reads which slot is which hand from the world. Written only when the root does not hold
+    /// exactly that, so a restart of an unchanged world writes nothing; a world that births no bodies writes none.
+    fn put_family(&mut self, now: Micros) {
+        if std::mem::replace(&mut self.family_put, true) {
+            return;
+        }
+        let Some(l) = self.life.as_ref() else { return };
+        let to = replica::bodies::default_family(&l.kind, &l.family);
+        let tree = self.replica.tree();
+        let Some(root) = tree.node(tree.root()) else {
+            return;
+        };
+        let field = replica::bodies::F_DEFAULT_FAMILY;
+        if root.fields().get(&field) == Some(&to) {
+            return;
+        }
+        let world = root.id();
+        let set = Effect {
+            envelope: Clock::own(world, now),
+            body: Body::Changes(recs_of(vec![Change::Set {
+                node: world,
+                field,
+                to,
+                by: None,
+            }])),
+            events: None,
+            rest: Rest::new(),
+        };
+        self.write_own(vec![set], "the default body's family");
+    }
+
     /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
     /// world time `now`; then each of its timers due before the next tick's start, fired at its due time against what
     /// the node announces then, in K9's order. Nothing runs between changes, so a world that catches up 48 hours
@@ -5991,6 +6026,8 @@ impl Clock {
         self.fire_sky(now);
         // 1. The kinds the release added since the world's header, defined at this start's first tick (#4954).
         self.put_kinds(now);
+        // 1. What the default body is made of, on the world's root, when this start's differs (#5068).
+        self.put_family(now);
         // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
         self.fire_loose(now);
         at[3] = mark();
@@ -7271,6 +7308,7 @@ pub fn start<S: Storage + 'static>(
         measures: clock_measures,
         sky,
         define,
+        family_put: false,
         tick_us,
         text,
         put_off: BTreeMap::new(),
