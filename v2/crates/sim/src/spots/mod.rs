@@ -407,11 +407,12 @@ impl Table {
         // #5254: a target in a doorway's or a stair's clearance (on ground a body stands on, or in the opening itself)
         // is stood at only as far off as clears the passage itself ([`Ground::in_passage_itself`]: the body's radius
         // and margin, not [`CLEAR`]): on fine rings [`NEAR_PITCH`] apart from the target itself out, the first that
-        // has such a point, out to the full rings' reach; numbered after the target on its ring 0. Never further than
-        // that ring: the walk says how far it was moved, and why (`walk.goal-moved`).
+        // has such a point, out to twice [`CLEAR`] (past that only the full rings' places, clear of [`CLEAR`], as before);
+        // numbered after the target on its ring 0. Never further than that ring: the walk says how far it was moved,
+        // and why (`walk.goal-moved`).
         if passage {
             let mut k = 0u16;
-            for i in 0..=RINGS * PITCH / NEAR_PITCH {
+            for i in 0..=2 * CLEAR / NEAR_PITCH {
                 let n = if i == 0 {
                     1
                 } else {

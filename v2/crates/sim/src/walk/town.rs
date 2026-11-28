@@ -2545,7 +2545,11 @@ pub fn passage_named(
     door: Option<Id>,
     clear: i64,
 ) -> Option<(Id, Kind)> {
-    let clears = if clear == CLEAR { CLEARS } else { (clear, clear) };
+    let clears = if clear == CLEAR {
+        CLEARS
+    } else {
+        (clear, clear)
+    };
     for &(bi, li) in passages.on.get(&node).map_or(&[][..], |v| &v[..]) {
         let i = bi as usize;
         if node == ground
@@ -2575,6 +2579,7 @@ enum Lies {
 /// How `p` lies in link `l`'s doorway or on its flight ([`in_passage_but`]'s test of one link of `b`). With `mouths`
 /// false, a point at a doorway's mouth is told [`Lies::In`] without reading its line. `(end, band)` is how far round
 /// its ends and past its width along its line it reaches, µm: [`CLEARS`] for a walker's passage (#5254).
+#[allow(clippy::too_many_arguments)]
 fn link_passage(
     b: &Building,
     l: &crate::links::Link,

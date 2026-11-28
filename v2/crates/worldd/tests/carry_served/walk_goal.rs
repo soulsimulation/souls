@@ -14,7 +14,10 @@ use sim::walk::town::Town;
 fn town_of(facts: &str) -> Town {
     let im = import_eden::load(facts).expect("the facts load");
     let v = Value::Map(BTreeMap::from([
-        (1, Value::Bytes(Hash::of(Purpose::Fixture, b"souls/5254-walk-goal/1").to_bytes())),
+        (
+            1,
+            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/5254-walk-goal/1").to_bytes()),
+        ),
         (2, Value::Bytes(schema_hash().to_bytes())),
         (3, Value::Bytes(im.nodes["world"].scope().0.to_vec())),
         (4, im.nodes["world"].to_value()),
@@ -36,14 +39,18 @@ fn move_ended(dir: &Path, body: Id) -> BTreeMap<u64, Value> {
             .iter()
             .flat_map(|e| e.events.iter().flatten())
             .filter(|ev| {
-                ev.name.as_str() == "souls:move-ended" && ev.fields.get(&1) == Some(&body.to_value())
+                ev.name.as_str() == "souls:move-ended"
+                    && ev.fields.get(&1) == Some(&body.to_value())
             })
             .last()
             .map(|ev| ev.fields.clone());
         if let Some(f) = found {
             return f;
         }
-        assert!(Instant::now() < end, "no souls:move-ended of {body:?} in the log");
+        assert!(
+            Instant::now() < end,
+            "no souls:move-ended of {body:?} in the log"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -69,7 +76,7 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
     let d = scratch("wgdoor");
     let facts = world(&d);
     let socket = d.join("s");
-    let (dir, ids, served) = seed_and_serve(&d, &facts, (0, 36), &socket, 1);
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (0, 36), &socket, 3);
     served.line("listening ", 180);
     let im = import_eden::load(&facts).unwrap();
     let ground = im.nodes["ground"];
@@ -83,14 +90,24 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
     let body = body_of(&dir, ids[0]);
     let f = move_ended(&dir, body);
     let off = gap(stood(&dir)[&body], goal);
-    println!("to the doorway: {got:?}, {} mm off; its end {f:?}", off / 1000);
+    println!(
+        "to the doorway: {got:?}, {} mm off; its end {f:?}",
+        off / 1000
+    );
     assert!(got.is_ok(), "the walk is done: {got:?}");
-    assert_eq!(text(f.get(&2)).as_deref(), Some("walk.goal-moved"), "its end's word");
+    assert_eq!(
+        text(f.get(&2)).as_deref(),
+        Some("walk.goal-moved"),
+        "its end's word"
+    );
     let Some(Value::Uint(mm)) = f.get(&7) else {
         panic!("how far, field 7: {f:?}")
     };
     let mm = i64::try_from(*mm).unwrap();
-    assert!((mm - off / 1000).abs() <= 2, "field 7 ({mm} mm) is how far it stands from its goal ({off} µm)");
+    assert!(
+        (mm - off / 1000).abs() <= 2,
+        "field 7 ({mm} mm) is how far it stands from its goal ({off} µm)"
+    );
     // Clear of the doorway itself (at least the body's radius and margin, 0.34 m, off the goal in it), yet still within
     // the 0.7 m a walker is kept from it: moved only as far as needed, never the full clearance.
     assert!(mm >= 340, "moved clear of the doorway itself: {mm} mm");
@@ -100,9 +117,61 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
         town.passage_at(ground, end).is_some(),
         "it stands within the 0.7 m a walker is kept from the doorway, not moved the full clearance: {end:?}"
     );
-    assert!(town.passage_at(ground, goal).is_some(), "the goal was in the doorway");
-    assert_eq!(text(f.get(&10)).as_deref(), Some("doorway"), "the passage it cleared");
-    assert!(f.contains_key(&9), "the thing the doorway belongs to: {f:?}");
+    assert!(
+        town.passage_at(ground, goal).is_some(),
+        "the goal was in the doorway"
+    );
+    assert_eq!(
+        text(f.get(&10)).as_deref(),
+        Some("doorway"),
+        "the passage it cleared"
+    );
+    assert!(
+        f.contains_key(&9),
+        "the thing the doorway belongs to: {f:?}"
+    );
+    // Two more sent to the same goal at once, its nearest place held: each is done, and an end that says it was moved
+    // off the doorway says how far it truly stands from the goal and stands where only that move puts a body; one held
+    // off by the others says so (A2-4), never moved.
+    let mut more = Vec::new();
+    for k in 1..3 {
+        more.push(Soul::connect(&url, ids[k], lineage, &tokens[k]).await);
+    }
+    for m in more.iter_mut() {
+        m.send("eden:walk", ground, point(goal)).await;
+    }
+    for (k, m) in more.iter_mut().enumerate() {
+        let got = m.answer().await;
+        let body = body_of(&dir, ids[k + 1]);
+        let f = move_ended(&dir, body);
+        let end = stood(&dir)[&body];
+        let off = gap(end, goal);
+        let word = text(f.get(&2));
+        println!(
+            "another to the doorway: {got:?}, {} mm off; its end {f:?}",
+            off / 1000
+        );
+        assert!(got.is_ok(), "done: {got:?}");
+        match word.as_deref() {
+            Some("walk.goal-moved") => {
+                let Some(Value::Uint(mm)) = f.get(&7) else {
+                    panic!("how far, field 7: {f:?}")
+                };
+                assert!(
+                    (i64::try_from(*mm).unwrap() - off / 1000).abs() <= 2,
+                    "field 7 is how far it stands"
+                );
+                assert!(
+                    town.passage_at(ground, end).is_some(),
+                    "moved off the doorway only as far as needed: {end:?}"
+                );
+            }
+            Some("done.as-near-as-the-crowd-allows") => {}
+            other => panic!(
+                "a walk to a held doorway goal ends moved or held off by the crowd: {other:?}"
+            ),
+        }
+    }
     drop(served);
 }
 
@@ -137,8 +206,14 @@ async fn walk_goal_two_crews_carrying_past_each_other_both_arrive() {
     let (crew_a, crew_b) = souls.split_at_mut(2);
     let (a0, a1) = crew_a.split_at_mut(1);
     let (b0, b1) = crew_b.split_at_mut(1);
-    let carry_a = gather(&mut a0[0], &mut a1[0], &dir, ground, beam_a, &entry, a_at, true).await;
-    let carry_b = gather(&mut b0[0], &mut b1[0], &dir, ground, beam_b, &entry, b_at, true).await;
+    let carry_a = gather(
+        &mut a0[0], &mut a1[0], &dir, ground, beam_a, &entry, a_at, true,
+    )
+    .await;
+    let carry_b = gather(
+        &mut b0[0], &mut b1[0], &dir, ground, beam_b, &entry, b_at, true,
+    )
+    .await;
     let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     for (s, carry, beam) in [(&mut a0[0], carry_a, beam_a), (&mut b0[0], carry_b, beam_b)] {
         s.act("carry:lift", carry, BTreeMap::from([(1, beam.to_value())]))
@@ -148,8 +223,20 @@ async fn walk_goal_two_crews_carrying_past_each_other_both_arrive() {
     let north = |p: Vec3, by: i64| Vec3::new(p.x, 0, p.z + by);
     let lane = 7 * M;
     // Crew A first carries its beam 7 m north, out of the yard's row.
-    a0[0].send("eden:walk", ground, point(north(spot(a_at, front, true), lane))).await;
-    a1[0].send("eden:walk", ground, point(north(spot(a_at, back, true), lane))).await;
+    a0[0]
+        .send(
+            "eden:walk",
+            ground,
+            point(north(spot(a_at, front, true), lane)),
+        )
+        .await;
+    a1[0]
+        .send(
+            "eden:walk",
+            ground,
+            point(north(spot(a_at, back, true), lane)),
+        )
+        .await;
     a0[0].answer().await.expect("crew A's front north");
     a1[0].answer().await.expect("crew A's back north");
     // Then both at once: crew A south again, crew B north, past each other on lanes 0.9 m apart. A crew carried south
@@ -186,9 +273,14 @@ async fn walk_goal_two_crews_carrying_past_each_other_both_arrive() {
 #[ignore = "needs the Mars camp's exported facts (MARS_CAMP_FACTS)"]
 async fn walk_goal_on_the_mars_camp_a_crew_walks_from_the_rack_pile_to_beside_the_deck_bay() {
     let path = std::env::var("MARS_CAMP_FACTS").unwrap_or_else(|_| {
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.local/import-eden/mars-camp.facts.json").to_owned()
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../.local/import-eden/mars-camp.facts.json"
+        )
+        .to_owned()
     });
-    let facts = std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{path}: export the Mars camp first"));
+    let facts = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("{path}: export the Mars camp first"));
     let d = scratch("wgcamp");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let entries = d.join("entries");
@@ -199,7 +291,11 @@ async fn walk_goal_on_the_mars_camp_a_crew_walks_from_the_rack_pile_to_beside_th
             std::fs::copy(&p, entries.join(p.file_name().unwrap())).unwrap();
         }
     }
-    std::fs::copy(root.join("body/humanoid.json"), entries.join("humanoid.json")).unwrap();
+    std::fs::copy(
+        root.join("body/humanoid.json"),
+        entries.join("humanoid.json"),
+    )
+    .unwrap();
     let socket = d.join("s");
     // Born at the rack pile: the two 12 ft frames lie at (-30, 19) and (-30, 21.5).
     let (dir, ids, served) = seed_and_serve(&d, &facts, (-31, 20), &socket, 2);
@@ -231,7 +327,11 @@ async fn walk_goal_on_the_mars_camp_a_crew_walks_from_the_rack_pile_to_beside_th
     let at_end = stood(&dir);
     for (k, g) in got.iter().enumerate() {
         let off = gap(at_end[&bodies[k]], goals[k]);
-        println!("crew walker {k}: {g:?}, {} mm off its goal; its end {:?}", off / 1000, move_ended(&dir, bodies[k]));
+        println!(
+            "crew walker {k}: {g:?}, {} mm off its goal; its end {:?}",
+            off / 1000,
+            move_ended(&dir, bodies[k])
+        );
         assert!(g.is_ok(), "crew walker {k} arrives: {g:?}");
         assert!(off <= 400_000, "crew walker {k} within 0.4 m: {off} µm");
     }

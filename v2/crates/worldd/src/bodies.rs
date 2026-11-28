@@ -2131,18 +2131,27 @@ impl Bodies {
                 // [`WALK_AGAIN`] times (some three seconds); then it answers how far short it stopped, and why.
                 // #5254: one that came to the place it was granted off the point it was sent to is done there and says
                 // so (`goal_moved`): that point in a doorway's or a stair's clearance, moved only as far as clears the
-                // passage itself, however far that is; or off its ground, nearer than a walker's goal tolerance.
+                // passage itself, however far that is; or off its ground, nearer than a walker's goal tolerance. Never
+                // one a crowd held off (A2-4, A2-5: done as near as the crowd allows), nor one granted a place a crowd
+                // pushed out: the spot tables admit a place in a passage's clearance only as the nearest that clears
+                // the passage itself, so a place outside it is the full rings' or an overflow point's.
                 if how.is_ok()
+                    && !self.short.contains(&id)
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(g) = self.runner.granted.get(&body).copied()
-                    && let (Some(asked), Some(there)) = (self.gap_to(body, t, p), self.gap_to(body, t, g))
+                    && let (Some(asked), Some(there)) =
+                        (self.gap_to(body, t, p), self.gap_to(body, t, g))
                     && asked > 50
                     && there <= 50
                 {
                     match self.town.passage_at(t, p) {
-                        Some(why) => {
+                        Some(why)
+                            if self.town.passage_at(t, g).is_some()
+                                || asked <= STOPPED_SHORT_MM =>
+                        {
                             self.goal_moved.insert(id, (asked, Some(why)));
                         }
+                        Some(_) => {}
                         None if asked <= STOPPED_SHORT_MM => {
                             self.goal_moved.insert(id, (asked, None));
                         }
@@ -2169,7 +2178,10 @@ impl Bodies {
                         self.walked_again.insert(id, n + 1);
                         let goal = self.goal(body, t, Some(p));
                         let walk = Box::new(Route::sent(WALK, self.runner.tick));
-                        if goal.and_then(|g| self.runner.send(body, walk, g, id)).is_ok() {
+                        if goal
+                            .and_then(|g| self.runner.send(body, walk, g, id))
+                            .is_ok()
+                        {
                             self.short.remove(&id);
                             continue;
                         }
