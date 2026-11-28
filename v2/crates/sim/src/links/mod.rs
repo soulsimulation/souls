@@ -935,7 +935,10 @@ impl Building {
                         if tree
                             .handle(nodes[1])
                             .and_then(|h| tree.node(h))
-                            .is_some_and(|n| n.fields().contains_key(&crate::ground::scene::F_WHILE_JOINED)) =>
+                            .is_some_and(|n| {
+                                n.fields()
+                                    .contains_key(&crate::ground::scene::F_WHILE_JOINED)
+                            }) =>
                     {
                         line.clear();
                         ([None, None], Some("link-end-off-ground"))

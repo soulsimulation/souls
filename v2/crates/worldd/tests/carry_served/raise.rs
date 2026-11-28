@@ -109,7 +109,10 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     }
     let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     let entry = construction("rack_upright.json");
-    let (l, spec) = (Load::of(&entry).unwrap(), Spec::of(&entry).expect("a raise"));
+    let (l, spec) = (
+        Load::of(&entry).unwrap(),
+        Spec::of(&entry).expect("a raise"),
+    );
     let at = upright_at();
     // Carried lying: lifted from beside its edges (laid along the line its carriers stand on, Soul 1 east), walked
     // 6 m north and set down.
@@ -173,10 +176,15 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     assert_eq!(lying.frame.node, ground);
     let (foot, lie) = (lying.position, lying.orientation);
     let dir_of = |q: replica::pose::Quat, v: Vec3| q.rotate(v).unwrap();
-    let (along, across) = (dir_of(lie, Vec3::new(0, M, 0)), dir_of(lie, Vec3::new(M, 0, 0)));
+    let (along, across) = (
+        dir_of(lie, Vec3::new(0, M, 0)),
+        dir_of(lie, Vec3::new(M, 0, 0)),
+    );
     assert!(along.y.abs() <= 20_000, "it lies: {along:?}");
     let on = |a: i64, b: i64| {
-        let v = |x: i64, y: i64| (i128::from(x) * i128::from(a) + i128::from(y) * i128::from(b)) / i128::from(M);
+        let v = |x: i64, y: i64| {
+            (i128::from(x) * i128::from(a) + i128::from(y) * i128::from(b)) / i128::from(M)
+        };
         Vec3::new(
             foot.x + v(across.x, along.x) as i64,
             0,
@@ -240,7 +248,11 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     // The track: a sample a tick, the foot where it was on the plan, the top never more than 60 mm from the last.
     let top = |q: replica::pose::Quat| dir_of(q, Vec3::new(0, spec.height, 0));
     let checked = |track: &[(Vec3, replica::pose::Quat)], what: &str| {
-        assert!(track.len() >= 60, "{what}: a track, {} samples", track.len());
+        assert!(
+            track.len() >= 60,
+            "{what}: a track, {} samples",
+            track.len()
+        );
         for (p, _) in track {
             assert!(
                 (p.x - foot.x).abs() <= 1 && (p.z - foot.z).abs() <= 1,
@@ -251,12 +263,18 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             .windows(2)
             .map(|w| {
                 let (a, b) = (top(w[0].1), top(w[1].1));
-                (i128::from(a.x - b.x).pow(2) + i128::from(a.y - b.y).pow(2) + i128::from(a.z - b.z).pow(2))
-                    .isqrt()
+                (i128::from(a.x - b.x).pow(2)
+                    + i128::from(a.y - b.y).pow(2)
+                    + i128::from(a.z - b.z).pow(2))
+                .isqrt()
             })
             .max()
             .unwrap_or(0);
-        println!("{what}: {} samples, its top at most {} mm a tick", track.len(), step / 1000);
+        println!(
+            "{what}: {} samples, its top at most {} mm a tick",
+            track.len(),
+            step / 1000
+        );
         assert!(step <= 60_000, "{what}: no jump: {step} µm in a tick");
     };
     if restart {
@@ -275,13 +293,19 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             lean.y / 1000,
             spec.height / 1000
         );
-        assert!(lean.y > 100_000 && lean.y < spec.height - 100_000, "leaning: {lean:?}");
+        assert!(
+            lean.y > 100_000 && lean.y < spec.height - 100_000,
+            "leaning: {lean:?}"
+        );
         let served = super::grips::serve_again(&dir, &socket);
         served.line("listening ", 180);
         said(&dir, &served, carry, "souls:lowered", 1, 40).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         let all = samples(&dir, carry);
-        checked(&all[before..], "raised part way, then lowered by the world started again");
+        checked(
+            &all[before..],
+            "raised part way, then lowered by the world started again",
+        );
         let laid = moves_of(&dir, frame).last().cloned().expect("laid down");
         let y = dir_of(laid.orientation, Vec3::new(0, M, 0));
         println!(
@@ -348,10 +372,17 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     let posts: Vec<i64> = held.holds.iter().map(|h| h.hands[0].x).collect();
     println!("held: {:?}", held.holds);
     let post = spec.half_width - spec.half_thick;
-    assert!(posts[0] == -posts[1] && posts[0].abs() == post, "one on each post: {posts:?}");
+    assert!(
+        posts[0] == -posts[1] && posts[0].abs() == post,
+        "one on each post: {posts:?}"
+    );
     for h in &held.holds {
         assert_eq!([h.hands[0].y, h.hands[1].y], grips::HOLD_HANDS, "{h:?}");
-        assert_eq!((h.hands[0].x, h.hands[0].z), (h.hands[1].x, -spec.half_thick), "its back: {h:?}");
+        assert_eq!(
+            (h.hands[0].x, h.hands[0].z),
+            (h.hands[1].x, -spec.half_thick),
+            "its back: {h:?}"
+        );
     }
     // Each holder walks round to behind its post, 0.35 m off the frame's back.
     let end = Instant::now() + Duration::from_secs(20);
@@ -361,7 +392,10 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             .holds
             .iter()
             .map(|h| {
-                let st = dir_of(stands.orientation, Vec3::new(h.hands[0].x, 0, -spec.half_thick - 350_000));
+                let st = dir_of(
+                    stands.orientation,
+                    Vec3::new(h.hands[0].x, 0, -spec.half_thick - 350_000),
+                );
                 let p = Vec3::new(stands.position.x + st.x, 0, stands.position.z + st.z);
                 let f = feet[&h.body];
                 (i128::from(f.x - p.x).pow(2) + i128::from(f.z - p.z).pow(2)).isqrt()
@@ -401,11 +435,16 @@ async fn raise_and_lower(tag: &str, restart: bool) {
         "its foot where it stood: {:?}",
         laid.position
     );
-    assert!((laid.position.y - spec.half_thick).abs() <= 2_000, "on its face");
+    assert!(
+        (laid.position.y - spec.half_thick).abs() <= 2_000,
+        "on its face"
+    );
     let p = phases(&dir, carry);
     let of = |w: &str| p.iter().position(|x| x == w).unwrap_or(usize::MAX);
     assert!(
-        of("souls:raise") < of("souls:raised") && of("souls:raised") < of("souls:lower") && of("souls:lower") < of("souls:lowered"),
+        of("souls:raise") < of("souls:raised")
+            && of("souls:raised") < of("souls:lower")
+            && of("souls:lower") < of("souls:lowered"),
         "the words in order: {p:?}"
     );
     assert_eq!(
@@ -441,9 +480,13 @@ async fn turn_two_souls_turn_a_lying_frame_a_quarter_turn_about_its_middle() {
         souls.push(Soul::connect(&url, *s, lineage, t).await);
     }
     for (j, s) in souls.iter_mut().enumerate() {
-        s.act("eden:walk", ground, point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)))
-            .await
-            .expect("born");
+        s.act(
+            "eden:walk",
+            ground,
+            point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)),
+        )
+        .await
+        .expect("born");
     }
     let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     let l = Load::of(&construction("rack_upright.json")).unwrap();
@@ -470,7 +513,10 @@ async fn turn_two_souls_turn_a_lying_frame_a_quarter_turn_about_its_middle() {
         .await
         .expect("the carry offered");
     let carry = carry_made(&dir, &offered);
-    souls[1].act("activity:accept", carry, BTreeMap::new()).await.expect("accepts");
+    souls[1]
+        .act("activity:accept", carry, BTreeMap::new())
+        .await
+        .expect("accepts");
     souls[0]
         .act("carry:lift", carry, BTreeMap::from([(1, frame.to_value())]))
         .await
@@ -482,13 +528,21 @@ async fn turn_two_souls_turn_a_lying_frame_a_quarter_turn_about_its_middle() {
     let h0 = dir_of(q0);
     // A heading of nothing is no turn.
     let none = souls[1]
-        .act("carry:turn", carry, BTreeMap::from([(3, point(Vec3::ZERO).remove(&1).unwrap())]))
+        .act(
+            "carry:turn",
+            carry,
+            BTreeMap::from([(3, point(Vec3::ZERO).remove(&1).unwrap())]),
+        )
         .await;
     assert_eq!(none.map(|_| ()), Err("carry-turn-heading".to_owned()));
     // A quarter turn, from east toward north: its heading now turned about +y.
     let want = Vec3::new(h0.z, 0, -h0.x);
     souls[1]
-        .act("carry:turn", carry, BTreeMap::from([(3, point(want).remove(&1).unwrap())]))
+        .act(
+            "carry:turn",
+            carry,
+            BTreeMap::from([(3, point(want).remove(&1).unwrap())]),
+        )
         .await
         .expect("the turn begins");
     said(&dir, &served, carry, "souls:turn", 1, 10).await;
@@ -497,8 +551,12 @@ async fn turn_two_souls_turn_a_lying_frame_a_quarter_turn_about_its_middle() {
     let turn = &all[before.len() - 1..];
     let (p1, q1) = *turn.last().unwrap();
     let h1 = dir_of(q1);
-    let cos = (i128::from(h1.x) * i128::from(want.x) + i128::from(h1.z) * i128::from(want.z)) * 1000
-        / (i128::from(M) * (i128::from(want.x).pow(2) + i128::from(want.z).pow(2)).isqrt().max(1));
+    let cos = (i128::from(h1.x) * i128::from(want.x) + i128::from(h1.z) * i128::from(want.z))
+        * 1000
+        / (i128::from(M)
+            * (i128::from(want.x).pow(2) + i128::from(want.z).pow(2))
+                .isqrt()
+                .max(1));
     let step = turn
         .windows(2)
         .map(|w| {
@@ -518,7 +576,10 @@ async fn turn_two_souls_turn_a_lying_frame_a_quarter_turn_about_its_middle() {
     assert!(step <= 30_000, "at most about 1.6 degrees a tick: {step}");
     assert!(moved <= 150_000, "about its middle: {moved} µm");
     // The carry goes on at its new heading: set down, it lies turned.
-    souls[0].act("carry:set-down", carry, BTreeMap::new()).await.expect("set down");
+    souls[0]
+        .act("carry:set-down", carry, BTreeMap::new())
+        .await
+        .expect("set down");
     tokio::time::sleep(Duration::from_millis(2000)).await;
     let laid = moves_of(&dir, frame).last().cloned().expect("laid");
     assert_eq!(laid.frame.node, ground);
@@ -544,9 +605,13 @@ async fn walk_a_walk_short_of_its_goal_says_so_and_two_crews_walk_past_each_othe
         souls.push(Soul::connect(&url, *s, lineage, t).await);
     }
     for (j, s) in souls.iter_mut().enumerate() {
-        s.act("eden:walk", ground, point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)))
-            .await
-            .expect("born");
+        s.act(
+            "eden:walk",
+            ground,
+            point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)),
+        )
+        .await
+        .expect("born");
     }
     let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     let l = Load::of(&construction("rack_upright.json")).unwrap();
@@ -557,8 +622,15 @@ async fn walk_a_walk_short_of_its_goal_says_so_and_two_crews_walk_past_each_othe
     };
     // Beside its edge: arrives.
     let edge = spot(at, l.half_width + 350_000, false);
-    souls[0].act("eden:walk", ground, point(edge)).await.expect("arrives beside its edge");
-    assert!(off(bodies[0], edge) <= 400_000, "within 0.4 m: {}", off(bodies[0], edge));
+    souls[0]
+        .act("eden:walk", ground, point(edge))
+        .await
+        .expect("arrives beside its edge");
+    assert!(
+        off(bodies[0], edge) <= 400_000,
+        "within 0.4 m: {}",
+        off(bodies[0], edge)
+    );
     // Two pairs on crossing lanes, 8 m each, meeting halfway.
     let c = Vec3::new(44 * M, 0, -24 * M);
     let goals = [
@@ -580,7 +652,10 @@ async fn walk_a_walk_short_of_its_goal_says_so_and_two_crews_walk_past_each_othe
     for (k, s) in souls.iter_mut().enumerate() {
         let got = s.answer().await;
         let gap = off(bodies[k], goals[k]);
-        println!("crossing walker {k}: {got:?}, {} mm off its goal", gap / 1000);
+        println!(
+            "crossing walker {k}: {got:?}, {} mm off its goal",
+            gap / 1000
+        );
         // #5254: each arrives within 0.4 m, the others' bodies having moved off (its walk sent again meanwhile).
         assert!(got.is_ok(), "crossing walker {k} arrives: {got:?}");
         assert!(gap <= 400_000, "done within 0.4 m: {gap} µm");

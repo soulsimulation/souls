@@ -73,6 +73,111 @@ test('third attempt requires fresh independent evidence-bound review and is the 
   const third = await f.runner(f.o); assert.equal(third.repairAttempt, 3); assert.equal(third.status, 'FAIL');
   f.change('p4'); await assert.rejects(f.runner(f.o), /repair-ceiling/);
 });
+function continuation(f, {current,relocations=[],maximum=4}={}) {
+  const file=join(f.root,'continuation.json'),value={schema:'owned-proof-continuation/1',authorizer:'/test/coordinator',
+    grant:'https://github.com/soulsimulation/souls/issues/4379#issuecomment-1',at:new Date(f.now()).toISOString(),owner:f.o.owner,
+    ledger:{file:f.o.ledger,hash:createHash('sha256').update(readFileSync(f.o.ledger)).digest('hex')},cycle:f.o.cycle,
+    current:current??{product:f.identity(f.product),tool:f.identity(f.root)},importedBudget:null,
+    slot:{arm:f.o.arm,repeat:f.o.repeat,maxTotalAttempts:maximum},relocations,
+    frozenEvidence:f.ledger().attempts.map(a=>({file:a.report,hash:a.reportHash}))};
+  writeFileSync(file,JSON.stringify(value));f.o.continuationAuthority={file,hash:createHash('sha256').update(readFileSync(file)).digest('hex')};
+  return value;
+}
+function latestReview(f) {
+  const rows=f.ledger().attempts.slice(-2);
+  return {reviewer:'/test/independent-reviewer',evidenceOnly:true,decision:'TRY',at:new Date(f.now()).toISOString(),
+    evidence:rows.map(a=>a.reportHash),source:{product:f.identity(f.product),tool:f.identity(f.root)},
+    hypothesis:'new independently diagnosed correction '+rows.length+' '+rows.at(-1).reportHash,change:{path:'fix.ts',line:1}};
+}
+test('an exact one-prestate authority permits a fourth correction without resetting the chain or old evidence',async t=>{
+  const f=setup(t);f.o.journey=async c=>c.check('contact',false);
+  const one=await f.runner(f.o);f.change('p2');await f.runner(f.o);f.change('p3');f.o.review=latestReview(f);await f.runner(f.o);
+  const old=readFileSync(join(one.paths.dir,'report.json'));f.change('p4');f.o.review=latestReview(f);
+  await assert.rejects(f.runner(f.o),/repair-ceiling/);continuation(f);
+  const prior=f.o.review.evidence;f.o.review.evidence=f.ledger().attempts.map(a=>a.reportHash);
+  await assert.rejects(f.runner(f.o),/review-evidence-mismatch/);f.o.review.evidence=prior;
+  f.o.journey=async c=>c.check('contact',true);const four=await f.runner(f.o);
+  assert.equal(four.status,'PASS');assert.equal(four.repairAttempt,4);assert.equal(f.ledger().attempts.length,4);
+  assert.equal(f.ledger().cycles.length,1);assert.deepEqual(readFileSync(join(one.paths.dir,'report.json')),old);
+  assert.deepEqual(four.continuationAuthority,f.o.continuationAuthority);assert.equal(f.ledger().continuationAuthorities.length,1);
+});
+test('authorized product relocation verifies the frozen root and still requires a relevant source repair',async t=>{
+  let identity;const f=setup(t,{source:r=>identity(r)});identity=f.identity;
+  f.o.journey=async c=>c.check('contact',false);const first=await f.runner(f.o),old=readFileSync(join(first.paths.dir,'report.json'));
+  const to=join(f.root,'relocated');mkdirSync(to);writeFileSync(join(to,'fix.ts'),'export const repaired = 2;');
+  identity=r=>resolve(r)===to?{root:to,head:'p2'}:f.identity(r);f.o.sourceRoot=to;
+  f.o.repair={root:to,from:'p1',to:'p2',paths:['fix.ts'],scope:'reviewed source relocation and correction',hypothesis:'actual corrected current source'};
+  await assert.rejects(f.runner(f.o),/planned-source-mismatch/);
+  continuation(f,{maximum:3,current:{product:identity(to),tool:identity(f.root)},relocations:[{from:f.identity(f.product),to:identity(to),
+    sourceFiles:[{path:'fix.ts',hash:createHash('sha256').update(readFileSync(join(f.product,'fix.ts'))).digest('hex')}]}]});
+  f.o.journey=async c=>c.check('contact',true);const second=await f.runner(f.o);
+  assert.equal(second.status,'PASS');assert.equal(second.repairAttempt,2);assert.equal(f.ledger().cycles.length,1);
+  assert.deepEqual(readFileSync(join(first.paths.dir,'report.json')),old);
+  assert.equal(readFileSync(join(f.product,'fix.ts'),'utf8'),'export const repaired = true;\n');
+});
+async function relocatedNewCycle(t) {
+  let identity;const f=setup(t,{source:r=>identity(r)});identity=f.identity;
+  f.o.history={count:7,evidence:[]};const first=await f.runner(f.o),prior=f.ledger();
+  const to=join(f.root,'new-product');mkdirSync(to);writeFileSync(join(to,'fix.ts'),'export const differentDepiction = true;');
+  const identities=new Map([[to,{root:to,head:'p2'}]]);identity=r=>identities.get(resolve(r))??f.identity(r);
+  f.o.sourceRoot=to;f.o.cycle={id:'different-depiction',fix:{root:to,from:'p1',to:'p2',paths:['fix.ts'],scope:'new declared-body depiction concern'},
+    arms:{candidate:identity(to)},plan:[{arm:'candidate',repeat:1}]};
+  const relocation={kind:'product',from:f.identity(f.product),to:identity(to),sourceFiles:[{path:'fix.ts',hash:createHash('sha256').update(readFileSync(join(f.product,'fix.ts'))).digest('hex')}]};
+  const grant=()=>continuation(f,{maximum:3,current:{product:identity(to),tool:identity(f.root)},relocations:[relocation]});
+  return {f,to,first,prior,relocation,grant,identities};
+}
+test('a separately authorized material cycle preserves the completed cycle, reports, attempts and capture counts across protected roots',async t=>{
+  const {f,first,prior,grant}=await relocatedNewCycle(t),old=readFileSync(join(first.paths.dir,'report.json'));
+  await assert.rejects(f.runner(f.o),/cycle-change-from-mismatch/);grant();const next=await f.runner(f.o),after=f.ledger();
+  assert.equal(next.status,'PASS');assert.equal(next.captureOrdinal,9);assert.equal(next.repairAttempt,1);
+  assert.equal(after.historicalCaptures,7);assert.equal(after.captures,2);assert.equal(after.cycles.length,2);
+  assert.deepEqual(after.cycles[0],prior.cycles[0]);assert.deepEqual(after.attempts[0],prior.attempts[0]);assert.equal(after.attempts.length,2);
+  assert.deepEqual(readFileSync(join(first.paths.dir,'report.json')),old);assert.equal(readFileSync(join(f.product,'fix.ts'),'utf8'),'export const repaired = true;\n');
+});
+for(const defect of ['old root','old head','new root','new head','kind','old bytes','unchanged fix'])
+test(`new material cycle rejects a relocation with ${defect}`,async t=>{
+  const {f,to,prior,relocation,grant,identities}=await relocatedNewCycle(t);
+  if(defect==='old root'){
+    const other=join(f.root,'unrecorded-product');mkdirSync(other);writeFileSync(join(other,'fix.ts'),'export const repaired = true;\n');
+    identities.set(other,{root:other,head:'p1'});relocation.from=identities.get(other);
+  }
+  if(defect==='old head'){
+    identities.set(f.product,{root:f.product,head:'unrecorded'});relocation.from=identities.get(f.product);f.o.cycle.fix.from='unrecorded';
+  }
+  if(defect==='new root')relocation.to={root:f.product,head:'p2'};
+  if(defect==='new head')relocation.to={root:to,head:'unrecorded'};
+  if(defect==='kind'){relocation.kind='tool';relocation.to=f.identity(f.root);}
+  grant();
+  if(defect==='old bytes')writeFileSync(join(f.product,'fix.ts'),'changed frozen source');
+  if(defect==='unchanged fix'){f.o.cycle.fix.to='p1';identities.set(to,{root:to,head:'p1'});relocation.to=identities.get(to);grant();}
+  const why=defect.startsWith('new ')?/continuation-old-source/:defect==='old bytes'?/continuation-old-source-files/:defect==='unchanged fix'?/material-change-required/:/cycle-change-from-mismatch/;
+  await assert.rejects(f.runner(f.o),why);assert.deepEqual(f.ledger(),prior);assert.equal(f.children.length,1,'rejection launches no additional resource');
+});
+test('an explicitly relocated tool and identical ledger retain counts and require a material tool correction',async t=>{
+  let identity;const f=setup(t,{source:r=>identity(r)});identity=f.identity;
+  writeFileSync(join(f.root,'fix.ts'),'frozen helper');f.o.journey=async c=>c.check('contact',false);await f.runner(f.o);
+  const fromFile=f.o.ledger,old=readFileSync(fromFile),to=join(f.root,'new-tool');mkdirSync(to);writeFileSync(join(to,'fix.ts'),'corrected helper');
+  identity=r=>resolve(r)===to?{root:to,head:'t2'}:f.identity(r);
+  f.o.toolRoot=to;f.o.ledger=join(to,'ledger.json');writeFileSync(f.o.ledger,old);
+  f.o.repair={root:to,from:'t1',to:'t2',paths:['fix.ts'],scope:'actual helper compatibility correction'};
+  const options={current:{product:identity(f.product),tool:identity(to)}};
+  continuation(f,options);await assert.rejects(f.runner(f.o),/repair-from-mismatch/);
+  options.relocations=[{kind:'tool',from:identity(f.root),to:identity(to),sourceFiles:[{path:'fix.ts',hash:createHash('sha256').update(readFileSync(join(f.root,'fix.ts'))).digest('hex')}]}];
+  const a=continuation(f,options);a.ledgerRelocation={fromFile,hash:createHash('sha256').update(old).digest('hex'),toFile:f.o.ledger};
+  writeFileSync(f.o.continuationAuthority.file,JSON.stringify(a));f.o.continuationAuthority.hash=createHash('sha256').update(readFileSync(f.o.continuationAuthority.file)).digest('hex');
+  f.o.journey=async c=>c.check('contact',true);const report=await f.runner(f.o);
+  assert.equal(report.status,'PASS');assert.equal(report.repairAttempt,2);assert.equal(f.ledger().attempts.length,2);assert.equal(f.ledger().cycles.length,1);
+  assert.deepEqual(readFileSync(fromFile),old);assert.equal(report.source.tool.root,to);
+});
+test('a continuation cannot bypass stopped, unfinished or cleanup-failed ownership',async t=>{
+  const f=setup(t);f.o.journey=async c=>c.check('contact',false);await f.runner(f.o);f.change('p2');
+  const state=f.ledger();state.cycles[0].stopped='cleanup failed';writeFileSync(f.o.ledger,JSON.stringify(state));continuation(f);
+  await assert.rejects(f.runner(f.o),/repair-ceiling/);
+  delete state.cycles[0].stopped;state.cycles[0].inFlight='owned';writeFileSync(f.o.ledger,JSON.stringify(state));continuation(f);
+  await assert.rejects(f.runner(f.o),/unfinished-attempt/);
+  const g=setup(t,{stop:async()=>{throw Error('cleanup failed');}});await g.runner(g.o);g.change('p2');continuation(g);
+  await assert.rejects(g.runner(g.o),/EEXIST/);assert.ok(existsSync(g.o.ledger+'.lock'));
+});
 test('two predeclared repeats per arm allow passes, but a failure cannot be sidestepped and counts all three tries', async t => {
   const f = setup(t); f.o.cycle.arms.baseline = { root: f.product, head: 'p1' };
   f.o.cycle.plan = [{ arm: 'baseline', repeat: 1 }, { arm: 'baseline', repeat: 2 }, { arm: 'candidate', repeat: 1 }, { arm: 'candidate', repeat: 2 }];

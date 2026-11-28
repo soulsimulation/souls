@@ -7,7 +7,19 @@
 // if the early entry fails to load; its socket opens after at most SOCKET_FALLBACK_MS (PF2). P7d: `__soulsPhase2(true)` starts only its downloads and the socket; the main entry
 // itself runs at the next call (early-entry.ts: once the early renderer's poster is up), so it never competes with it. Pages that are not two-phase (the head script's phasedEntryWanted: desktops, old
 // worlds, pictures, ?phased=0) load both at once, main first, as before.
-// No imports: vite.config.ts loads this file in node.
+// #4986: where the launcher says this build's files are on the asset CDN (app-cdn.ts), the loader asks for both phases
+// there instead of the origin, by file name; everything those files load follows them (vite.config.ts builtUrl). An entry
+// that does not load from the CDN (unreachable, blocked, a file missing) reloads the page once with `?appcdn=0`, from the origin.
+// A browser refuses to start a worker from another origin's file, so on such a page the loader also wraps `Worker`: a
+// module worker asked for at the CDN's origin is started from a same-origin blob module that imports that file by name
+// from the CDN folder (its own imports then come from the CDN too). Any other worker is started as asked. That wrapper
+// and the choice live here, in index.html, so the page's chunks carry none of it.
+// #4986 review: the same once-only reload covers a CDN that hangs (no file of it has arrived APP_CDN_HANG_MS after the
+// loader asked, and the early entry has not loaded) and a failure after the entry has loaded: a lazy chunk or style
+// (Vite's `vite:preloadError`) or a worker started from the CDN that does not load. `?appcdn=0` turns all of it off, so
+// it can never loop. Data files fetched by the app's own code keep their own handling.
+// No imports but one as plain as this file: vite.config.ts loads this file in node.
+import { appCdn } from './app-cdn.ts';
 
 /** The window function that starts phase two (idempotent; `(true)`: its downloads, not yet its entry; `('fill')`: its
  *  downloads, its entry's download and the socket; `()`: everything, the entry run). */
@@ -32,6 +44,11 @@ export const SOCKET_FALLBACK_MS = 2_500;
  *  is fetched (not run) and the socket opens while the phone links and draws the poster; the entry runs at the next plain
  *  call, as before. */
 export const PHASE2_FILL = 'fill';
+/** #4986 review: a CDN that has delivered no file at all this long after the loader asked for the first is taken as
+ *  hung, and the page reloads once from the origin. 8 s: the first phase's smallest files are a few KB, which even a 2G
+ *  link (~50 kbit/s) brings in well under it after a new connection's handshakes; a hang otherwise lasts forever. It
+ *  times arrival of any file, not the whole download, so a slow link is never sent to download it all again. */
+export const APP_CDN_HANG_MS = 8_000;
 
 export type Phase = { entry: string; preloads: readonly string[] };
 
@@ -44,7 +61,14 @@ export function callPhase2(mode?: true | typeof PHASE2_FILL): void {
  *  head script) and opens the deferred entry socket (window.__soulsOpenSocket) with phase two. */
 export function phasedLoaderScript(early: Phase, main: Phase): string {
   return `(function(){var d=document,W=window,E=${JSON.stringify(early)},M=${JSON.stringify(main)},done=false,pre=false,sock=false,`
-    + `add=function(u,entry){var l=d.createElement(entry?'script':'link');if(entry){l.type='module';l.src=u;}else{l.rel='modulepreload';l.href=u;}l.crossOrigin='';d.head.appendChild(l);return l;},`
+    // #4986: C is the CDN directory ('' = the origin); at(u) is u's file there; back() reloads once from the origin
+    + `C=(function(){try{return (${appCdn.toString()})(W.__simConfig,location.search||'');}catch(e){return '';}})(),at=function(u){return C?C+u.slice(u.lastIndexOf('/')+1):u;},`
+    + `gone=false,back=function(){if(gone)return;gone=true;try{location.replace(location.pathname+(location.search?location.search+'&':'?')+'appcdn=0'+location.hash);}catch(e){}},`
+    // a worker from the CDN: a same-origin blob that imports it (freed once the worker has read it); one that does not
+    // load (a plain error event; an error inside a running worker carries a message) takes the same reload
+    + `NW=C&&W.Worker,SW=NW&&function(u,o){var b='';try{var a=new URL(String(u),location.href);if(o&&o.type==='module'&&a.origin===new URL(C).origin)u=b=URL.createObjectURL(new Blob(['import '+JSON.stringify(C+a.pathname.slice(a.pathname.lastIndexOf('/')+1))],{type:'text/javascript'}));}catch(e){}`
+    + `var w=new NW(u,o);if(b){try{w.addEventListener('error',function(e){if(!e.message)back();});setTimeout(function(){URL.revokeObjectURL(b);},6e4);}catch(e){}}return w;},`
+    + `add=function(u,entry){var l=d.createElement(entry?'script':'link');if(entry){l.type='module';l.src=at(u);if(C)l.addEventListener('error',back);}else{l.rel='modulepreload';l.href=at(u);}l.crossOrigin='';d.head.appendChild(l);return l;},`
     + `so=function(){if(!sock){sock=true;try{var o=W.__soulsOpenSocket;if(typeof o==='function')o();}catch(e){}}},`
     // t4-phone3: the entry's download (fe) and its end (ml): the socket opens once it is in, its join after it on the link
     + `si=false,fe=false,ml=false,`
@@ -53,9 +77,13 @@ export function phasedLoaderScript(early: Phase, main: Phase): string {
     + `fill=function(){if(!done&&!fe){fe=true;var l=add(M.entry);l.onload=l.onerror=function(){ml=true;so();};}},`
     + `two=function(hold){if(!pre){pre=true;var left=M.preloads.length,got=function(){if(--left===0&&hold===true)near();};M.preloads.forEach(function(u){var l=add(u);l.onload=l.onerror=got;});if(!left&&hold===true)near();}`
     + `if(hold===${JSON.stringify(PHASE2_FILL)})fill();if(hold!==true&&hold!==${JSON.stringify(PHASE2_FILL)}&&!done){done=true;var e=add(M.entry,true);if(!fe||ml)so();else e.onload=e.onerror=so;}};`
+    + `if(SW){SW.prototype=NW.prototype;W.Worker=SW;}`
     + `W[${JSON.stringify(PHASE2_GLOBAL)}]=two;var ph=W.__soulsPhased===true;if(!ph)two();`
     + `try{W.__soulsSnapshotPrefetch.response.then(function(){si=true;},function(){});}catch(e){}`
-    + `E.preloads.forEach(function(u){add(u);});var ee=add(E.entry,true);ee.onerror=two;if(ph){ee.onload=function(){setTimeout(function(){if(!si)so();},${SOCKET_FALLBACK_MS});};setTimeout(two,${PHASE2_FALLBACK_MS});}})();`;
+    + `E.preloads.forEach(function(u){add(u);});var ee=add(E.entry,true);ee.onerror=two;if(ph){ee.onload=function(){setTimeout(function(){if(!si)so();},${SOCKET_FALLBACK_MS});};setTimeout(two,${PHASE2_FALLBACK_MS});}`
+    // #4986 review: a hung CDN (nothing of it arrived, the early entry not in) and a lazy chunk or style that fails later
+    + `if(C){var eo=false;ee.addEventListener('load',function(){eo=true;});setTimeout(function(){if(eo)return;try{var es=performance.getEntriesByType('resource');for(var i=0;i<es.length;i++)if(es[i].name.indexOf(C)===0)return;}catch(e){return;}back();},${APP_CDN_HANG_MS});`
+    + `W.addEventListener('vite:preloadError',back);}})();`;
 }
 
 const MODULE_SCRIPT = /[ \t]*<script type="module" crossorigin src="([^"]+)"><\/script>\n?/g;
