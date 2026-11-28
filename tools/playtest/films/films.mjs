@@ -106,6 +106,7 @@ async function remoteSeat(world, label, owner, name) {
   if (!asked) throw Error(`${label}: pair gave no code (${JSON.stringify(lines.at(-1) ?? {}).slice(0, 200)})`);
   const ap = await owner.post('/v1/pair/approve', { code: asked.code, confirm: true });
   if (ap.status !== 200) throw Error(`${label}: the owner's approval answered ${ap.status} ${ap.body.refused ?? ''}`);
+  await run(['start']); // N13: pair returns at once; start waits for the approval, keeps the token, starts the client
   }
   for (const end = Date.now() + 120_000; !soul && Date.now() < end; await sleep(1000)) {
     const done = jl((await sshExec(`cat ${rdir}/.souls/pairing.log 2>/dev/null`)).out);

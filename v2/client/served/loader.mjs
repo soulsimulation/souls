@@ -8,7 +8,7 @@
 //   copy is newer (docs/architecture/api.md, "Soul client upgrade", frozen).
 // - The modules are unpacked once into `.souls/bin/client/<version>-<digest>/` and the thin command runs from there,
 //   so its daemon and its pairing start from files, as they do in the repository.
-// - `pair <world url>` in a home with no client first installs it (`../src/upgrade/served.mjs`): the world's address
+// - `pair <world url>` (the url anywhere after `pair`) in a home with no client first installs it (`../src/upgrade/served.mjs`): the world's address
 //   becomes the home's one trusted site, and the client, the skill and the daemon's library are fetched from it, each
 //   checked by length and hash before anything is written. A command whose version has no library yet fetches it.
 // - `upgrade`: a newer client from that site (served.mjs), then R18's `main` (`../src/upgrade/upgrade.mjs`), which
@@ -102,8 +102,10 @@ else if (args[0] === 'upgrade') {
   // `god <verb> ...`: the creator's command (souls-god.mjs, G7) from the same files, for a world's creator.
   const god = args[0] === 'god', rest = god ? args.slice(1) : args;
   let ready = true;
-  if (rest[0] === 'pair' && rest[1]) {
-    try { await (await served()).firstInstall({ home, url: rest[1] }); } catch (e) { refused(e); ready = false; }
+  // The world's address is the word after `pair` that is a url: `pair --wait` (N13) names none and installs nothing.
+  const site = rest[0] === 'pair' ? rest.slice(1).find((w) => /^https?:\/\//.test(w)) : undefined;
+  if (site) {
+    try { await (await served()).firstInstall({ home, url: site }); } catch (e) { refused(e); ready = false; }
   }
   if (ready) {
     // The daemon's library for this version: kept, else fetched by hash from the home's site.
