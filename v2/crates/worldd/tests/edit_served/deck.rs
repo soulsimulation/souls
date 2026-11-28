@@ -600,6 +600,8 @@ fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_un
     // body.
     k.walk(&[(4, Deck::at(6_000, 3_000))], "Soul 5 to the flight's foot");
     let walker = body_of(&k.w, k.w.souls[4]);
+    dump(&k.w, &[k.site, sheet, flight, deck]);
+    println!("Soul 5 before: {:?}", body_on(&k.w, walker));
     let up = |k: &mut Deck, node: Id, p: Vec3, what: &str| {
         let to = BTreeMap::from([(1, Value::Array(vec![int(p.x), int(p.y), int(p.z)]))]);
         k.hands[4].send("eden:walk", node, to);
@@ -643,6 +645,34 @@ fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_un
     let c = k.crew_at((2, 3), SHEET_ENDS, "Souls 3 and 4 under the sheet's ends");
     done(k.unseat(2, c, sheet), "the sheet off, nobody on it");
     assert_eq!(where_is(&k.w, sheet).0, Some(c), "the sheet rides its crew");
+}
+
+/// What the served world holds under each of `ids`: kind, parent, slot and children, for a failing step's print.
+fn dump(w: &Seeded, ids: &[Id]) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    for &id in ids {
+        let Some(h) = t.handle(id) else {
+            println!("dump {}: not in the tree", show(id));
+            continue;
+        };
+        let n = t.node(h).unwrap();
+        let kids: Vec<String> = t
+            .children(h)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|c| t.node(*c))
+            .map(|c| format!("{} {} slot {:?}", show(c.id()), c.kind().as_str(), c.slot()))
+            .collect();
+        let fields: Vec<String> = n.fields().keys().map(|k| format!("{k:?}")).collect();
+        println!(
+            "dump {} {} parent {:?} slot {:?} fields {fields:?} kids {kids:?}",
+            show(id),
+            n.kind().as_str(),
+            n.parent().map(show),
+            n.slot()
+        );
+    }
 }
 
 /// Every row of body `body` in the log, in order: the node it was on and its place there.
