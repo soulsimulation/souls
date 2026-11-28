@@ -3244,7 +3244,8 @@ async fn b20_a_running_world_refuses_a_part_left_hanging() {
     println!("{joined}");
     assert_eq!(
         joined,
-        "joined parts: bays [mars:rack_bay], standing [mars:rack_upright], bearing [mars:rack_beam]"
+        "joined parts: bays [mars:deck_bay, mars:rack_bay], standing [mars:rack_upright, mars:rack_upright_12ft], \
+         bearing [mars:deck_beam, mars:plywood_sheet, mars:rack_beam, mars:two_by_four]"
     );
     s.line("listening ", 120);
     let (_, rules) = served_copy(&w);
