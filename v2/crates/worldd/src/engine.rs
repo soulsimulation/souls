@@ -1454,12 +1454,14 @@ impl Engine {
                     let fixed = std::cell::OnceCell::new();
                     let swept = tree.frozen();
                     let geometry = || fixed.get_or_init(|| Fixed::of(&swept, ground).ok());
-                    let clear = |a: (Vec3, Quat), b: (Vec3, Quat)| match geometry() {
-                        Some(fx) => sim::activity::carry::node_way(fx, &load, floor, a, b),
-                        None => Err(refusal("carry-geometry", show(ground))),
+                    let clear = |a: (Vec3, replica::pose::Quat), b: (Vec3, replica::pose::Quat)| {
+                        match geometry() {
+                            Some(fx) => sim::activity::carry::node_way(fx, &load, floor, a, b),
+                            None => Err(refusal("carry-geometry", show(ground))),
+                        }
                     };
-                    let bears = |at: (Vec3, Quat)| {
-                        geometry().is_some_and(|fx| {
+                    let bears = |at: (Vec3, replica::pose::Quat)| {
+                        geometry().as_ref().is_some_and(|fx| {
                             sim::activity::carry::node_bears(fx, &load, floor, at).unwrap_or(false)
                         })
                     };

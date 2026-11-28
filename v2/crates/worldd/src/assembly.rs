@@ -1954,6 +1954,106 @@ impl Assembly {
 mod tests {
     use super::*;
 
+    /// FOR-FABLE 6: a 2x4 fed west over a beam, its crew in line east of the bay. It is raised, then slid; the carrier
+    /// behind walks it in; the one by the bay, who cannot follow, lets go once the part rests on the beam, never
+    /// before. With nothing to rest on, or nobody behind to hold it to the end, or the way blocked, it is refused by
+    /// name. Where it would be fed from is named on the line of its length, clear of where it goes.
+    #[test]
+    fn a_fed_part_is_let_go_only_where_it_is_borne_and_another_holds_it() {
+        let id = |n| Id::new(replica::ids::Scope([1; 16]), n).expect("an id");
+        let c = |n, x: i64, gx: i64| Carrier {
+            body: id(n),
+            feet: Vec3::new(x, 0, 0),
+            reach: 2_060_000,
+            grip: Vec3::new(gx, 0, 0),
+        };
+        // The node 2.2 m east of its slot at carrying height; the back at its west grip, by the bay.
+        let from = (Vec3::new(2_200_000, HEIGHT, 0), Quat::IDENTITY);
+        let to = (Vec3::new(0, 1_946_000, 0), Quat::IDENTITY);
+        let crew = [c(1, 3_282_000, 732_000), c(2, 1_118_000, -732_000)];
+        // Ground east of the bay only; the part rests on the beam once its west end is over it (x = 0.6 m).
+        let ground = |_: Id, _: Vec3, b: Vec3| b.x > 900_000;
+        let clear = |_: (Vec3, Quat), _: (Vec3, Quat)| Ok(());
+        let borne = |(p, _): (Vec3, Quat)| p.x - 914_000 < 600_000 && p.y == 1_946_000;
+        let feed = Feed {
+            most: 2_829_000,
+            half_length: 914_000,
+            place: 1_082_000,
+            clear: &clear,
+            bears: &borne,
+        };
+        let f = fed(&crew, from, to, &feed, &ground).expect("fed");
+        assert_eq!(f.via, (Vec3::new(2_200_000, 1_946_000, 0), Quat::IDENTITY));
+        assert_eq!((f.rise, f.slide), (2_250_000, 5_500_000));
+        assert_eq!(f.walks.iter().map(|w| w.body).collect::<Vec<_>>(), [id(1)]);
+        assert_eq!(f.walks[0].to, Vec3::new(1_082_000, 0, 0));
+        // It lets go where its hold is 0.7 m from its feet: the node 1.15 m out, the part's end long over the beam.
+        let [(who, when)] = f.lets[..] else {
+            panic!("one lets go: {:?}", f.lets)
+        };
+        assert_eq!(who, id(2));
+        let there = between(f.via, to, (0, f.slide), when).unwrap().0;
+        assert!((1_100_000..1_160_000).contains(&there.x), "{there:?}");
+        // Nothing under it where the carrier by the bay would let go.
+        let bare = Feed {
+            bears: &|_| false,
+            ..Feed { ..feed }
+        };
+        let r = fed(&crew, from, to, &bare, &ground).expect_err("unborne");
+        assert_eq!(r.name, "part.feed-unborne");
+        assert!(r.detail.contains(&show(id(2))), "{}", r.detail);
+        // Nobody behind it: both by the bay.
+        let r = fed(&crew, from, to, &feed, &|_, _, _| false).expect_err("unheld");
+        assert_eq!(
+            r.name, "part.feed-unborne",
+            "the one behind would let go off the beam"
+        );
+        // The way blocked: the sweep's refusal is the feed's.
+        let shut = Feed {
+            clear: &|_, _| Err(refusal("part.way-blocked", "a post")),
+            ..Feed { ..feed }
+        };
+        assert_eq!(
+            fed(&crew, from, to, &shut, &ground)
+                .map_err(|r| r.name)
+                .err(),
+            Some("part.way-blocked")
+        );
+        // Too far to slide, and held across its slot's line.
+        let far = (Vec3::new(3_000_000, HEIGHT, 0), Quat::IDENTITY);
+        let far_crew = [c(1, 4_082_000, 732_000), c(2, 1_918_000, -732_000)];
+        assert_eq!(
+            fed(&far_crew, far, to, &feed, &ground)
+                .map_err(|r| r.name)
+                .err(),
+            Some("part.out-of-reach")
+        );
+        let across = (to.0, Quat::from_yaw_mdeg(90_000).unwrap());
+        assert_eq!(
+            fed(&crew, from, across, &feed, &ground)
+                .map_err(|r| r.name)
+                .err(),
+            Some("part.feed-turned")
+        );
+        // Where from: on the line of its length, its leading carrier 0.2 m clear of its end; with the east side shut,
+        // from the west, the crew's front toward the slot.
+        assert_eq!(
+            fed_from(to, HEIGHT, &feed),
+            Some((Vec3::new(2_196_000, HEIGHT, 0), false))
+        );
+        let west = Feed {
+            clear: &|a, _| match a.0.x > 0 {
+                true => Err(refusal("part.way-blocked", "a stair")),
+                false => Ok(()),
+            },
+            ..Feed { ..feed }
+        };
+        assert_eq!(
+            fed_from(to, HEIGHT, &west),
+            Some((Vec3::new(-2_196_000, HEIGHT, 0), true))
+        );
+    }
+
     /// #5067 item 3: a carrier whose grip a track would take beyond its reach, on the plan or above it, is named.
     #[test]
     fn a_carrier_out_of_reach_of_its_grip_is_named() {
