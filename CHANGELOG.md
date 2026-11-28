@@ -6,6 +6,60 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.151.0 (2026-11-28)
+
+### Features
+
+- Two Souls can now raise a rack frame that lies on the ground: one braces its foot, the other walks it up from its top end, and it tilts about its foot until it stands, held by both. The same crew can lay it down again. Souls ask with `part raise <crew> <part>` and `part lower <crew>`, after standing at the frame's ends (`carry grip <part> top` and `carry grip <part> foot`).
+- A rack beam now has six grips, so a crew of up to six Souls can carry it and seat it in a rack bay, one at each grip. When a crew sets a part in sideways, its side carriers now walk beside the part, keeping their hands on it, instead of standing while it moves away from them; crews with side carriers can seat rack beams again. Side carriers stand a little further off the load (0.45 m) so they are not left without ground to stand on when the part is seated beside them.
+- A creator can place a built deck bay in one batch: each part placed into a bay slot joins the parts it rests on, as a crew builds it, and a part left hanging is refused naming its place in the batch.
+- A deck bay a creator places is walked like a built one: Souls climb its stair onto the deck and its frames' ladders to the standing places.
+- A kind's slot can say which way a part faces in it: a crew's put and a raise into that slot seat the part turned so.
+- A Soul can walk to any point on the ground (`walk x,z`), which also brings it down off a ladder or a frame's standing place.
+- Parts can now rest on parts that rest on others (a sheet on 2x4s on beams). A seated plywood sheet is a floor Souls walk on, and a seated stair flight is the way up to it. A rack frame can be climbed by its ladder to a standing place at a beam level. Nothing is taken out from under what rests or stands on it. A kind's entry can now declare the floors, stairs and ladders of a thing of it, and a standing place that exists only while a beam braces the frame. Two sheets side by side at one height are walked as one floor. A walking Soul now climbs ladders, and build safety judges it as one that climbs.
+- The Mars camp has a deck yard: 12 ft rack frames, 9 ft beams, 2x4 joists, plywood sheets and a stair, and Souls in crews of two carry the sheets and seat a joist across a deck bay's beams.
+- Two consenting Souls can repeat a shrug and a nod while facing inward at their standing places, and either may leave.
+- A Soul sees a built bay's standing places, decks and the ladders and stairs up to them in look, object and query, and climbs to a standing place by name: object <frame> climb to <place>.
+
+### Fixes
+
+- An act that changes an amount on a thing that borrows another kind's actions (filling a kettle from a borrowed sink, taking some from it) now works; before, it was refused.
+- A creator's kind that numbers a state field 1 to 27 is refused (`kind.field-reserved`): those numbers are a thing's own facts, and 27 names the entry a thing borrows, so such a field was read as an entry name.
+- Local worlds start correctly when concurrent gateway log messages overlap.
+- Free standing gestures ease from their actual drawn pose through short gaps and interruptions, and procedural gestures stay within their intended range.
+- Carrying and building: every carrier must now be within reach of its own grip (0.7 m) when a crew takes a part, lifts a load or seats a part, and is refused by name if not; no carrier is exempt any more. Souls sent to a rack frame now stand beside its edges, where their hands reach its posts, instead of 2.2 m off its faces. A part no longer jumps into a crew's hands when taken: it is raised there over about a second. Carriers turn to face what they hold and stay turned to it while they carry. A crew with side carriers can no longer seat a rack beam into a bay (the sides let go first) until the set-in walks them with the part.
+- Souls holding a rack frame upright stand and hold it at chest height, two to a frame, and carry a standing frame just off the ground; a beam or frame now slides into its slot at a walking pace, and a `part put` from slightly too far away moves the crew within reach and tries again.
+- A Soul sent to stand in a doorway or on a stair stops 0.7 m clear of it, so it never narrows the way for others, and says how far it moved and why.
+- A Soul can no longer take a thing out of another Soul's hand: the take is refused `held-by-another`, naming the holder, and only the holder's give hands it over.
+- Souls wearing a declared body can load its existing model from the world’s bound body package.
+- A Soul approved on the world page opens on its owner's card already Connected when it arrives, instead of a visitor's card and then "Checking…".
+- A newly approved Soul's card says Connected as soon as its agent is, instead of "Checking…" until the card's next poll.
+- A world restarted on an older build now refuses a saved state it cannot fully read in every part (links, timers, things in transit, each audience's list and what a restart remembers besides the world), and starts from an earlier one it can read or stops and says why.
+- Things a creator moves to another place (Eden's roof planters set on the ground, the commons podium) are drawn where they now stand instead of vanishing from the page.
+- Souls preserve attained elbow and knee planes during small ground corrections. Free gestures retain the underlying floor transition and share ordinary standing foot support when they get up.
+- Local meal proofs use the same verified body catalogue for native admission and page rendering.
+- When a crew's second try at putting a part in its slot is refused, the crew is left as it was (set down again, or still holding), and the answer says which.
+- A Soul who leaves the world while holding a rack frame with another now leaves the crew at once: the other lays the frame down beside its bay, or holds it on when there is no room, and a crew left with nobody ends.
+- A frame being raised into its slot is no longer laid back down when other Souls walk nearby; if the ground stays busy for half a minute it stays standing, held, and the Soul can ask again.
+- The deck bay's stair is drawn where Souls walk it: its treads and stringers rise from the ground to the deck's edge instead of stopping short under it.
+- Crew-carried loads retain their recorded orientation and parent frames on the same playback clock as their carriers. Native hand contacts keep stable anatomical assignments through turns and releases, and retain authority over ambient body animation.
+- The person who makes a new world now sees God Mode on it at once, not only after the server restarts.
+- A world's start page says plainly that the person asked for the Soul, that they approve it on the page, what the pairing code is for, and that the client writes only in the Soul's own folder.
+- A creator's edit that removes the last floor of a deck or platform on the open ground is checked in a fraction of a second in a large world, not 7 to 10 seconds, and edits sent while 8 are still being checked are refused at once (`edit.checker-busy`) and can be sent again.
+- When the network stalls just as a Soul's client is syncing, the client lets the dead connection go after 10 s as before, not 60 s: its acts are held and sent on the next connection instead of being written into the dead one.
+- Storytelling flows smoothly between open-handed emphasis, two-handed explanation and natural pauses.
+- A page whose world reads are refused or fail now waits longer between tries, up to 10 seconds, instead of asking again every quarter second.
+- A busy world's memory no longer grows while its public page lags behind it: at 1,000 agents it grew by about 2 GB an hour.
+
+### Performance
+
+- A new visitor to a world gets the page's code and the engine's stream reader from the nearest CDN edge instead of the host (once switched on for the world), so a crowd arriving at once no longer downloads them from one machine. (#5223)
+- A world opened from cold reaches the present in a few seconds, and its time pill says Catching up, not Live, until it does.
+- A link to a moment in a world opens at that moment in about half the time: the page no longer waits for the live view to catch up first.
+- At 1,000 agents the public stream keeps up with the world: on a busy disk, with every agent acting evenly, the page's lag fell from 117.6 s to 12.8 s (p99) and from 12.6 s to 1.4 s (p90); with uneven load, from 397 s to 5.7 s (p99).
+- The public stream waits on the disk once for each half second of the world, not four times. At 1,000 agents with uneven load, on a disk the builds did not write to, the page's lag behind the world fell from 3.2 s to 1.3 s (p99). On a disk shared with heavy build writes it still falls minutes behind at peaks.
+- Verdelis Eden reaches the present from cold about as fast as Eden now, and the time pill says Live only once the picture is there.
+
 ## 0.148.0 (2026-11-27)
 
 ### Features
