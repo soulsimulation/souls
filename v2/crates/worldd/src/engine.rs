@@ -878,7 +878,7 @@ impl Engine {
             seat_wait: std::env::var("WORLDD_SEAT_WAIT_S")
                 .ok()
                 .and_then(|s| s.parse::<i64>().ok())
-                .map_or(SEAT_WAIT, |s| s.saturating_mul(1_000_000)),
+                .map_or(SEAT_WAIT, |s| s.clamp(0, 30).saturating_mul(1_000_000)),
             fixed: BTreeMap::new(),
             asked: Vec::new(),
             waiting: BTreeMap::new(),
@@ -1843,6 +1843,18 @@ impl Engine {
             return Ok(());
         }
         // #5067: a part on its way up or down hangs on both its carriers: the leave waits until it stands or lies.
+        if self.raise_parked(activity) {
+            return Err(refusal(
+                "raise.under-way",
+                format!(
+                    "{} holds its part standing, not seated (the ground's map stayed busy); next: part raise {} to seat \
+                     it, or part lower {} to lay it down, then leave",
+                    show(activity),
+                    show(activity),
+                    show(activity)
+                ),
+            ));
+        }
         if self.raising.contains_key(&activity) {
             return Err(refusal(
                 "raise.under-way",

@@ -5538,6 +5538,21 @@ fn raise_beside_a_walking_crew(busy: bool) {
                 words(crew_b)
             );
         }
+        // Another slot named is refused by name, and it stays held where it stands.
+        let other = hands[0].act(
+            "part:raise",
+            crew,
+            BTreeMap::from([
+                (1, frame.to_value()),
+                (4, bay.to_value()),
+                (5, Value::Uint(slots["upright_b"])),
+            ]),
+        );
+        assert_eq!(
+            (other.kind, other.reason.as_str()),
+            (2, "raise.not-at-slot"),
+            "{other:?}"
+        );
         let got = hands[0].act(
             "part:raise",
             crew,

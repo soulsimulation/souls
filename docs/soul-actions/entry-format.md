@@ -103,7 +103,9 @@ tried again once a tick while the walkers' maps go stale (bodies moving near it)
 never turned back for it; past that the raise stops held where it stands: `souls:carry-track` `souls:raise-held` why
 `souls:map-busy`, then `souls:carry-grips` `souls:held`, the ask refused `raise.map-busy` if still open. Asked again
 (`part raise` by a member of the crew), it is seated as its end would have been; `part lower` lays it down from there
-(`souls:lower` why `souls:lower-asked`).
+(`souls:lower` why `souls:lower-asked`). Another slot named is refused `raise.not-at-slot`, a holder out of reach
+`part.grip-out-of-reach`; a leave is refused `raise.under-way` until it is seated or laid down; a world started again
+lays it down (`souls:world-restarted`), as any raise part way. A put's set-in waits the same 30 s, then is refused.
 
 Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
 width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
