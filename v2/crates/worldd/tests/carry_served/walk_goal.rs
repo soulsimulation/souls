@@ -54,11 +54,11 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
     let lineage = im.nodes["world"].scope();
     let (url, tokens) = gateway(&socket, &ids).await;
     let mut s = Soul::connect(&url, ids[0], lineage, &tokens[0]).await;
-    let body = body_of(&dir, ids[0]);
     // The front door's wall centre (`testworld`: the hall's half depth and half a wall south of its centre), x 0.
     let hz = testworld::HALL_DEPTH / 2 + testworld::WALL / 2;
     let goal = Vec3::new(0, 0, (testworld::HALL_Z - hz) * 1000);
     let got = s.act("eden:walk", ground, point(goal)).await;
+    let body = body_of(&dir, ids[0]);
     let f = move_ended(&dir, body);
     let off = gap(stood(&dir)[&body], goal);
     println!("to the doorway: {got:?}, {} mm off; its end {f:?}", off / 1000);
@@ -92,7 +92,6 @@ async fn walk_goal_two_crews_carrying_past_each_other_both_arrive() {
     for (s, t) in ids.iter().zip(&tokens) {
         souls.push(Soul::connect(&url, *s, lineage, t).await);
     }
-    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     let entry = construction("rack_beam.json");
     let [back, front] = Load::of(&entry).unwrap().places();
     let at = |k: i64| {
@@ -109,6 +108,7 @@ async fn walk_goal_two_crews_carrying_past_each_other_both_arrive() {
     let (b0, b1) = crew_b.split_at_mut(1);
     let carry_a = gather(&mut a0[0], &mut a1[0], &dir, ground, beam_a, &entry, a_at, true).await;
     let carry_b = gather(&mut b0[0], &mut b1[0], &dir, ground, beam_b, &entry, b_at, true).await;
+    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     for (s, carry, beam) in [(&mut a0[0], carry_a, beam_a), (&mut b0[0], carry_b, beam_b)] {
         s.act("carry:lift", carry, BTreeMap::from([(1, beam.to_value())]))
             .await
@@ -181,7 +181,6 @@ async fn walk_goal_on_the_mars_camp_a_crew_walks_from_the_rack_pile_to_beside_th
     for (s, t) in ids.iter().zip(&tokens) {
         souls.push(Soul::connect(&url, *s, lineage, t).await);
     }
-    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     // The deck bay (`deck_bay.json`: 4.328 m by 2.972 m, `upright_a` 1.448 m south of its middle) as the template places
     // it, and a 12 ft frame's half width (0.61 m).
     let (bx, bz) = (-24_000_000, 23_372_000);
@@ -197,6 +196,7 @@ async fn walk_goal_on_the_mars_camp_a_crew_walks_from_the_rack_pile_to_beside_th
     for s in souls.iter_mut() {
         got.push(s.answer().await);
     }
+    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     let at_end = stood(&dir);
     for (k, g) in got.iter().enumerate() {
         let off = gap(at_end[&bodies[k]], goals[k]);
