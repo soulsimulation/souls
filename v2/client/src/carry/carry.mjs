@@ -241,6 +241,8 @@ export function slotPoint(at, entry, slot) {
 /** How near a free slot's place a lying part's foot (its origin) must be for `part raise` to raise it into the slot,
  *  µm: worldd's own bound for a raise into a slot (`raise.not-at-slot`). */
 export const RAISE_INTO = 150_000;
+/** And how near its turn: the cosine between its base line and the bay's, at least (15 degrees). */
+export const RAISE_INTO_COS = 0.966;
 
 /** The free slot of a bay in the copy that takes `part`'s kind, its place nearest the part's foot within RAISE_INTO:
  *  {bay, n, name}, or null. `ctx.loose()` lists what stands on the open ground, `ctx.seated(bay)` what fills its slots. */
@@ -257,7 +259,10 @@ export function raiseSlot(ctx, part) {
       const s = slotPoint(b, entry, name);
       if (!s || taken.has(s.n)) continue;
       const d = Math.hypot(s.point[0] - at.pos[0], s.point[1] - at.pos[2]);
-      if (d <= RAISE_INTO && (!best || d < best.d)) best = { bay, n: s.n, name, d };
+      // turned as the slot within 15 degrees (worldd's bound too): its own x, its base line, along the bay's
+      const px = turn(at.rot ?? [ONE, 0, 0, 0], [M, 0, 0]), bx = turn(b.rot ?? [ONE, 0, 0, 0], [M, 0, 0]);
+      const cos = (px[0] * bx[0] + px[2] * bx[2]) / ((Math.hypot(px[0], px[2]) * Math.hypot(bx[0], bx[2])) || 1);
+      if (d <= RAISE_INTO && cos >= RAISE_INTO_COS && (!best || d < best.d)) best = { bay, n: s.n, name, d };
     }
   }
   return best && { bay: best.bay, n: best.n, name: best.name };

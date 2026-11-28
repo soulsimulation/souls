@@ -1358,11 +1358,11 @@ impl Carry {
             Some(h) if h.phase != Phase::Lift => return Ok(None),
             Some(h) if !self.back => {
                 // Straight down from where the node is on its track, to rest under it on its carriers' floor (the
-                // track's end is between them at carrying height).
+                // track's end is between them at the carry's own height: #5067, 0.15 m for a load held standing).
                 let floor = match (self.track.last(), here) {
-                    (Some(&(_, c, _)), _) => c.y - HEIGHT,
+                    (Some(&(_, c, _)), _) => c.y - self.load.carried,
                     (None, Some((_, Some(f)))) => f,
-                    _ => h.to.0.y - HEIGHT,
+                    _ => h.to.0.y - self.load.carried,
                 };
                 let under = Vec3::new(h.at.0.x, floor, h.at.0.z);
                 self.hoist = None;

@@ -88,7 +88,8 @@ pub fn standing(holds: &[Hold], half: Vec3, outer: i64) -> Vec<Hold> {
 /// [`HOLD_STAND`] off the part's outer face, behind its post, on the floor.
 pub fn stance(hold: &Hold, half: Vec3) -> (Vec3, Vec3) {
     let (x, z) = (hold.hands[0].x, hold.hands[0].z);
-    let out = z.signum();
+    // On its outer face by `standing`; a hold on no face (z 0) is taken to be on the back.
+    let out = if z > 0 { 1 } else { -1 };
     (Vec3::new(x, 0, z + out * HOLD_STAND), Vec3::new(x, 0, out * half.z))
 }
 

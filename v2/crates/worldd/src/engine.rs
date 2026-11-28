@@ -251,7 +251,7 @@ pub struct Engine {
     /// Crews holding a standing part whose holders are to go to their stance behind its posts (#5067), and each holder
     /// on its way there: where it stands then and the point it faces.
     stances: BTreeSet<Id>,
-    stance_face: BTreeMap<Id, (Vec3, Vec3)>,
+    stance_face: BTreeMap<Id, (Id, Vec3, Vec3)>,
     /// Acts held while a carry's node is on a lift's or a set-down's track (#5067), by the carry: a set-down or a put
     /// asked during its lift, the last member's leave during its set-down (its node holds the load until it rests).
     /// Each runs again when the track ends ([`Engine::reruns`]), answered then.
@@ -3704,24 +3704,27 @@ impl Engine {
                         continue;
                     }
                 }
-                self.stance_face.insert(hold.body, (to, face));
+                self.stance_face.insert(hold.body, (activity, to, face));
             }
         }
         let arrived: Vec<Id> = self
             .stance_face
             .iter()
-            .filter(|(b, (to, _))| stands(c, **b).is_ok_and(|(_, f)| apart(f, *to) <= 30_000))
+            .filter(|(b, (_, to, _))| stands(c, **b).is_ok_and(|(_, f)| apart(f, *to) <= 30_000))
             .map(|(b, _)| *b)
             .collect();
         for b in arrived {
-            if let (Some((_, face)), Ok((_, feet))) = (self.stance_face.remove(&b), stands(c, b))
+            if let (Some((_, _, face)), Ok((_, feet))) = (self.stance_face.remove(&b), stands(c, b))
                 && let Some(f) = sim::controller::facing_toward(feet, face)
             {
                 let _ = c.face(b, f);
             }
         }
-        // One that never gets there (its walk stopped) is forgotten once it no longer stands.
-        self.stance_face.retain(|b, _| stands(c, *b).is_ok());
+        // One that never gets there is forgotten once it no longer stands, or no longer holds the part (review of #5268).
+        self.stance_face.retain(|b, (a, _, _)| {
+            stands(c, *b).is_ok()
+                && holds_on(live, *a).is_some_and(|h| h.phase == grips::HELD && h.holds.iter().any(|x| x.body == *b))
+        });
     }
 
     /// Half of `part` in its own frame, µm (its entry's bounds): where its posts and faces are.

@@ -102,6 +102,27 @@ pub struct Raising {
     slide: Option<((Vec3, Quat), (Vec3, Quat), Micros, Micros)>,
 }
 
+/// A raise into a slot turned back after (or on) its slide (review of #5268): its geometry taken again from where the
+/// part has slid to, standing there, laid down toward where it lay, the lifter on its own side: so the lowering starts
+/// where the part is, with no step back across the slide.
+fn unslide(ra: &mut Raising, now: Micros) {
+    let Some((from, to, t0, t1)) = ra.slide.take() else {
+        return;
+    };
+    let Ok((p, q)) = sim::activity::carry::between(from, to, (t0, t1), now.min(t1)) else {
+        return;
+    };
+    let base = ra.geo.lifter_at(0);
+    let lifter = Vec3::new(base.x + p.x - ra.geo.foot.x, base.y, base.z + p.z - ra.geo.foot.z);
+    match Raise::down(ra.geo.spec, p, q, Some(ra.geo.along), lifter) {
+        Ok(g) => {
+            ra.geo = g;
+            ra.r = 0;
+        }
+        Err(e) => eprintln!("worldd: a slid raise's way down was not found: {e}"),
+    }
+}
+
 impl Raising {
     fn goal(&self) -> i64 {
         if self.up { 0 } else { self.geo.spec.height }
@@ -267,7 +288,7 @@ impl Engine {
             false => Raise::down(spec, at.pos, at.rot, toward, lf)?,
         };
         // #5067: raised into a bay's slot (parameters 4 and 5): its foot at the slot's place, within `INTO_NEAR`, turned
-        // as the slot within `INTO_TURN`; else refused by name before anything moves.
+        // as the slot within `INTO_COS`; else refused by name before anything moves.
         let into = match (up, a.params.get(&4), a.params.get(&5)) {
             (true, Some(_), Some(Value::Uint(k))) => {
                 let bay = param_id(&a.params, 4, "raise-into")?;
@@ -335,7 +356,7 @@ impl Engine {
 
     /// Slot `k` of `bay` on `ground` for a part whose raise is `geo` (#5067): its pose on the ground (the slot's point,
     /// the bay's turn), when the part's foot is within [`INTO_NEAR`] of it on the plan and the part stands turned as
-    /// the slot within [`INTO_TURN`]; refused `raise.not-at-slot` naming how far, or `slot.occupied`.
+    /// the slot within [`INTO_COS`]; refused `raise.not-at-slot` naming how far, or `slot.occupied`.
     fn raise_slot(
         &self,
         tree: &Tree,
@@ -502,6 +523,7 @@ impl Engine {
                 ra.settling = false;
                 ra.up = false;
                 ra.walking = false;
+                unslide(&mut ra, now);
                 let mut tree = live.frozen();
                 self.turned_back(&mut tree, r.activity, &ra, "souls:raise-refused", now);
                 self.collect(None);
@@ -672,6 +694,7 @@ impl Engine {
                     ra.up = false;
                     ra.walking = false;
                     ra.waited = 0;
+                    unslide(&mut ra, now);
                     self.turned_back(tree, activity, &ra, "souls:raise-refused", now);
                     false
                 }
@@ -708,7 +731,9 @@ impl Engine {
             }
             _ => false,
         };
-        if ra.up && !reaches {
+        // On its slide into its slot (at most 0.15 m, its crew stepping with it) the raise's own geometry is not where the
+        // part is: the reach is not judged against it.
+        if ra.up && !reaches && ra.slide.is_none() {
             ra.up = false;
             ra.walking = false;
             ra.still = 0;
@@ -900,7 +925,7 @@ impl Engine {
                     eprintln!("worldd: {} was not seated as it stood: {e}", show(ra.part));
                     ra.up = false;
                     ra.walking = false;
-                    ra.slide = None;
+                    unslide(ra, now);
                     self.turned_back(tree, activity, ra, "souls:raise-refused", now);
                 }
             }

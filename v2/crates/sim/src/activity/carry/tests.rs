@@ -1501,6 +1501,39 @@ mod each_step {
         assert_eq!(h.to.0.y, frame().rest);
     }
 
+    /// #5067 (review of #5268): a frame taken standing out of a stand whose take breaks off on its track comes down to
+    /// rest on its carriers' floor, measured from the carry's own height (0.15 m), not 0.9 m under it.
+    #[test]
+    fn a_standing_take_broken_off_comes_down_onto_the_floor_not_under_it() {
+        use replica::pose::{Quat, Vec3};
+        use replica::world_model::Audience;
+
+        use super::super::{Carry, STAND_LIFT};
+        let w = testworld::generate(1, 40).unwrap();
+        let im = import_eden::load(&w.text).unwrap();
+        let (tree, ground) = (&im.tree, im.nodes["ground"]);
+        let load = replica::ids::Id::new(im.nodes["world"].scope(), 999_998).unwrap();
+        let mut carry = Carry::new(
+            im.nodes["world"],
+            load,
+            ground,
+            Audience::Everyone,
+            super::header(im.nodes["world"]),
+            im.rules.clone(),
+        );
+        carry.load = upright().held_at(Vec3::ZERO, Quat::IDENTITY).unwrap();
+        carry.back = false;
+        // #5067 review of #5268: taken out of a stand 0.1 m up, on its way to its carriers' hands 0.15 m up, broken off.
+        let q = Quat::IDENTITY;
+        let slot = (Vec3::new(-60 * M, 100_000, 60 * M), q);
+        let hands = (Vec3::new(-60 * M, STAND_LIFT, 60 * M), q);
+        carry.take_up(0, slot, hands, 2 * M, (ground, slot.0, q)).unwrap();
+        carry.release(tree, 100_000, ground, None, "souls:test").unwrap();
+        let h = carry.hoist.expect("a set-down's track");
+        assert_eq!(h.to.0.y, 0, "its foot onto the floor: {:?}", h.to);
+        assert_eq!(h.rest.1.y, 0, "at rest on the floor: {:?}", h.rest);
+    }
+
     /// #5067: a frame held standing has its own carry height. Its node (its foot) is 0.15 m above its carriers' feet,
     /// not at the 1.05 m a load is carried by its middle; it spans 0.15 m to 2.59 m; and a carry broken off lowers the
     /// node those 0.15 m to the floor, where the frame is then put. Before, the set-down measured from its middle: the
