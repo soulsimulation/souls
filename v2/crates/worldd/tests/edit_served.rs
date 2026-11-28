@@ -3197,7 +3197,7 @@ fn a2_parts_rest_at_the_grounds_height() {
     one(
         &mut hands,
         5,
-        v3(ua.x + 1_000_000, 0, ua.z),
+        v3(ua.x + 2_200_000, 0, ua.z),
         "Soul 6 beside the bay",
     );
     let c = seat(&mut hands, (3, 4), fb, "frame B in");
