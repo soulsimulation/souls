@@ -101,11 +101,12 @@ async function remoteSeat(world, label, owner, name) {
   else {
   // a request that did not reach the directory (`failed`, fetch failed) is asked again, up to three times
   let lines = [];
-  for (let i = 0; i < 3; i++) { lines = (await run(['pair', world])).lines; if (lines.some((j) => typeof j.code === 'string' && j.code && j.ok !== false) || lines.at(-1)?.code !== 'failed') break; log(`${label}: pair ${lines.at(-1)?.detail ?? 'failed'}, again`); await sleep(3000); }
+  for (let i = 0; i < 3; i++) { lines = (await run(['pair', world, '--within', '0'])).lines; if (lines.some((j) => typeof j.code === 'string' && j.code && j.ok !== false) || lines.at(-1)?.code !== 'failed') break; log(`${label}: pair ${lines.at(-1)?.detail ?? 'failed'}, again`); await sleep(3000); }
   const asked = lines.find((j) => typeof j.code === 'string' && j.code && j.ok !== false);
   if (!asked) throw Error(`${label}: pair gave no code (${JSON.stringify(lines.at(-1) ?? {}).slice(0, 200)})`);
   const ap = await owner.post('/v1/pair/approve', { code: asked.code, confirm: true });
   if (ap.status !== 200) throw Error(`${label}: the owner's approval answered ${ap.status} ${ap.body.refused ?? ''}`);
+  await run(['pair', '--wait']); // N13: pair waits in the foreground; --wait keeps the token once approved
   }
   for (const end = Date.now() + 120_000; !soul && Date.now() < end; await sleep(1000)) {
     const done = jl((await sshExec(`cat ${rdir}/.souls/pairing.log 2>/dev/null`)).out);
