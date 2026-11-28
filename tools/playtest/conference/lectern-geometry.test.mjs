@@ -83,7 +83,7 @@ test('representative production shoes clear the lectern base and stay over the a
 const EPOCH=1795837089,CLAP_START=1.75,CLAP_END=3.55;
 function returnTake(name,fromTick=EPOCH*1e6/TICK_US,ticks=100){
   const at=s=>(EPOCH+s)*1e6,root=metre(entry.slots.lectern.at_mm),p=[-root[0]*1000,root[1]*1000,(4-root[2])*1000];
-  const body={entity:'lectern-return-'+name,soul:'lectern-source-'+name,name:'Presenter',heading:-Math.PI/2,
+  const body={entity:'lectern-return-'+name,soul:'lectern-source-'+name,name:'Presenter',heading:-Math.PI/2,standing:[{at:at(0),heading:-Math.PI/2,from:-Math.PI/2}],
     samples:[{at:at(0),p},{at:at(5),p}],gestures:[
       {start:at(.1),end:at(CLAP_START),activity:'point',target:'question',toward:[3000,3000],run:'point-before-clap',point:{hand:'left',ends:[at(.4),at(CLAP_START)]}},
       {start:at(CLAP_START),end:at(CLAP_END),activity:'clap'}]};
