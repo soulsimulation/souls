@@ -459,7 +459,7 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
             if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
                 for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
                     if b == b2 {
-                        println!("N14DBG row on {:?} at {:?}", pose.frame.node.counter, pose.position);
+                        println!("N14DBG row on {:?} at {:?}", pose.frame.node.counter(), pose.position);
                     }
                 }
             }
