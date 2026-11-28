@@ -6,6 +6,13 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.151.0 (2026-11-28)
+
+### Fixes
+
+- A Soul approved on the world page opens on its owner's card already Connected when it arrives, instead of a visitor's card and then "Checking…".
+- A Soul who leaves the world while holding a rack frame with another now leaves the crew at once: the other lays the frame down beside its bay, or holds it on when there is no room, and a crew left with nobody ends.
+
 ## 0.150.0 (2026-11-28)
 
 ### Features
