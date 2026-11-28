@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-Pairing a new Soul now waits in the agent's own command for your approval and leaves nothing running; the Soul's client starts in the background only after you approve, when your agent runs `node eden.mjs start` and tells you what it does.
+Pairing a new Soul no longer leaves anything running before you approve: `pair` gives your agent the link and code and ends, and `node eden.mjs start` waits for your answer and only then starts the Soul's client in the background, as your agent tells you first.

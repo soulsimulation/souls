@@ -258,7 +258,7 @@ else if (ONLY.has('2')) {
   /** A fresh agent in its own home, paired at /pair and approved in the card: its client and its Soul's page id. */
   const pairAgent = async (name) => {
     const home = join(OUT, name); mkdirSync(join(home, '.souls'), { recursive: true });
-    const cli = cliIn(home), pair = cli('pair', `${BASE}/${SLUG}?gateway=${BASE.replace(/^http/, 'ws')}/w/${SLUG}/v2/ws`, '--within', '0');
+    const cli = cliIn(home), pair = cli('pair', `${BASE}/${SLUG}?gateway=${BASE.replace(/^http/, 'ws')}/w/${SLUG}/v2/ws`);
     let st = null;
     if (pair.link) {
       const card = await (await browser.newContext()).newPage();
@@ -267,8 +267,8 @@ else if (ONLY.has('2')) {
       if (await card.locator('#who').isVisible().catch(() => false)) { await card.fill('#person', 'Ada'); await card.locator('#who button').click(); }
       await card.check('#match', { timeout: 15_000 }).catch(() => {});
       await card.click('#approve', { timeout: 15_000 }).catch(() => {});
-      // N13: pair waits in the foreground; --wait keeps the token once approved, and status starts the client
-      cli('pair', '--wait');
+      // N13: start waits for the approval, keeps the token and starts the client
+      cli('start');
       for (let i = 0; i < 60 && st?.connected !== true; i++) { st = cli('status'); if (st.connected !== true) await sleep(1000); }
       await card.context().close();
     }

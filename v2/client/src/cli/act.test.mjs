@@ -56,11 +56,6 @@ function souls(home, args) {
   const r = spawnSync(process.execPath, [CLI, ...args], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
   return JSON.parse(r.stdout.trim().split('\n').at(-1));
 }
-/** N13: `pair` waits in the foreground; `--within 0` gives its link and code (its first line) and ends at once. */
-function pairAsked(home, args, opts = {}) {
-  const r = spawnSync(process.execPath, [CLI, ...args, '--within', '0'], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8', ...opts });
-  return JSON.parse(r.stdout.trim().split('\n')[0]);
-}
 
 /** The answer event that ends `sequence`, read from the daemon: a walk's or a form's accepted (kind 3, sent as its
  *  run starts, W11 #4087) is read past to its receipt or refusal; an act has at most one. */
@@ -383,7 +378,7 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.equal(souls(home, ['act', `fill:${chair}`, named['the chair in the square']]).code, 'act-arg-unnamed');
 });
 
-test('A1: pair <world url> prints the link and code; once the owner approves, pair --wait keeps the token and the Soul is ready to act', async () => {
+test('A1: pair <world url> prints the link and code and returns; once the owner approves, start keeps the token and the Soul is ready to act', async () => {
   const tokensFile = join(dir, 'pair-gateway', 'tokens.txt');
   mkdirSync(dirname(tokensFile), { recursive: true });
   const { m } = await run(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:1',
@@ -392,29 +387,27 @@ test('A1: pair <world url> prints the link and code; once the owner approves, pa
   const directory = `http://${m[1]}`;
   const gwPort = await freePort();
   const home = join(dir, 'paired', '.souls');
-  const asked = pairAsked(home, ['pair', `${directory}/local?gateway=ws://127.0.0.1:${gwPort}/v2/ws`]);
+  const asked = souls(home, ['pair', `${directory}/local?gateway=ws://127.0.0.1:${gwPort}/v2/ws`]);
   assert.equal(asked.ok, true, JSON.stringify(asked));
   assert.equal(asked.step, 'approve');
   assert.match(asked.code, /^[B-DF-HJ-NP-TV-XZ]{4}-[B-DF-HJ-NP-TV-XZ]{4}$/);
   assert.equal(asked.link, `http://127.0.0.1:1/pair?code=${asked.code}`);
   assert.ok(!existsSync(join(home, 'credentials.json')), 'nothing paired before the approval');
 
-  // The owner approves once, signed in; `pair --wait` (N13) waits for the same request and keeps the token.
+  // The owner approves once, signed in; `start` (N13) waits for that answer, keeps the token and starts the client.
   const approve = await fetch(new URL('/v1/pair/approve', directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: asked.code, confirm: true, test_person: 'owner' }) });
   assert.equal(approve.status, 200);
-  assert.equal(souls(home, ['pair', '--wait']).step, 'approved');
+  await run(bin('gatewayd'), ['--listen', `127.0.0.1:${gwPort}`, '--world', world, '--tokens', tokensFile, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
+  const started = souls(home, ['start']);
+  assert.deepEqual([started.ok, started.step, started.approved, started.started], [true, 'started', true, true], JSON.stringify(started));
+  assert.match(started.say, /runs in the background on this computer.*`node eden.mjs quit`/);
   const creds = JSON.parse(readFileSync(join(home, 'credentials.json'), 'utf8'));
   const [soul] = Object.keys(creds.souls);
   assert.equal(statSync(join(home, 'credentials.json')).mode & 0o777, 0o600);
 
   // Ready to act: the gateway knows the token, and an act sent through the thin command is answered.
-  await run(bin('gatewayd'), ['--listen', `127.0.0.1:${gwPort}`, '--world', world, '--tokens', tokensFile, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   const rt = runtimeOf(home, soul);
   daemons.push(rt);
-  // N13: the agent starts the Soul's client once approved; its answer says it runs in the background, and how to stop it.
-  const started = souls(home, ['start']);
-  assert.deepEqual([started.ok, started.step, started.started], [true, 'started', true], JSON.stringify(started));
-  assert.match(started.say, /runs in the background on this computer.*`node eden.mjs quit`/);
   const act = souls(home, ['act', 'local:wave']);
   assert.equal(act.ok, true, JSON.stringify(act));
   const answered = await answerOf(rt, act.sequence);
@@ -432,13 +425,14 @@ test('A1: pair <world url> prints the link and code; once the owner approves, pa
   const files = (root) => { const out = {}; const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) { const f = join(d, e.name); if (e.isDirectory()) walk(f); else out[f] = createHash('sha256').update(readFileSync(f)).digest('hex'); } }; walk(root); return out; };
   const before = files(join(parent, '.souls'));
   const inChild = { cwd: child, env: { PATH: process.env.PATH, HOME: parent, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' };
-  const r = spawnSync(process.execPath, [CLI, 'pair', `${directory}/local?gateway=ws://127.0.0.1:${gwPort}/v2/ws`, '--within', '0'], inChild);
-  const own = JSON.parse(r.stdout.trim().split('\n')[0]);
+  const r = spawnSync(process.execPath, [CLI, 'pair', `${directory}/local?gateway=ws://127.0.0.1:${gwPort}/v2/ws`], inChild);
+  const own = JSON.parse(r.stdout.trim().split('\n').at(-1));
   assert.equal(own.step, 'approve', JSON.stringify(own));
   const approved = await fetch(new URL('/v1/pair/approve', directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: own.code, confirm: true, test_person: 'owner' }) });
   assert.equal(approved.status, 200);
-  spawnSync(process.execPath, [CLI, 'pair', '--wait'], inChild);
+  spawnSync(process.execPath, [CLI, 'start'], inChild);
   assert.ok(existsSync(join(child, '.souls', 'credentials.json')));
+  spawnSync(process.execPath, [CLI, 'quit'], inChild);
   assert.deepEqual(files(join(parent, '.souls')), before, "the parent folder's home is byte-identical");
   assert.ok(!existsSync(join(parent, '.souls', 'credentials.json')) && !existsSync(join(parent, '.souls', 'pairing.log')), 'nothing new in it');
 });

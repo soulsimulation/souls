@@ -13,13 +13,11 @@
 //                                             --follow, one line for each as it arrives, until stopped
 //   souls.mjs find <words...> [--limit n]     one search over the copy
 //   souls.mjs pair <world url> --name "<Name>"   asks the world's directory for a Soul: prints a link and a code for
-//                                             the owner, then waits here for their answer (N13): exits 0 approved,
-//                                             1 refused, or 2 after --within <s> (default 90) still waiting; nothing
-//                                             is left running and nothing starts in the background
-//   souls.mjs pair --wait [--within <s>]      waits again for the same request (a later `pair` for the same world
-//                                             within ten minutes does too); a second one while one waits is refused
-//   souls.mjs start [--soul <id>]             once approved: starts the Soul's client in the background (the daemon),
-//                                             which keeps it connected and carries these commands; `quit` stops it
+//                                             the owner, keeps the request and returns (N13); nothing is left running
+//   souls.mjs start [--soul <id>] [--within <s>]   waits here for the owner's answer to that request, up to 90 s
+//                                             (exit 0 approved, 1 refused, 2 still waiting: start again); approved,
+//                                             it starts the Soul's client in the background (the daemon), which keeps
+//                                             it connected and carries these commands until `quit`
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb;
 //                                             sit:<kind> (sit:bench, sit:chair) takes the nearest free one of that kind
@@ -230,15 +228,12 @@ export function agentLabel(env = process.env) {
   return `${named ?? 'An agent'} on this computer`;
 }
 
-/** `pair` in the foreground (N13): here.mjs, its answer printed when it ends, with its exit code. */
-async function pairing(home, url, { name, wait, within } = {}) {
-  const { pairHere, PAIR_WITHIN_S } = await import('../pair/here.mjs');
-  if (!url && !wait) throw Object.assign(new Error('pair <world url> --name "<Name>", or pair --wait'), { code: 'pair-names-a-world' });
-  // The link and code print first, as JSON for the agent and as plain lines for the person; then what it waits for.
-  const say = (v) => { process.stdout.write(JSON.stringify(v) + '\n'); if (v.step === 'approve') process.stderr.write(approvalText(v)); };
-  const answer = await pairHere({ home, url: wait ? null : url, name, within: within ?? PAIR_WITHIN_S, label: agentLabel(), say,
-    tell: (t) => process.stderr.write(t) });
-  if (answer.step === 'approved' && !answer.name) answer.name = 'none given: ask your owner what to call this Soul (or choose one), then run: profile name "<Name>". It is not born without one.';
+/** `pair` (N13): asks and keeps the request (here.mjs), its link and code printed for the agent and the person. */
+async function pairing(home, url, { name } = {}) {
+  const { pairAsk } = await import('../pair/here.mjs');
+  if (!url) throw Object.assign(new Error('pair <world url> --name "<Name>"'), { code: 'pair-names-a-world' });
+  const answer = await pairAsk({ home, url, name, label: agentLabel(), say: (v) => process.stderr.write(approvalText(v)) });
+  if (!name && !answer.resumed) answer.name = 'none given: ask your owner what to call this Soul (or choose one), then run: profile name "<Name>". It is not born without one.';
   return answer;
 }
 
@@ -254,7 +249,7 @@ export function pairingState(home) {
   if (last.ok === false) return { ok: true, in_world: false, pairing: 'refused', code: last.code, say: `Not in the world: the pairing ended (${last.code}). Run pair again for a new link and code.` };
   if (last.soul) return { ok: true, in_world: false, pairing: 'approved', soul: last.soul, say: 'Approved: your Soul is arriving. Look again in a few seconds.' };
   return { ok: true, in_world: false, pairing: 'waiting', link: ask?.link, code: ask?.code,
-    say: `Not in the world yet: waiting for your owner to approve. They open ${ask?.link ?? 'the link pair printed'} signed in and check the code ${ask?.code ?? ''}; the card is also on the world page. \`node eden.mjs pair --wait\` waits here for their answer.` };
+    say: `Not in the world yet: waiting for your owner to approve. They open ${ask?.link ?? 'the link pair printed'} signed in and check the code ${ask?.code ?? ''}; the card is also on the world page. Once they have answered, \`node eden.mjs start\`.` };
 }
 
 /**
@@ -307,7 +302,6 @@ export function requestOf(argv) {
   }
   // D1: `act ... --wait` sends the act, then waits for its receipt's final phase (actEnd). A carry's or a part's step
   // always waits: the next step needs its end (0.135 C, A).
-  const pairWait = args[0] === 'pair' && args.includes('--wait');
   const waits = (args[0] === 'act' && args.includes('--wait')) || (['carry', 'part'].includes(args[0]) && args[1] !== 'list')
     || (['together', 'give'].includes(args[0]) && args[1] !== 'kinds');
   if (args.includes('--wait')) args.splice(args.indexOf('--wait'), 1);
@@ -377,15 +371,15 @@ export function requestOf(argv) {
     Object.assign(req, { id: rest[0], reply: rest.slice(1).join(' '), ...(opts.close !== undefined ? { close: opts.close } : {}) });
   }
   if (op === 'pair') {
-    for (const f of ['--name', '--within']) {
-      const n = rest.indexOf(f);
-      if (n >= 0) { req[f.slice(2)] = rest[n + 1]; rest.splice(n, 2); }
-    }
-    if (req.within !== undefined && !/^\d+$/.test(String(req.within))) return { refused: 'pair-usage', detail: '--within <seconds>: how long pair waits here for the answer, 0 to 600' };
-    if (req.within !== undefined) req.within = Number(req.within);
-    if (pairWait) req.wait = true;
-    if (rest[0] !== undefined && !rest[0].startsWith('--')) req.url = rest[0];
-    if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true;
+    const n = rest.indexOf('--name');
+    if (n >= 0) { req.name = rest[n + 1]; rest.splice(n, 2); }
+    req.url = rest[0]; if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true;
+  }
+  if (op === 'start') {
+    // How long start waits for the answer (default 90 s): for a harness whose commands are stopped sooner, and tests.
+    const n = rest.indexOf('--within');
+    if (n >= 0 && !/^\d+$/.test(String(rest[n + 1]))) return { refused: 'start-usage', detail: '--within <seconds>: how long start waits here for the answer, 0 to 600' };
+    if (n >= 0) req.within = Number(rest[n + 1]);
   }
 
   if (op === 'pray') req.words = rest.join(' ');
@@ -860,23 +854,31 @@ if (isMain(import.meta.url)) {
         if (paired?.paired && paired.soul && req.name) paired.profile = await soulProfile(home, paired.soul, ['name', req.name]).then((p) => p.profile, (e) => ({ failed: e.code ?? 'profile' }));
         out(paired); process.exit(0);
       }
-      // N13: in the foreground; the link and code print first (and as plain lines for the person), then the answer.
-      const { exit, ...answer } = await pairing(home, req.url, { name: req.name, wait: req.wait, within: req.within });
-      out(answer); process.exit(exit ?? 0);
+      // N13: asks, keeps the request and returns; the link and code also as plain lines for the person.
+      out(await pairing(home, req.url, { name: req.name })); process.exit(0);
     }
     else if (req.op === 'start') {
-      // N13: the Soul's client starts here, once approved and once the agent has told its person; the first daemon
-      // command starts it the same way (client.mjs `call`).
-      if (soulsWithTokens(home).length === 0) {
-        const waiting = pairingState(home);
-        throw Object.assign(new Error(waiting?.pairing === 'waiting' ? 'not approved yet: `node eden.mjs pair --wait` waits for the answer' : 'no Soul is paired in this folder: `node eden.mjs pair <world> --name "<Name>"` first'),
-          { code: waiting?.pairing === 'waiting' ? 'pairing-waiting' : 'not-paired' });
+      // N13: a request waiting is waited for here, in the foreground; only once it is approved does the Soul's client
+      // start, in the background. The first daemon command starts it the same way (client.mjs `call`).
+      const { askedIn, startWait } = await import('../pair/here.mjs');
+      let paired = null;
+      if (askedIn(home) || soulsWithTokens(home).length === 0) {
+        const { exit, ...answer } = await startWait({ home, within: req.within, tell: (t) => process.stderr.write(t) });
+        if (exit !== 0) { out(answer); process.exit(exit); }
+        paired = answer;
       }
-      const { soul } = await chooseCommandSoul(home, named);
-      const s = await call(home, soul, { op: 'status' }, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: DAEMON_PATIENCE_MS });
+      const { soul } = paired ? { soul: paired.soul } : await chooseCommandSoul(home, named);
       const name = listSouls(home).find((x) => x.id === soul)?.name ?? null;
-      out({ ok: s.ok !== false, step: 'started', soul, ...(name ? { name } : {}), started: s.started === true, ...(s.pid ? { pid: s.pid } : {}),
-        say: `${s.started ? 'Started' : 'Already running'}: ${name || 'the Soul'}'s client runs in the background on this computer. It keeps ${name || 'the Soul'} ` +
+      let s;
+      try { s = await call(home, soul, { op: 'status' }, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: DAEMON_PATIENCE_MS }); } catch (e) {
+        // Approved and kept, but the client did not start: said plainly, and start tries again.
+        out({ ok: false, step: 'not-started', code: e.code ?? 'daemon-not-started', soul, ...(name ? { name } : {}), ...(paired ? { approved: true } : {}),
+          say: `${paired ? `Approved: ${name || 'the Soul'} is your user's, and its login is kept here. ` : ''}Its client did not start (${e.code ?? 'daemon-not-started'}): ${String(e.message ?? e).slice(0, 160)}. \`node eden.mjs start\` tries again.` });
+        process.exit(1);
+      }
+      out({ ok: s.ok !== false, step: 'started', soul, ...(name ? { name } : {}), ...(paired ? { approved: true, history: paired.history, entries: paired.entries, guide: paired.guide, ...(paired.welcome ? { welcome: paired.welcome } : {}) } : {}),
+        started: s.started === true, ...(s.pid ? { pid: s.pid } : {}),
+        say: `${paired ? `Approved: ${name || 'the Soul'} is your user's. ` : ''}${s.started ? 'Started' : 'Already running'}: ${name || 'the Soul'}'s client runs in the background on this computer. It keeps ${name || 'the Soul'} ` +
           'connected to the world and carries your `node eden.mjs` commands to it; it writes only in this folder\'s `.souls`. ' +
           `It runs until \`node eden.mjs quit\`, or until your user presses Disconnect on ${name || 'the Soul'}'s card on the world page.` });
     }
