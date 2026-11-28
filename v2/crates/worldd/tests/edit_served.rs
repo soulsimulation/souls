@@ -3041,11 +3041,11 @@ fn act(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, verb: &str, targ
 }
 
 /// 0.135 A2, review round seven: parts rest at the ground's height. On ground raised 1 m (terrain tiles, as Eden's),
-/// a lone holder's lay-down rests frame A on the ground beside the bay, not 1 m under it; a retiring last holder out of
-/// reach lays it flat where it stands, on its own base; and, with a Soul standing where it would lie, leaves it standing
-/// on its base, with no jump. Under the two-holder rule (a 12 ft frame's `hold_crew` is two, N4 item 5) a frame is put
-/// in its slot by two, and is held by one alone only once the other retires (the kept hold): each case seats it by
-/// two and retires one first. Six Souls: four of them retire.
+/// a frame set down as a holder leaves the world rests on the raised ground, not 1 m under it. Under the two-holder
+/// rule and the coordinator's decision of 28 Nov (N4), a frame is put in its slot by two, and when one of them
+/// retires it leaves the crew and the other, who alone does not hold it up, lays it down beside the bay (frame A);
+/// with no side to lay it on, the other holds it on with the retired share kept, and when it retires too the frame is
+/// set down on the raised ground, laid flat or left standing on its base, with no jump (frame B).
 #[test]
 fn a2_parts_rest_at_the_grounds_height() {
     const RAISE: i64 = 1_000_000;
@@ -3189,97 +3189,94 @@ fn a2_parts_rest_at_the_grounds_height() {
         );
     };
 
-    // A lone holder's lay-down. Alone (its partner retired), it may not just let go, and the refusal names the lay-down.
+    // Laid down by the rest when one of its two holders retires (the coordinator's decision of 28 Nov: a retire leaves
+    // the crew, then the rules of letting go): Soul 2 alone does not hold frame A up, so it lays it down beside the bay.
+    let wait_on_ground = |f: Id, what: &str| {
+        let end = Instant::now() + Duration::from_secs(30);
+        while where_is(&w, f).0 != Some(g) {
+            assert!(Instant::now() < end, "{what}: not on the ground");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    };
     let c = seat(&mut hands, (0, 1), fa, "frame A in");
-    let got = hands[1].act("activity:leave", c, BTreeMap::new());
-    assert_eq!(
-        (got.kind, got.reason.as_str()),
-        (2, "support.none"),
-        "Soul 2, alone, lets go of frame A: {got:?}"
-    );
-    assert!(
-        got.detail.contains("next: lay it down first (part:unseat)"),
-        "the leave names its next step: {}",
-        got.detail
-    );
-    one(
-        &mut hands,
-        1,
-        v3(ua.x, 0, ua.z + 1_200_000),
-        "Soul 2 beside frame A",
-    );
-    let got = hands[1].act("part:unseat", c, part(fa));
-    assert_eq!(got.kind, 1, "frame A laid down: {got:?}");
-    assert_eq!(where_is(&w, fa).0, Some(g));
+    wait_on_ground(fa, "frame A laid down at Soul 1's retire");
     let (_, mid, lying) = rest_of(&w, fa, 1_219);
     assert!(lying, "laid down");
     on_ground("laid down beside the bay", mid);
     assert_eq!(hands[1].act("activity:leave", c, BTreeMap::new()).kind, 1);
+    // It steps away from frame A's slot, where the next crew stands.
+    one(
+        &mut hands,
+        1,
+        v3(ua.x - 4_000_000, 0, ua.z - 4_000_000),
+        "Soul 2 steps away",
+    );
 
-    // Frame B (frame A lies beside the bay now), with Soul 6 standing where it would lie: left standing on its base.
-    seat(&mut hands, (3, 4), fb, "frame B in");
+    // Frame B, with frame A lying on one side of the bay and Soul 6 standing on the other: at Soul 4's retire Soul 5 has
+    // no side to lay it on, so it holds it on in its slot with Soul 4's share kept (`souls:hold-kept`), standing on
+    // its base on the raised ground. Soul 6 walks off and Soul 5 retires too: frame B, its last holder gone, is set down
+    // (laid flat, or left standing where it stands), on the raised ground, with no jump.
     one(
         &mut hands,
         5,
-        v3(ua.x + 1_000_000, 0, ua.z),
-        "Soul 6 where frame A would lie",
+        v3(ua.x + 2_200_000, 0, ua.z),
+        "Soul 6 beside the bay",
+    );
+    let c = seat(&mut hands, (3, 4), fb, "frame B in");
+    let end = Instant::now() + Duration::from_secs(30);
+    while !logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .any(|ev| ev.name.as_str() == "souls:hold-kept" && ev.fields.get(&1) == Some(&c.to_value()))
+    {
+        assert!(
+            Instant::now() < end,
+            "frame B held on at Soul 4's retire: no souls:hold-kept"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert_eq!(where_is(&w, fb).0, Some(bay), "frame B still in its slot");
+    let (base, _, lying) = rest_of(&w, fb, 1_219);
+    assert!(
+        !lying && (base - RAISE).abs() <= 1_000,
+        "standing on its base: {base} µm"
     );
     one(
         &mut hands,
-        4,
-        v3(ua.x, 0, ua.z - 2_000_000),
-        "Soul 5 2 m off",
+        5,
+        v3(ua.x + 6_000_000, 0, ua.z),
+        "Soul 6 walks off",
     );
     hands[4].send_to(answers::LEAVE, None, BTreeMap::new());
     let got = socket_end(&mut hands[4].s);
-    assert_eq!(got.kind, 1, "Soul 5 leaves the world: {got:?}");
-    // Its set-down goes through the walkers' maps, which a Soul beside it moving holds back: Soul 6 walks off.
-    one(
-        &mut hands,
-        5,
-        v3(ua.x + 4_000_000, 0, ua.z),
-        "Soul 6 walks off",
-    );
-    let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
-    assert!(
-        why.contains(&(fb, "souls:holder-left-standing".into())),
-        "{why:?}"
-    );
-    let (base, _, lying) = rest_of(&w, fb, 1_219);
-    println!(
-        "left standing: its base {} mm above the raised ground",
-        (base - RAISE) / 1000
-    );
-    assert!(!lying, "standing");
-    assert!(
-        (base - RAISE).abs() <= 1_000,
-        "on its base, with no jump: {base} µm"
-    );
-
-    // A retiring last holder out of reach: frame B laid flat where it stands.
-    seat(
-        &mut hands,
-        (1, 2),
-        fb,
-        "frame B in again, from where it stands",
-    );
-    one(
-        &mut hands,
-        2,
-        v3(ua.x + 2_000_000, 0, ua.z),
-        "Soul 3 2 m off",
-    );
-    hands[2].send_to(answers::LEAVE, None, BTreeMap::new());
-    let got = socket_end(&mut hands[2].s);
-    assert_eq!(got.kind, 1, "Soul 3 leaves the world: {got:?}");
-    let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
-    assert!(
-        why.contains(&(fb, "souls:holder-left-flat".into())),
-        "{why:?}"
-    );
-    let (_, mid, lying) = rest_of(&w, fb, 1_219);
-    assert!(lying, "laid flat");
-    on_ground("laid flat where it stood", mid);
+    assert_eq!(got.kind, 1, "Soul 5 retires: {got:?}");
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (base, mid, lying) = rest_of(&w, fb, 1_219);
+        let down = where_is(&w, fb).0 == Some(g);
+        if down {
+            println!(
+                "frame B set down at its last holder's retire: {}, base {} mm, middle {} mm above the raised ground",
+                if lying { "lying" } else { "standing" },
+                (base - RAISE) / 1000,
+                (mid - RAISE) / 1000
+            );
+            match lying {
+                true => on_ground("frame B laid flat", mid),
+                false => assert!(
+                    (base - RAISE).abs() <= 1_000,
+                    "on its base, with no jump: {base} µm"
+                ),
+            }
+            break;
+        }
+        assert!(
+            Instant::now() < end,
+            "frame B set down at its last holder's retire"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 /// B20 A1 and A2 (#3356): a world served from N2's test world with its yard and a bay at the site reads the
@@ -9888,6 +9885,174 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
         .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
         .count();
     assert_eq!(downs, 0, "no carry broke off");
+}
+
+/// The members of crew `crew` as the served tree holds them (its membership links), or `None` once its node is gone.
+fn tree_members(w: &Seeded, crew: Id) -> Option<usize> {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let h = t.handle(crew)?;
+    Some(
+        t.links_of(h)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|e| t.ty(e).as_str() == replica::activity::MEMBER)
+            .count(),
+    )
+}
+
+/// The coordinator's decision of 28 Nov (N4): a member who retires leaves its crew; then the rules of a holder letting
+/// go. Frame A is seated in `upright_a` by Souls 1 and 2, both holding it (a 12 ft frame's hold crew is two). Soul 1
+/// retires: it is no longer in the crew (the tree says one member), and Soul 2 alone does not hold the frame up, so it
+/// is laid down beside the bay; the bay then takes frame B from Souls 3 and 4 (before, it was refused `support.holders`
+/// naming frame A). Soul 2 retires too: its crew ends, its node gone. Started again from its log, the world has no crew
+/// left on frame A, and frame A lies where it was laid.
+#[test]
+fn a_holder_who_retires_leaves_its_crew_and_the_part_is_laid_down_and_the_crew_ends() {
+    let d = scratch("retirecrew");
+    let (facts, slots) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 4, (36, -20), Some(&d.join("entries")));
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let im = import_eden::load(&facts).unwrap();
+    let (bay, fa, fb) = (
+        im.nodes["site-bay"],
+        im.nodes["yard-frame-1"],
+        im.nodes["yard-frame-2"],
+    );
+    let g = w.ground;
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    let both = |hands: &mut [Hand], (a, b): (usize, usize), (pa, pb): (Vec3, Vec3), what: &str| {
+        let legs = frame_legs(crew_now(&w, hands[a].soul, hands[b].soul), (pa, pb));
+        let led = legs.len() > 1;
+        for (pa, pb) in legs {
+            if led {
+                hands[a].send("eden:walk", g, heading_walk(pa, pb));
+                let x = socket_end(&mut hands[a].s);
+                assert_eq!(x.kind, 1, "{what}: {x:?}");
+                settled(&w, hands[b].soul, pb, what);
+                hands[b].walk_to(g, pb);
+                let y = socket_end(&mut hands[b].s);
+                assert_eq!(y.kind, 1, "{what}: {y:?}");
+                continue;
+            }
+            hands[a].walk_to(g, pa);
+            hands[b].walk_to(g, pb);
+            let (x, y) = (socket_end(&mut hands[a].s), socket_end(&mut hands[b].s));
+            assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
+        }
+    };
+    let crew = |hands: &mut [Hand], (a, b): (usize, usize)| {
+        let body = body_of(&w, w.souls[b]);
+        let got = hands[a].act(
+            "activity:offer",
+            g,
+            BTreeMap::from([
+                (1, pinned_activity(&w, "mars:carry_activity")),
+                (2, Value::Text(Name::new("mars:front").unwrap())),
+                (3, Value::Array(vec![body.to_value()])),
+            ]),
+        );
+        assert_eq!(got.kind, 1, "offered: {got:?}");
+        let made = created_by(&w, &got.entries, "mars:carry_activity@");
+        assert_eq!(
+            hands[b].act("activity:accept", made, BTreeMap::new()).kind,
+            1
+        );
+        made
+    };
+    let slot_at = |k: &str| {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        sim::ground::scene::slot_points(t, t.handle(bay).unwrap(), t.handle(g).unwrap())
+            .unwrap()
+            .into_iter()
+            .find(|(n, _)| *n == slots[k])
+            .unwrap()
+            .1
+    };
+    // A crew of `ab` takes frame `f` where it stands and puts it in `slot`, both holding it.
+    let seat = |hands: &mut [Hand], ab: (usize, usize), f: Id, slot: &str| {
+        both(
+            hands,
+            ab,
+            frame_ends_of(&w, f),
+            &format!("to {}", f.counter()),
+        );
+        let c = crew(hands, ab);
+        let got = hands[ab.0].act("part:take", c, BTreeMap::from([(1, f.to_value())]));
+        assert_eq!(got.kind, 1, "taken: {got:?}");
+        both(hands, ab, frame_ends(slot_at(slot)), &format!("to {slot}"));
+        let got = hands[ab.0].act(
+            "part:put",
+            c,
+            BTreeMap::from([(1, bay.to_value()), (2, Value::Uint(slots[slot]))]),
+        );
+        assert_eq!(got.kind, 1, "put in {slot}: {got:?}");
+        c
+    };
+    let wait = |what: &str, done: &dyn Fn() -> bool| {
+        let end = Instant::now() + Duration::from_secs(30);
+        while !done() {
+            assert!(Instant::now() < end, "{what}");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    };
+    let retire = |hands: &mut [Hand], k: usize| {
+        let body = body_of(&w, w.souls[k]);
+        hands[k].send_to(answers::LEAVE, None, BTreeMap::new());
+        let got = socket_end(&mut hands[k].s);
+        assert_eq!(got.kind, 1, "Soul {} retires: {got:?}", k + 1);
+        left_the_world(&w, body, "a retire");
+        got
+    };
+
+    let c = seat(&mut hands, (0, 1), fa, "upright_a");
+    assert_eq!(tree_members(&w, c), Some(2), "two hold frame A");
+    let got = retire(&mut hands, 0);
+    wait("frame A laid down beside the bay", &|| {
+        where_is(&w, fa).0 == Some(g)
+    });
+    let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
+    assert!(
+        why.contains(&(fa, "souls:holder-retired".into())),
+        "the set-down names the retire as its reason: {why:?}"
+    );
+    let kept = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        t.handle(c)
+            .and_then(|h| t.node(h))
+            .and_then(|n| match n.fields().get(&sim::structure::F_KEPT) {
+                Some(Value::Uint(k)) => Some(*k),
+                _ => None,
+            })
+            .unwrap_or(0)
+    };
+    assert_eq!(
+        kept, 0,
+        "the retired share is given back once frame A is laid down"
+    );
+    println!(
+        "Soul 1 retired: frame A lies at {:?}; its crew has {:?} members in the tree",
+        where_is(&w, fa).2,
+        tree_members(&w, c)
+    );
+    assert_eq!(tree_members(&w, c), Some(1), "Soul 1 is out of the crew");
+    // The bay takes frame B: no hold is left counted for a member who is gone.
+    seat(&mut hands, (2, 3), fb, "upright_b");
+    assert_eq!(where_is(&w, fb).0, Some(bay), "frame B in upright_b");
+    let _ = retire(&mut hands, 1);
+    wait("frame A's crew ends", &|| tree_members(&w, c).is_none());
+    drop(s);
+    // Started again from its log.
+    let socket2 = d.join("s2");
+    let s2 = serve_with(&w, &socket2, None);
+    s2.line("listening ", 120);
+    assert_eq!(tree_members(&w, c), None, "no crew left after the restart");
+    assert_eq!(where_is(&w, fa).0, Some(g), "frame A where it was laid");
+    drop(s2);
 }
 
 /// FOR-FABLE 10, a raise into a slot that declares a turn: the deck bay's `upright_b` declares a quarter turn (this
