@@ -7869,6 +7869,10 @@ fn edit_checker(
                             buildsafe::with_buildings(&mut e, &entries, &world.kinds)
                                 .and_then(|parts| {
                                     buildsafe::stand_as_kinds(&mut e, &entries, &structure, &parts);
+                                    // A part placed into a bay's slot joins as a Soul's put joins it (racks, lane C).
+                                    crate::edit_joins::with_joins(
+                                        &mut e, &copy, world, &structure, ground,
+                                    )?;
                                     edit::check(e, &copy, world)
                                 })
                                 .and_then(|c| definitions_form_checked(&c).map(|()| c))

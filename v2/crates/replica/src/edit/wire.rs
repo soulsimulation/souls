@@ -209,6 +209,7 @@ fn op(o: &Op) -> Value {
             field,
             row,
             door,
+            bare,
         } => {
             let mut m = vec![
                 (1, Value::Uint(6)),
@@ -220,6 +221,10 @@ fn op(o: &Op) -> Value {
                 (7, Value::Array(row.clone())),
             ];
             m.extend(door.map(|d| (8, node(d))));
+            // A bare link (a creator's joint) only: key 9, so every other link's bytes stay as they were.
+            if *bare {
+                m.push((9, Value::Uint(1)));
+            }
             map(m)
         }
         Op::Rows {
@@ -324,7 +329,7 @@ fn read_op(v: &Value) -> R<Op> {
             })
         }
         6 => {
-            only(&[1, 2, 3, 4, 5, 6, 7, 8], "a link")?;
+            only(&[1, 2, 3, 4, 5, 6, 7, 8, 9], "a link")?;
             let Some(Value::Text(ty)) = m.get(&3) else {
                 return Err("a link's type is a name".into());
             };
@@ -349,6 +354,11 @@ fn read_op(v: &Value) -> R<Op> {
                 field: uint(m.get(&6), "a link's field")?,
                 row: row.clone(),
                 door: m.get(&8).map(|d| read_node(Some(d))).transpose()?,
+                bare: match m.get(&9) {
+                    None => false,
+                    Some(Value::Uint(1)) => true,
+                    Some(_) => return Err("a link's bare mark is 1 or absent".into()),
+                },
             })
         }
         7 => {
