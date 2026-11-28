@@ -55,6 +55,33 @@ const sameOriginDir = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*\/$/.t
 // follows only the one it knows, so a binding naming any other is read from the page's origin as before.
 const httpsOrigin = (s) => typeof s === 'string' && /^https:\/\/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(s);
 const CONFIG = /<script>window\.__simConfig=(\{.*?\})<\/script>/s;
+// #4986: copies on the asset CDN of what a new viewer downloads first, so those bytes come from an edge and not from
+// this host. The binding names the CDN (`firstLoadOrigin`); tools/cdn/mirror-first-load.mjs puts the copies there:
+// - the replica this launcher serves, at `<origin>/assets/replica/<version>/` (the same version, so the same bytes);
+// - the web build's own files (its `assets/` folder: scripts, styles, data), at `<origin>/assets/app/<name>`, with a
+//   marker `<origin>/assets/app/sets/<set>.json` written last, `<set>` naming exactly this build's files (app-files.mjs).
+// The page is told of a copy (`v2ReplicaCdn`, `appCdn`) only once this launcher has seen it answer there as a browser
+// needs it (the right type, immutable); until then, and after a release whose files are not mirrored yet, the page loads
+// this host's copies as before. Asked at most once a minute per version until it is there; a version seen is never
+// asked again (the objects are never removed).
+export const EDGE_LOOK_MS = 60_000;
+/** -> `seen(key, files)`: true once every `[url, type]` of `files` has answered 200 as that type, immutable. */
+export function edgeLook({ fetcher = globalThis.fetch, now = () => Date.now() } = {}) {
+  const looks = new Map(); // key -> { ok, at, flight }
+  return (key, files) => {
+    let s = looks.get(key);
+    if (!s) { if (looks.size >= 32) looks.clear(); looks.set(key, s = { ok: false, at: -Infinity, flight: null }); }
+    if (s.ok) return true;
+    if (!s.flight && now() - s.at >= EDGE_LOOK_MS && typeof fetcher === 'function') {
+      s.at = now();
+      s.flight = Promise.all(files.map(async ([url, type]) => {
+        const r = await fetcher(url, { method: 'HEAD', redirect: 'error', signal: AbortSignal.timeout(5000) });
+        return r.status === 200 && type.test(r.headers.get('content-type') ?? '') && /\bimmutable\b/.test(r.headers.get('cache-control') ?? '');
+      })).then((all) => { s.ok = all.every(Boolean); }, () => { /* unreachable: this host's copy stays */ }).finally(() => { s.flight = null; });
+    }
+    return false;
+  };
+}
 // 24 Nov: Explore's places of a moved world, from its published snapshot: the model the new engine's world was imported
 // from (W4), so the same things by the same ids. Each thing at the world root, as the old process lists it
 // (apps/server god/context-view-scene.ts contextTargetRows: its point, radius and viewpoint; meaning.ts humanTitle):
@@ -138,8 +165,10 @@ const bodyType = (name) => ({ json: 'application/json', glb: 'model/gltf-binary'
  *  /etc/souls/cutover-binding.json), read again when it changes (looked at once a second), so the switch command
  *  (v2-switch.mjs) takes effect without a restart. No file: an ordinary old launcher until one is written. An invalid
  *  file refuses startup; written invalid later, the last valid binding stays and `log` says so. */
-export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING || '/etc/souls/cutover-binding.json', log = () => {}, now = () => Date.now() } = {}) {
-  if (binding !== undefined) return fenceOf(binding);
+export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING || '/etc/souls/cutover-binding.json', log = () => {}, now = () => Date.now(), fetcher = globalThis.fetch, appSet = () => null } = {}) {
+  // #4986: one memory of what the CDN holds, kept across binding reloads; `appSet()` names the web build's files (app-files.mjs)
+  const edge = { seen: edgeLook({ fetcher, now }), appSet };
+  if (binding !== undefined) return fenceOf(binding, edge);
   let seen, current = null, checked = -Infinity;
   const load = (first = false) => {
     if (!first && now() - checked < 1000) return current;
@@ -149,7 +178,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
     if (key === seen) return current;
     seen = key;
     if (!st) return (current = null);
-    try { current = fenceOf(JSON.parse(readFileSync(file, 'utf8'))); }
+    try { current = fenceOf(JSON.parse(readFileSync(file, 'utf8')), edge); }
     catch { if (first) throw Error('cutover.binding-invalid'); log(`cutover: ${file} is not a valid binding; the last valid one stays`); }
     return current;
   };
@@ -183,7 +212,7 @@ export const routeOnlyId = (slug) => `v2:${slug}`;
  *  `archived`, a public stream) that no binding binds is served as one: the launcher builds its page (the old page) and
  *  lists it, and the fence answers its client, body and refused-write reads as for a bound world. It takes the first
  *  binding's routes file, client and body folders; it has no static folder (no old views: the page draws from the stream). */
-function withRouteOnly(fence, bindings) {
+function withRouteOnly(fence, bindings, edge) {
   const first = bindings[0], bound = new Set(bindings.map((b) => b.canonicalSlug)), fences = new Map();
   const table = () => {
     let value; try { value = JSON.parse(readBounded(first.routesFile, 32 * 1024 * 1024)); } catch { return {}; }
@@ -212,7 +241,8 @@ function withRouteOnly(fence, bindings) {
     if (!slug || bound.has(slug) || !routeOnly().includes(slug)) return null;
     let f = fences.get(slug);
     if (!f) fences.set(slug, f = oneFence({ oldWorldId: routeOnlyId(slug), canonicalSlug: slug, routesFile: first.routesFile, clientDir: first.clientDir,
-      ...(first.bodiesDir ? { bodiesDir: first.bodiesDir } : first.v2Bodies ? { v2Bodies: first.v2Bodies } : {}), ...(first.v2Directory ? { v2Directory: first.v2Directory } : {}) }));
+      ...(first.bodiesDir ? { bodiesDir: first.bodiesDir } : first.v2Bodies ? { v2Bodies: first.v2Bodies } : {}), ...(first.v2Directory ? { v2Directory: first.v2Directory } : {}),
+      ...(first.firstLoadOrigin ? { firstLoadOrigin: first.firstLoadOrigin } : {}) }, edge));
     return f;
   };
   return {
@@ -231,10 +261,10 @@ function withRouteOnly(fence, bindings) {
   };
 }
 
-function fenceOf(binding) {
-  if (!binding || typeof binding !== 'object' || (binding.worlds === undefined && binding.schema === undefined)) return withRouteOnly(oneFence(binding), [binding]);
+function fenceOf(binding, edge) {
+  if (!binding || typeof binding !== 'object' || (binding.worlds === undefined && binding.schema === undefined)) return withRouteOnly(oneFence(binding, edge), [binding], edge);
   if (binding.schema !== BINDINGS || !Array.isArray(binding.worlds) || !binding.worlds.length) throw Error('cutover.binding-invalid');
-  const fences = binding.worlds.map(oneFence);
+  const fences = binding.worlds.map((b) => oneFence(b, edge));
   const distinct = (key) => { const v = binding.worlds.map((b) => b[key]).filter((x) => x !== undefined); return new Set(v).size === v.length; };
   // one entry per world, and never two worlds publishing into one static folder (each clears its own on rollback)
   if (!distinct('canonicalSlug') || !distinct('oldWorldId') || !distinct('staticDir')) throw Error('cutover.binding-invalid');
@@ -250,14 +280,15 @@ function fenceOf(binding) {
     publishedSeq: (w) => of(w)?.publishedSeq(w) ?? null,
     publishedPlaces: (w) => of(w)?.publishedPlaces(w) ?? null,
     handle: (req, res, w, url, o) => of(w)?.handle(req, res, w, url, o) ?? false,
-  }, binding.worlds);
+  }, binding.worlds, edge);
 }
 
-function oneFence(binding) {
+function oneFence(binding, edge = { seen: () => false, appSet: () => null }) {
   if (!binding || typeof binding.oldWorldId !== 'string' || !binding.oldWorldId.length || binding.oldWorldId.length > 256 || /[\x00-\x1f\x7f]/.test(binding.oldWorldId) || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(binding.canonicalSlug)
       || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '') || (binding.staticDir !== undefined && !isAbsolute(binding.staticDir)) || (binding.v2Bodies !== undefined && !sameOriginDir(binding.v2Bodies)) || (binding.bodiesDir !== undefined && !isAbsolute(binding.bodiesDir))
       || (binding.v2Gateway !== undefined && !samePath(binding.v2Gateway)) || (binding.v2Directory !== undefined && binding.v2Directory !== '/')
-      || (binding.v2StreamOrigin !== undefined && !httpsOrigin(binding.v2StreamOrigin))) throw Error('cutover.binding-invalid');
+      || (binding.v2StreamOrigin !== undefined && !httpsOrigin(binding.v2StreamOrigin))
+      || (binding.firstLoadOrigin !== undefined && !httpsOrigin(binding.firstLoadOrigin))) throw Error('cutover.binding-invalid');
   // v2Bodies: the same-origin directory serving the v2 body catalogue (bodies.json and its models), as the operator places it.
   // bodiesDir (B3-1): a built body-assets folder (V2_BODY_ASSETS) this launcher serves at the world's `v2/bodies/` while
   // routed; v2Bodies then defaults to that path.
@@ -349,7 +380,9 @@ function oneFence(binding) {
       // R2 (0.133): the world's public history export (its route's `history`, `/s/…/`), for the page's past time
       let history = null;
       try { const r = route(); history = publicStream(r.history) ? r.history : null; } catch { /* none */ }
-      const version = replicaVersion();
+      const version = replicaVersion(), cdn = binding.firstLoadOrigin ?? null;
+      let set = null; try { set = cdn ? edge.appSet() : null; } catch { set = null; }
+      if (typeof set !== 'string' || !/^[0-9a-f]{32}$/.test(set)) set = null;
       // v2Views: whether the old views (snapshot, scene, items, platforms, kernel) are published; the page asks for none
       // when they are not (apps/web scene-offer.ts oldViews), since each would answer 404
       // v2World: the world's name in the new engine, which the navbar's "your Souls" asks the directory by (the stream's
@@ -357,7 +390,12 @@ function oneFence(binding) {
       // v2StreamOrigin (#4159): the CDN in front of the stream, when the binding names one (docs/operations/cdn.md)
       return { ...(v2Bodies ? { v2Bodies } : {}), ...(binding.v2StreamOrigin ? { v2StreamOrigin: binding.v2StreamOrigin } : {}), v2World: canonicalSlug, v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}),
         v2Views: this.published(w),
-        ...(version ? { v2Replica: `/w/${canonicalSlug}/v2/replica/${version}/replica.js` } : {}) };
+        ...(version ? { v2Replica: `/w/${canonicalSlug}/v2/replica/${version}/replica.js` } : {}),
+        // #4986: the copies on the asset CDN, each once this launcher has seen it there (edgeLook): the same version's
+        // replica (`v2ReplicaCdn`), and the folder holding this web build's own files (`appCdn`)
+        ...(version && cdn && edge.seen(`replica ${cdn} ${version}`, [[`${cdn}/assets/replica/${version}/replica.js`, /^text\/javascript\b/], [`${cdn}/assets/replica/${version}/replica_bg.wasm`, /^application\/wasm\b/]])
+          ? { v2ReplicaCdn: `${cdn}/assets/replica/${version}/replica.js` } : {}),
+        ...(set && edge.seen(`app ${cdn} ${set}`, [[`${cdn}/assets/app/sets/${set}.json`, /^application\/json\b/]]) ? { appCdn: `${cdn}/assets/app/` } : {}) };
     },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written
      *  into staticDir, each file whole (`.tmp`, then renamed; the origin never serves a `.tmp`), the manifest last. Once

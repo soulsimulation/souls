@@ -41,6 +41,7 @@ pub mod defined;
 pub mod entry;
 pub mod place;
 pub mod sizes;
+pub mod ways;
 
 use crate::encode::{Name, Value, encode};
 use crate::ids::{Hash, KindRefusal, KindSource, name_kinds};
