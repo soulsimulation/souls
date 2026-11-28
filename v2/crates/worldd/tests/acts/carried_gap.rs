@@ -139,11 +139,16 @@ fn closest_to(run: &Run, who: Id, a: Vec3, b: Vec3) -> i128 {
     closest
 }
 
-#[test]
-fn e16_a_load_carried_across_the_only_way_is_never_walked_through() {
+/// The fixture's world with the third walker in it.
+fn with_w3() -> Replica {
     let mut changes = built();
     changes.push(create(w3(), WALKER, ground(), centre()));
-    let run = lockstep_on(world_of(zone_place(), changes), ringed_by_a_load);
+    world_of(zone_place(), changes)
+}
+
+#[test]
+fn e16_a_load_carried_across_the_only_way_is_never_walked_through() {
+    let run = lockstep_on(with_w3(), ringed_by_a_load);
     let none = BTreeMap::new;
     let role = |r: &str| p(&[(1, Value::Text(name(r)))]);
     let (proposed, _) = act_at(
@@ -169,7 +174,7 @@ fn e16_a_load_carried_across_the_only_way_is_never_walked_through() {
         r.expect(verb);
         tick += 200;
     }
-    let r = run.replay();
+    let r = run.replay_on(with_w3());
     assert_eq!(parent(&r, plank()), (Some(carry), Some(1)), "carried");
     let (c1, c2) = (at(&r, w1()), at(&r, w2()));
     let goal = Vec3::new(centre().x, 0, centre().z + 5_000_000);
@@ -182,7 +187,7 @@ fn e16_a_load_carried_across_the_only_way_is_never_walked_through() {
         ground(),
         point(goal),
     );
-    let r = run.replay();
+    let r = run.replay_on(with_w3());
     println!(
         "E16 carried gap: walk {walked:?} {detail:?}; the walker at {:?}",
         at(&r, w3())

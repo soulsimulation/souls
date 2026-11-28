@@ -68,6 +68,28 @@ fn e16_the_twelve_refusals_each_name_their_code_and_facts_and_nothing_hidden() {
     let mut wrong = Vec::new();
     let mut rows = Vec::new();
     for case in cases {
+        // Each case on a thread of its own: a fresh world numbers its answers from the start again, and the
+        // fixture's check of progress answers is kept per thread.
+        let got = std::thread::scope(|s| s.spawn(|| one(case)).join());
+        match got {
+            Ok((row, w)) => {
+                rows.push(row);
+                wrong.extend(w);
+            }
+            Err(_) => wrong.push(format!("{:?}: its setup failed (see above)", case.get("n"))),
+        }
+    }
+    println!("| n | request | answer | detail |\n|---|---|---|---|");
+    for r in &rows {
+        println!("{r}");
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// One case of the table, on its own served world: its row, and what is wrong with it.
+fn one(case: &Json) -> (String, Vec<String>) {
+    let mut wrong = Vec::new();
+    {
         let n = match case.get("n") {
             Some(Json::Int(n)) => *n,
             _ => panic!("a case's number"),
@@ -96,7 +118,7 @@ fn e16_the_twelve_refusals_each_name_their_code_and_facts_and_nothing_hidden() {
         let want = case.get("code").and_then(Json::str).unwrap();
         let request = case.get("request").and_then(Json::str).unwrap();
         let detail = detail.unwrap_or_default();
-        rows.push(format!("| {n} | {request} | {asked:?} | {detail} |"));
+        let row = format!("| {n} | {request} | {asked:?} | {detail} |");
         if asked != Err(want.to_owned()) {
             wrong.push(format!("{n}: {asked:?}, not {want}"));
         }
@@ -122,10 +144,6 @@ fn e16_the_twelve_refusals_each_name_their_code_and_facts_and_nothing_hidden() {
         if !extra.is_empty() {
             wrong.push(format!("{n}: the detail names {extra:?}"));
         }
+        (row, wrong)
     }
-    println!("| n | request | answer | detail |\n|---|---|---|---|");
-    for r in &rows {
-        println!("{r}");
-    }
-    assert!(wrong.is_empty(), "{wrong:#?}");
 }
