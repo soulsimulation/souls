@@ -5750,18 +5750,16 @@ impl Clock {
             false => how,
         };
         let stopped_refusal;
+        // A walk held off its goal by a crowd standing at it ends done as near as the crowd allows (A2-4, after being
+        // sent again while the crowd might move); one with no way nearer is a named stop.
         let (how, said) = match (how, stopped) {
-            (Ok(()), Some((mm, crowd))) => {
+            (Ok(()), Some((mm, false))) => {
                 stopped_refusal = Refusal {
                     name: "walk.stopped-short",
                     detail: format!(
-                        "stopped {mm} mm short of the point it was sent to: {}; next: walk there again, or choose a \
-                         point beside it",
-                        if crowd {
-                            "bodies stand in the way there"
-                        } else {
-                            "no way nearer it that this body can walk"
-                        }
+                        "stopped {mm} mm short of the point it was sent to: no way nearer it that this body can \
+                         walk (ground it cannot stand on, or bodies in the way); next: walk there again, or choose a \
+                         point beside it"
                     ),
                 };
                 (Err("walk.stopped-short".to_owned()), Some(&stopped_refusal))
