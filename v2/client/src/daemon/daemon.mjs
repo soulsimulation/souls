@@ -1641,7 +1641,8 @@ function actsOf(words) {
     // ground there, or the floor there nearest its own level (down a ladder, `walk.no-ground-there` off any)
     else if (/^walk:/.test(w) && pointOf(w.slice(5))) {
       rows ??= rowsOf(copy);
-      const ground = groundIn(rows);
+      // The open ground, else (a copy that holds no row of it) the node the Soul's body stands in.
+      const ground = groundIn(rows) ?? own().row?.parent ?? null;
       if (!ground) throw Object.assign(new Error('no open ground in the copy yet: look first'), { code: 'walk-no-ground' });
       out.push({ verb: `${NS}:walk`, this: ground, point: pointOf(w.slice(5)) });
     }
