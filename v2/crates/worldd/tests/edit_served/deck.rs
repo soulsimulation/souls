@@ -745,7 +745,7 @@ impl Bay {
     /// the world's own ground, kept up as parts move, agrees).
     fn fresh(&self, node: Id, p: Vec3) -> Option<Vec3> {
         let (copy, _) = served_copy(&self.w);
-        let tree = copy.tree().clone();
+        let tree = copy.tree().frozen();
         let header = import_eden::header(self.root, &self.rules).unwrap();
         let next = tree.to_state().next;
         let town = sim::walk::town::Town::new_on(
