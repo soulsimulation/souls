@@ -4,7 +4,7 @@ import { Director } from './director.ts';
 import { Advisory } from './provider.ts';
 import { feasibleShots } from './shots.ts';
 import { frontality, foreground } from './composition.ts';
-import { safePose, execute } from './physical.ts';
+import { safePose, execute, withObservationWorlds, sceneWorld, safetyWorld } from './physical.ts';
 import { Observer, cameraScene } from './observation.ts';
 import { replayFrame } from './replay.ts';
 import { JevProvider } from './jev-server.ts';
@@ -547,4 +547,96 @@ void test('derived workstation target exists without modifying object task state
   assert.ok(o.subjects.workstation);
   assert.ok(o.subjects.workstation.points!.length);
   assert.equal(JSON.stringify(w), before);
+});
+
+function countedBounds(o: Observation) {
+  const coordinates = [...o.scene.bounds], count = { preparations: 0 };
+  o.scene.bounds = [...coordinates] as typeof o.scene.bounds;
+  // CameraWorld's constructor destructures these coordinates. No query-count proxy.
+  Object.defineProperty(o.scene.bounds, Symbol.iterator, { value: function* () {
+    count.preparations++; yield* coordinates;
+  } });
+  return count;
+}
+void test('advance reuses stale pending preparation within a batch and restores fresh current worlds', () => {
+  for (const collision of [false, true]) {
+    const world = classroomWorld(), observer = new Observer(), d = new Director('clear');
+    observer.reset('pending-batch');
+    const counters: ReturnType<typeof countedBounds>[] = [];
+    let first: ReturnType<Director['advance']> | undefined = undefined, previousPending = 0, finishedPending = 0;
+    for (let frame = 0; frame < 8; frame++) {
+      world.entities.guest1.pose.p[0] += .01;
+      const o = observer.read(world, frame, frame * .05, cameraScene(world, classroomScene()), undefined, frame);
+      if (collision && frame >= 2 && first?.pose) {
+        const p = first.pose.position;
+        o.scene.obstacles.push({ id: 'fresh-camera-wall', kind: 'wall',
+          obb: { c: [p[0], p[2]], half: [1, 1], yaw: 0 }, y0: p[1] - 1, y1: p[1] + 1 });
+      }
+      counters.push(countedBounds(o));
+      let moreCalls = 0;
+      const result = d.advance(o, .05, frame === 0 || frame === 1, false, () => ++moreCalls < 4);
+      first ??= result;
+      assert.ok(result?.pose);
+      assert.ok(counters[frame].preparations > 0, 'each fresh observation is prepared');
+      if (frame === 1) { assert.equal(d.searching, true); assert.equal(moreCalls, 4); }
+      if (frame >= 2 && frame <= 4) {
+        const prepared = counters[1].preparations;
+        assert.ok(prepared - previousPending <= 2, 'at most plain+safety preparation per stale batch');
+      }
+      previousPending = counters[1]?.preparations ?? 0;
+      if (!collision && (frame === 2 || frame === 3)) {
+        assert.equal(d.searching, true); assert.equal(moreCalls, 4);
+      }
+      if (frame === 4) { assert.equal(d.searching, false); assert.equal(moreCalls, 0); finishedPending = counters[1].preparations; }
+      if (collision && frame === 2) {
+        assert.equal(result.cut, true, 'fresh obstacle still requires recovery');
+        assert.equal(d.searching, false);
+        assert.ok(safePose(o, result.pose), 'applied pose is checked against fresh geometry');
+      }
+      if (frame > 4) assert.equal(counters[1].preparations, finishedPending, 'old observation not rebuilt after completion');
+    }
+  }
+});
+void test('nested pending scope restores current worlds on exception and rebuilds on the next call', () => {
+  const pending = observation(), current = observation(.05);
+  current.subjects.a.p = [8, 0, 8];
+  current.scene.obstacles.push({ id: 'new-wall', kind: 'wall', obb: { c: [12, 12], half: [1, 1], yaw: 0 }, y0: 0, y1: 3 });
+  const count = countedBounds(current), pose = { position: [12, 1, 12] as [number, number, number], target: [0, 1, 0] as [number, number, number], fov: 45 };
+  withObservationWorlds(current, () => {
+    const plain = sceneWorld(current), safety = safetyWorld(current);
+    assert.equal(safePose(current, pose), false);
+    assert.throws(() => withObservationWorlds(pending, () => {
+      assert.notEqual(sceneWorld(pending), plain); assert.equal(safePose(pending, pose), true);
+      throw Error('controlled pending failure');
+    }), /controlled pending failure/);
+    assert.equal(sceneWorld(current), plain); assert.equal(safetyWorld(current), safety);
+    assert.equal(count.preparations, 2);
+  });
+  current.subjects.a.p = [12, 0, 12];
+  current.scene.obstacles = [];
+  withObservationWorlds(current, () => {
+    assert.equal(safePose(current, pose), false, 'fresh actor remains an obstacle after wall removal');
+    assert.equal(safetyWorld(current).solids.find(s => s.o.id === 'body:a')?.cx, 12);
+  });
+  assert.equal(count.preparations, 3, 'same object is rebuilt after its scope ends');
+});
+void test('throwing more callback restores actual advance outer scope and next-call freshness', () => {
+  const world = classroomWorld(), observer = new Observer(), d = new Director('clear');
+  observer.reset('throwing-batch');
+  const read = (frame: number) => observer.read(world, frame, frame * .05, cameraScene(world, classroomScene()));
+  d.advance(read(0), .05, true, false, () => false);
+  d.advance(read(1), .05, true, false, () => false);
+  assert.equal(d.searching, true);
+  const current = read(2), count = countedBounds(current);
+  withObservationWorlds(current, () => {
+    const plain = sceneWorld(current), safety = safetyWorld(current);
+    assert.throws(() => d.advance(current, .05, false, false, () => { throw Error('controlled budget callback'); }), /controlled budget callback/);
+    assert.equal(sceneWorld(current), plain); assert.equal(safetyWorld(current), safety);
+    assert.equal(count.preparations, 2);
+  });
+  current.subjects.guest1.p[0] += 2;
+  withObservationWorlds(current, () => {
+    assert.equal(safetyWorld(current).solids.find(s => s.o.id === 'body:guest1')?.cx, current.subjects.guest1.p[0]);
+  });
+  assert.equal(count.preparations, 3);
 });

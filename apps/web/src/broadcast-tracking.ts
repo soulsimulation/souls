@@ -67,6 +67,8 @@ export function pathClear(m: TourMove, d: readonly number[], k0: number, k1: num
 /** The tour's crane rises about 8 m, made for a town view; on people it rises CRANE of that, so they stay in the shot. */
 export const CRANE = .45;
 function trackMove(m: TourMove): TourMove {
+  // The town's lateral pass slides its aim across scenery. A tracked gathering stays the subject.
+  if (m.type === 'dolly') return { ...m, at: k => ({ ...m.at(k), target: [...m.view.target] }) };
   if (m.type !== 'crane-up') return m;
   const lo = m.at(0), aim = m.view.target[1];
   return { ...m, at: k => { const p = m.at(k); return { ...p, position: [p.position[0], lo.position[1] + (p.position[1] - lo.position[1]) * CRANE, p.position[2]], target: [p.target[0], aim + (p.target[1] - aim) * CRANE, p.target[2]] }; } };
