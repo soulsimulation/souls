@@ -71,6 +71,8 @@ export function sampleAt(s: readonly Sample[], at: number): Sample | null {
 export class CarriedParts {
   readonly recorded=new RecordedCarry();
   isLoadKind(kind:string){return this.partKinds.has(plain(kind));}
+  /** A part kind's height (its entry's `geometry.bounds_mm` y), µm; null when its entry does not say. */
+  heightUm(kind:string):number|null{const e=this.partKinds.get(plain(kind)),b=e&&(read(e)?.geometry as {bounds_mm?:unknown}|undefined)?.bounds_mm;return Array.isArray(b)&&typeof b[1]==='number'&&b[1]>0?b[1]*1000:null;}
   private readonly nodes = new Map<string, PartNode>();
   private readonly defined = new Set<string>();
   /** Parts with an origin the layer has no entity for (an import's own ids), by id. */
