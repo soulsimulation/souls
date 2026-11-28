@@ -520,6 +520,27 @@ fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
     at.expect("a body row")
 }
 
+/// The last tick the served world has logged.
+fn last_tick(w: &Seeded) -> u64 {
+    sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+        .iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .filter_map(|r| {
+            match replica::effects::Part::read(r)
+                .ok()?
+                .rest
+                .get(&answers::TICK)
+            {
+                Some(Value::Uint(t)) => Some(*t),
+                _ => None,
+            }
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 /// Every row of body `body` in the log, in order, from every part (those with no effect too): the tick, the node it
 /// was on and its place there.
 fn body_ticks(w: &Seeded, body: Id) -> Vec<(u64, Id, Vec3)> {
@@ -1076,6 +1097,8 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
         "a town built afresh from the served tree stands a body on the standing place"
     );
     let before = body_ticks(&k.w, walker).len();
+    // The tick the log stands at as the walk is sent: the climb starts no sooner.
+    let sent = last_tick(&k.w);
     let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
     k.hands[4].send("eden:walk", perch, to);
     let got = socket_end(&mut k.hands[4].s);
@@ -1088,13 +1111,15 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     assert_eq!(at.y, 1_800_000, "at the beam level");
     // The climb is a track the controller follows a sample a tick; a body on a track writes no body row (the page
     // lane's gap, #5256), so the rows show it last at the ladder's foot and next on the place. No jump: the time
-    // between is at least the rise at the walk's speed (1.4 m/s), in 50 ms ticks.
+    // between is at least the rise at the walk's speed (1.4 m/s), in 50 ms ticks, counted from the later of its last
+    // row on the ground and the walk being sent (a body standing still writes no row either).
     let first = rows[before..]
         .iter()
         .position(|r| r.1 == perch)
         .map(|i| before + i)
         .expect("a row on the standing place");
     let (t0, n0, foot) = rows[first - 1];
+    let t0 = t0.max(sent);
     let (t1, ..) = rows[first];
     println!(
         "the climb: last on {} at {foot:?} at tick {t0}, first on the place at tick {t1}",

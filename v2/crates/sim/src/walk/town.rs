@@ -968,20 +968,21 @@ impl Town {
                 .and_then(|n| n.parent())
                 .is_some_and(|p| p != ground)
         };
-        let holds_ways = |id: &Id| {
-            base.handle(*id)
-                .and_then(|h| base.children(h))
+        // Read before the change and after it: a part made straight into a bay holds its floor only after.
+        let holds_ways = |t: &Tree, id: &Id| {
+            t.handle(*id)
+                .and_then(|h| t.children(h))
                 .unwrap_or(&[])
                 .iter()
                 .any(|&c| {
-                    base.node(c).is_some_and(|n| {
+                    t.node(c).is_some_and(|n| {
                         replica::world_model::plain(n.kind().as_str())
                             == crate::ground::scene::FLOOR
                     })
                 })
         };
-        let ways_ids: Vec<Id> = ids.iter().filter(|id| holds_ways(id)).copied().collect();
-        let mut ways = ways_ids.iter().any(|id| in_thing(base, id));
+        let part_ways = |t: &Tree| ids.iter().any(|id| holds_ways(t, id) && in_thing(t, id));
+        let mut ways = part_ways(base);
         let mut touched = BTreeSet::new();
         grounds(base, &ids, &mut touched);
         let kids = basis.index.children(base, &ids);
@@ -993,7 +994,7 @@ impl Town {
         base.apply(header, part)
             .map_err(|e| format!("{}: {}", e.name, e.detail))?;
         grounds(base, &ids, &mut touched);
-        ways = ways || ways_ids.iter().any(|id| in_thing(base, id));
+        ways = ways || part_ways(base);
         let mut versions = versions.clone();
         versions.bump(&touched);
         let (versions, base): (Versions, &Tree) = (versions, base);
