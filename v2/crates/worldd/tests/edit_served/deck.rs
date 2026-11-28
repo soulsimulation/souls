@@ -915,6 +915,11 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
         k.hands[4].send("eden:walk", node, to);
         let got = socket_end(&mut k.hands[4].s);
         println!("{what}: {got:?}");
+        if got.kind != 1 {
+            for l in k._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
+                println!("  {l}");
+            }
+        }
         assert_eq!(got.kind, 1, "{what}");
         let at = body_on(&k.w, walker);
         println!("{what}: the body on {} at {:?}", show(at.0), at.1);

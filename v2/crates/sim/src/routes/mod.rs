@@ -614,6 +614,7 @@ impl Map {
             let b = match b {
                 Ok(b) => b,
                 Err(e) => {
+                    eprintln!("worldd: DEBUG building {} unread: {e}", replica::world_model::show(id));
                     m.unread.push((id, e));
                     continue;
                 }

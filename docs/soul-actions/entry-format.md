@@ -76,8 +76,9 @@ building's are given from a world's facts: a floor child per floor, and a stair 
 the floor at its top. A thing whose facts give their own `floors` or `stairs` keeps those.
 
 - `floors`: `[{"top_mm", "size_mm": [x, z], "at_mm": [x, z], "while_joined"}]`, a rectangle `size_mm` about `at_mm` (the
-  origin when left out) at height `top_mm`. Like any floor it is shrunk at its edges by a body's radius, so a place
-  to stand needs about 0.6 m each way. Lying within a step of the ground it is ground cover; seated in a bay's slot it
+  origin when left out) at height `top_mm`. Like any floor it is cut back at each edge by a body's radius and a margin
+  (341 mm for a standard body), so a place to stand needs about 0.9 m each way (a rack frame's standing place is
+  0.9 m deep and as wide as the frame). Lying within a step of the ground it is ground cover; seated in a bay's slot it
   is a floor where it sits; carried it is no floor at all.
 - `"while_joined": true` makes it a standing place. It is ground only while a part joined to the thing, beside it in
   the same parent (a beam beside a frame in its bay), sits at the floor's height in the thing's frame, within half that

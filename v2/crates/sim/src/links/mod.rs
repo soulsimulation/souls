@@ -638,15 +638,23 @@ impl Building {
                 let level = n.fields().get(&F_LEVEL).and_then(int).unwrap_or(0);
                 // A floor that does not cut (N3 lists a stair's floor with no surfaces) has no patch: no link's end
                 // is on it.
-                let Ok(scene) = Scene::of(tree, n.id()) else {
-                    continue;
+                let scene = match Scene::of(tree, n.id()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("worldd: DEBUG floor {} no scene: {e}", replica::world_model::show(n.id()));
+                        continue;
+                    }
                 };
                 for d in &scene.doorways {
                     widths.insert(d.link, d.width);
                     acrosses.insert(d.link, d.across);
                 }
-                if let Ok(patch) = cut_floor(&scene, radius, Turn::NONE) {
-                    floors.insert(n.id(), (level, patch));
+                match cut_floor(&scene, radius, Turn::NONE) {
+                    Ok(patch) => {
+                        eprintln!("worldd: DEBUG floor {} cut: {} pieces", replica::world_model::show(n.id()), patch.pieces.len());
+                        floors.insert(n.id(), (level, patch));
+                    }
+                    Err(e) => eprintln!("worldd: DEBUG floor {} no cut: {e}", replica::world_model::show(n.id())),
                 }
             } else if let Some(l) = n.fields().get(&F_OPEN_DOOR_LINK) {
                 doors.insert(read_id(l).map_err(|e| e.detail)?, n.id());
