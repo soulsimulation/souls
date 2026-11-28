@@ -253,6 +253,7 @@ async function standFrames(state) {
   const B = SCENE.build, mark = step => (state.steps ??= []).push({ step, at: new Date().toISOString() });
   state.bay = (await find(state, B.bay)).id;
   const frames = []; for (const [name] of B.frames) frames.push((await find(state, name)).id);
+  state.beam = await find(state, B.beam[0]);
   let leave; const left = new Promise(ok => { leave = ok; });
   await Promise.all(B.frames.map(async ([name, slot, lead, holder], k) => {
     await gripEnds(state, frames[k], lead, holder);
@@ -277,16 +278,17 @@ async function bayBuild({ state, page, paths, signal, check, arm, root }) {
     const stood = await state.frames; if (!stood.ok) throw Error(stood.error);
     await delay(1000, signal); await shot('frames-held');
     state.crew = await crewOf(state, back, front);
-    const beam = await find(state, name);
+    const beam = state.beam;
     await gripEnds(state, beam.id, back, front);
     await watchBeam({ state, page, check, beam, manifest, root });
     await cli(state, back, 'part', 'take', state.crew, beam.id);
-    await delay(1500, signal); await shot('beam-taken'); await phase(state, page, 'take');
+    await delay(1000, signal); await shot('beam-taken'); await phase(state, page, 'take');
     await retried(state, back, 'carry', 'to', state.crew, mouth);
     await shot('beam-at-the-mouth'); await phase(state, page, 'carry');
     await delay(500, signal); await retried(state, back, 'part', 'put', state.crew, state.bay, slot);
     await delay(2500, signal); await shot('beam-seated'); await phase(state, page, 'seat');
-    const ends = []; for (const part of [...B.frames.map(f => f[0]), name]) ends.push({ name: part, in: (await find(state, part)).in });
+    const parts = [...B.frames.map(f => f[0]), name], found = ((await asked(state, 'ada', 'query', JSON.stringify(parts.map(find => ({ find }))))).answers ?? []).flatMap(a => a.found ?? []);
+    const ends = parts.map(part => ({ name: part, in: found.find(n => n.name === part && /^mars:/.test(n.kind ?? ''))?.in ?? null }));
     check('parts-in-the-bay', ends.every(e => String(e.in).includes(B.bay)), JSON.stringify(ends));
     check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
     const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; });
