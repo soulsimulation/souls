@@ -709,8 +709,14 @@ fn shade_a_rail_unseated_from_outside_its_posts_comes_down_clear_and_is_carried_
     );
     // #5067: the take is a track from the rail's slot to its carriers' hands (an unseat's way out goes at a set-in's
     // pace, 0.4 m/s: some three seconds here), not a jump.
-    std::thread::sleep(Duration::from_millis(4000));
-    let held = where_is(&w, rail).2;
+    let t0 = std::time::Instant::now();
+    let held = loop {
+        let held = where_is(&w, rail).2;
+        if ((x - 850) * 1000 - held.x) > 800_000 || t0.elapsed() > Duration::from_secs(10) {
+            break held;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
     println!("rail 1 unseated, held at {held:?}");
     assert!(
         ((x - 850) * 1000 - held.x) > 800_000,
