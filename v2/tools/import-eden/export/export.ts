@@ -152,8 +152,15 @@ for (const e of m.entities.values()) {
   const S = (v: number) => mm(v * s);
   const P = ([x, z]: V2) => [S(x), S(z)];
   const isWorldShape = d.form !== 'point' && e.in.parent === 'world';
+  // A part placed lying (`r: [yaw, pitch, roll]`, its pitch a quarter turn, as build-bay.ts lays an upright): its length
+  // flat, as a part set down off a carry lies (sim's `Load::of`, a length along y laid onto x), its origin, the foot,
+  // half its thickness up. The facts reader turns it (`lying`).
+  const pitch = Array.isArray(e.r) ? Number(e.r[1] ?? 0) : 0;
+  const lying = Math.abs(Math.abs(pitch) - Math.PI / 2) < 1e-6 && d.size?.box !== undefined;
+  const up = lying ? (d.size!.box![2] * s) / 2 : 0;
   const rec: Record<string, unknown> = {
-    id: e.id, def: e.def, ref, parent, pose: out(rel), world: out(wp), scale_ppm: Math.round(s * 1e6),
+    id: e.id, def: e.def, ref, parent, pose: out({ ...rel, y: rel.y + up }), world: out({ ...wp, y: wp.y + up }), scale_ppm: Math.round(s * 1e6),
+    ...(lying ? { lying: true } : {}),
     ...(slotRec ? { slot: slotRec.kind === 'room' ? { room: slotRec.id } : { n: slotNumbersOf(pe!).get(slotRec.id)!, id: slotRec.id } } : e.in.slot ? { slot: { missing: e.in.slot } } : {}),
     ...(e.name ? { name: e.name } : {}),
     // A path or area thing at the world root carries world-frame geometry, heights above the ground unless `abs`.
@@ -179,7 +186,7 @@ for (const e of m.entities.values()) {
   // Only a solid or surface thing's colliders block, as today's engine bridge takes them (engine-bridge.ts): scenery
   // (decor) is walked through, so a decor mesh's bounds (verdelis-eden's dome glass) never fill the ground under it.
   const layer = (d as { layer?: string }).layer;
-  if (b.colliders.length && (layer === 'solid' || layer === 'surface')) rec.solids =b.colliders.map((o) => [...G(o.c), geo(o.half[0]), geo(o.half[1]), mdeg(o.yaw), geo(o.y0), geo(o.y1), tagCode(o.tag), (o as { abs?: boolean }).abs ? 1 : 0]);
+  if (b.colliders.length && !lying && (layer === 'solid' || layer === 'surface')) rec.solids =b.colliders.map((o) => [...G(o.c), geo(o.half[0]), geo(o.half[1]), mdeg(o.yaw), geo(o.y0), geo(o.y1), tagCode(o.tag), (o as { abs?: boolean }).abs ? 1 : 0]);
   if (b.surfaces?.length) rec.floors = b.surfaces.map((f) => ({ level: f.level, y: geo(f.y), polygon: f.polygon.map(G), ...(f.tag ? { tag: f.tag } : {}), ...(f.abs ? { abs: true } : {}) }));
   if (b.rooms?.length) rec.rooms = b.rooms.map((r) => {
     const sl = b.slots.find((x) => x.kind === 'room' && x.id === r.id);
