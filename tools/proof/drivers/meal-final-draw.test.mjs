@@ -119,20 +119,27 @@ test('single imported submitted skin and both feet are measured, hidden prototyp
   } finally { tools.stop(); }
 });
 
-test('snapshot measures real selected palm, entry grip and native rotated pose without moving anything', () => {
+for (const yaw of [0, Math.PI / 3]) test(`snapshot measures selected palm and native pose once at holder yaw ${yaw}`, () => {
   const world = worldOf(), tools = toolsOf(), { holder, anchors } = body(world), root = picture(2), group = new THREE.Group(); world.scene.add(group);
   const e = { ...held, pos: [12000, 3000, -2000], rot: [Math.SQRT1_2 * 2 ** 30, 0, Math.SQRT1_2 * 2 ** 30, 0] };
-  const palm = new THREE.Vector3(.4, .8, 0), nativeQ = new THREE.Quaternion(0, Math.SQRT1_2, 0, Math.SQRT1_2);
-  root.quaternion.copy(nativeQ); root.position.copy(palm).add(new THREE.Vector3(...e.pos).multiplyScalar(1e-6)).sub(new THREE.Vector3(...entry.points.grip.at_mm).multiplyScalar(.001).applyQuaternion(nativeQ)); world.scene.add(root);
+  holder.rotation.y = yaw;
+  // Independent analytic world construction; do not call the measured projection or repeat its quaternion chain.
+  const rotateY = ([x, y, z], angle) => [Math.cos(angle) * x + Math.sin(angle) * z, y, -Math.sin(angle) * x + Math.cos(angle) * z];
+  const palm = new THREE.Vector3(.4, .8, 0), offset = rotateY(e.pos.map(n => n * 1e-6), yaw);
+  const grip = rotateY(entry.points.grip.at_mm.map(n => n * .001), yaw + Math.PI / 2);
+  root.rotation.y = yaw + Math.PI / 2;
+  root.position.fromArray(palm.toArray().map((n, i) => n + offset[i] - grip[i])); world.scene.add(root);
   const frame = { tick: 110, dt: .05, souls: [{ id: 'diner', entityId: holder.name }], entities: { [holder.name]: { activity: 'sit', state: { body: metadata, heldEntries: { entries: [e] } } } } };
-  world.gameFrame = () => frame; world.contactFrame = () => ({ tick: frame.tick, dt: frame.dt, bones: { [holder.name]: { feet: anchors } } });
+  world.gameFrame = () => frame; world.contactFrame = () => ({ tick: frame.tick, dt: frame.dt, bones: { [holder.name]: { feet: anchors.map(p => rotateY(p, yaw)) } } });
   const people = { group, frame: { tick: 10 }, take: { startTick: 100 }, bodyObject: () => holder, palmOf: (_id, side, out) => { assert.equal(side, 'left'); out.copy(palm); return true; } };
   tools.track(holder, world); tools.track(root, world);
   try {
-    const stamp = submit(root, world); submit(holder, world); const before = root.matrixWorld.toArray();
+    const stamp = submit(root, world); submit(holder, world); const before = root.matrixWorld.toArray(), bodyBefore = holder.matrixWorld.toArray();
     const expected = { native: { bowl: e }, soup: 2, phase: 'seated' };
     const result = tools.snapshot({ world, people, stamp, soul: 'diner', expected, entry, bodyBinding: { hash: metadata.nativeKindHash, resources: metadata.nativeResources } });
-    assert(result.gripErrorM < 1e-8); assert(result.rotationErrorRad < 1e-8); assert.deepEqual(root.matrixWorld.toArray(), before);
+    assert(result.gripErrorM < 1e-8); assert(result.rotationErrorRad < 1e-7);
+    for (let i = 0; i < 3; i++) assert(Math.abs(result.nativeOffsetPalm[i] - (palm.toArray()[i] + offset[i])) < 1e-9);
+    assert.deepEqual(root.matrixWorld.toArray(), before); assert.deepEqual(holder.matrixWorld.toArray(), bodyBefore);
     root.position.x += .01; world.scene.updateMatrixWorld(true); assert.throws(() => tools.snapshot({ world, people, stamp, soul: 'diner', expected, entry, bodyBinding: { hash: metadata.nativeKindHash, resources: metadata.nativeResources } }), /grip misses/);
     root.position.x -= .01; root.quaternion.identity(); world.scene.updateMatrixWorld(true); assert.throws(() => tools.snapshot({ world, people, stamp, soul: 'diner', expected, entry, bodyBinding: { hash: metadata.nativeKindHash, resources: metadata.nativeResources } }), /grip misses|orientation differs/);
     world.layer.drawn.set(e.origin, {}); assert.throws(() => tools.snapshot({ world, people, stamp, soul: 'diner', expected, entry, bodyBinding: { hash: metadata.nativeKindHash, resources: metadata.nativeResources } }), /world draw still present/); world.layer.drawn.clear();
