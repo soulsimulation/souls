@@ -1454,3 +1454,83 @@ fn deck_bay_a_soul_on_a_frames_standing_place_walks_to_a_point_on_the_ground_2_m
     k.ok(got, "Soul 5 walks to the point named");
     assert_eq!(body_on(&k.w, walker).0, g, "on the open ground there");
 }
+
+/// N14 measurement: the built deck bay (frames, four beams, three 2x4s, two sheets): frame 1's ladders, its standing
+/// places and whether each is there, and a climb's body rows, printed in the bay's frame (mm from its middle).
+#[test]
+fn deck_bay_measure_n14_frame_climb_with_the_deck() {
+    let mut k = Bay::serve("deck-n14-measure", 5);
+    k.frame();
+    k.deck();
+    let (copy, _) = served_copy(&k.w);
+    let t = copy.tree();
+    let gh = t.handle(k.w.ground).unwrap();
+    let bay = sim::ground::scene::xform_to(t, t.handle(k.bay).unwrap(), gh).unwrap();
+    let in_bay = |node: Id, p: Vec3| {
+        let w = sim::ground::scene::xform_to(t, t.handle(node).unwrap(), gh)
+            .unwrap()
+            .point(p)
+            .unwrap();
+        let o = bay.pos;
+        [(w.x - o.x) / 1000, (w.y - o.y) / 1000, (w.z - o.z) / 1000]
+    };
+    for (f, frame) in k.frames.iter().enumerate() {
+        for (l, place) in k.places[f].iter().enumerate() {
+            let h = t.handle(*place).unwrap();
+            println!(
+                "N14 frame {} place {} ({}): braced {}",
+                f + 1,
+                l + 1,
+                show(*place),
+                sim::ground::scene::braced(t, h)
+            );
+        }
+        let b = sim::links::Building::read(t, *frame).unwrap();
+        for (fl, (lvl, _)) in &b.floors {
+            println!("N14 frame {} floor {} level {lvl}", f + 1, show(*fl));
+        }
+        for li in &b.links {
+            let line: Vec<[i64; 3]> = li.line.iter().map(|p| in_bay(*frame, *p)).collect();
+            let ends: Vec<Option<[[i64; 3]; 2]>> = li
+                .ends
+                .iter()
+                .map(|e| e.map(|e| [in_bay(*frame, e.a), in_bay(*frame, e.b)]))
+                .collect();
+            println!(
+                "N14 frame {} link {} {:?} nodes {} -> {} blocked {:?} line {line:?} ends {ends:?}",
+                f + 1,
+                show(li.id),
+                li.kind,
+                show(li.nodes[0]),
+                show(li.nodes[1]),
+                li.blocked
+            );
+        }
+    }
+    drop(copy);
+    k.walk(&[(4, Bay::at(0, -3_900))], "Soul 5 to the ladder's foot");
+    let walker = body_of(&k.w, k.w.souls[4]);
+    let before = body_ticks(&k.w, walker).len();
+    let perch = k.places[0][0];
+    let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
+    k.hands[4].send("eden:walk", perch, to);
+    let got = socket_end(&mut k.hands[4].s);
+    println!("N14 Soul 5 climbs to frame 1's back place: {got:?}");
+    let (copy, _) = served_copy(&k.w);
+    let t = copy.tree();
+    let gh = t.handle(k.w.ground).unwrap();
+    let o = sim::ground::scene::xform_to(t, t.handle(k.bay).unwrap(), gh)
+        .unwrap()
+        .pos;
+    for (tick, node, p) in &body_ticks(&k.w, walker)[before..] {
+        let w = sim::ground::scene::xform_to(t, t.handle(*node).unwrap(), gh)
+            .unwrap()
+            .point(*p)
+            .unwrap();
+        println!(
+            "N14 row tick {tick} on {} bay mm {:?}",
+            show(*node),
+            [(w.x - o.x) / 1000, (w.y - o.y) / 1000, (w.z - o.z) / 1000]
+        );
+    }
+}
