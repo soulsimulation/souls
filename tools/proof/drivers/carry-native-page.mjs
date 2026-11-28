@@ -120,6 +120,12 @@ const SCENES = {
   interrupt: { who: ['ada', 'bo'], kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
     view: 'post=0&hour=12:00&eye=-1,5,33&at=-1,.6,24',
     interrupt: { load: 'rack-beam-4', front: 'ada', back: 'bo', first: ['-3.1,25', 2500], away: '2,30', then: [['1,25', 7000]] } },
+  // A standing frame carried at its carrying height (N5; CARRY_SCENE=standing): two take the stand's first frame off it
+  // standing, walk it west then east and set it down; the world holds a standing part 0.15 m up, hands at 1.05 and
+  // 1.35 m (#5268), and it stays held standing where it is set down.
+  standing: { who: ['ada', 'bo'], kind: 'mars:rack_upright', entry: 'content/kinds/construction/rack_upright.json',
+    view: 'post=0&hour=12:00&eye=-2.5,4.2,27&at=-1.5,.9,18',
+    carry: { load: 'rack-frame-1', back: 'ada', front: 'bo', take: true, legs: [['-1,17', 9000], ['2,17', 6000]] } },
   // The deck walk (B5, attempt 24; CARRY_SCENE=deckwalk; #5284's creator-placed ways): the world's creator places the
   // finished deck bay in one `souls-god.mjs batch`, a part of each slot's kind into each of deck_bay's slots in the
   // entry's order (frames, four beams, five joists, two sheets, the stair); then Ada walks up the stair onto the first
