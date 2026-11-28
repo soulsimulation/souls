@@ -111,13 +111,13 @@ export function shoulderAt(d: Dims, p: Posture) {
 }
 
 /** Distance from each target to its shoulder (targets[i].lat sign picks the side). */
-function reachErr(d: Dims, p: Posture, ts: Target[]) {
+function reachErr(d: Dims, p: Posture, ts: Target[], reach: number) {
   const s = shoulderAt(d, p);
   let err = 0, close = 0;
   for (const t of ts) {
     const side = t.lat >= 0 ? 1 : -1;
     const dist = Math.hypot(t.f - s.f, t.up - s.up, t.lat - side * d.shHalf);
-    err += Math.max(0, dist - PLAN_REACH * d.armLen);
+    err += Math.max(0, dist - reach * d.armLen);
     close += Math.max(0, 0.4 * d.armLen - dist);
   }
   return { err, close };
@@ -126,8 +126,9 @@ function reachErr(d: Dims, p: Posture, ts: Target[]) {
 /** Pelvis drop of a one-knee kneel for this rig: hip joints straight above a knee resting on the floor. */
 export const kneelDrop = (d: Dims) => Math.max(0, d.hipH - (KNEE_Y + d.thigh));
 
-/** Best posture for `targets` (body frame) under `style`: grid search, deterministic. */
-export function solvePosture(d: Dims, ts: Target[], style: Style): Posture {
+/** Best posture for `targets` (body frame) under `style`: grid search, deterministic. `reach`: the arm reach to plan
+ *  with, for a caller whose arms stop short of the usual one (a carried load's hands, humans.ts `CARRY_EXTENSION`). */
+export function solvePosture(d: Dims, ts: Target[], style: Style, reach = PLAN_REACH): Posture {
   if (!ts.length) return NEUTRAL;
   const st = STYLE[style];
   const dropMax = Math.min(st.dropMax ?? Infinity, Math.max(0, d.hipH - SQUAT_HIP));
@@ -135,7 +136,7 @@ export function solvePosture(d: Dims, ts: Target[], style: Style): Posture {
   const ND = 12, NB = Math.max(1, Math.round(st.bendMax / (5 * DEG)));
   const rises = st.rise ? [0, RISE_MAX / 2, RISE_MAX] : [0];
   const score = (p: Posture, effort: number) => {
-    const r = reachErr(d, p, ts);
+    const r = reachErr(d, p, ts, reach);
     const cost = 40 * r.err + 30 * r.close + effort;
     if (cost < bc - 1e-9) [best, bc] = [p, cost];
   };

@@ -2520,7 +2520,7 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
 
     // Gap 2: a Soul runs a form the creator's kind defines, as it runs a content entry's, through the one loader.
-    let bell = r#"{"format":"souls-entry/1","kind":"garden:bell","owner":"thing","state":{"rung":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},"geometry":{"bounds_mm":[300,400,300]},"forms":{"ring":{"who":"anyone","starts":"act","needs":[{"need":"state","field":"rung","is":false}],"effects":[{"change":"set","field":"rung","to":true,"event":"rang"}]}},"text":{"name":"bell"}}"#;
+    let bell = r#"{"format":"souls-entry/1","kind":"garden:bell","owner":"thing","state":{"rung":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},"geometry":{"bounds_mm":[300,400,300]},"forms":{"ring":{"who":"anyone","starts":"act","needs":[{"need":"state","field":"rung","is":false}],"effects":[{"change":"set","field":"rung","to":true,"event":"rang"}]}},"text":{"name":"bell"}}"#;
     let bell_full = defined::read(bell.as_bytes(), &|_| false).unwrap().full;
     let define_bell = Op::Place {
         name: 1,

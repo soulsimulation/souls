@@ -159,7 +159,7 @@ fn walked(
     what: &str,
 ) -> Vec<(Id, Vec3)> {
     let body = match r.controller.body(who) {
-        Some(b) => b.clone(),
+        Some(b) => *b,
         None => panic!("{what}: no such body"),
     };
     let legs = walk(r, t, body, SPEED, node, goal)
@@ -207,7 +207,9 @@ fn a_sheet_seated_while_the_world_runs_is_a_floor_and_a_flight_set_beside_it_the
         .expect("a body");
     let plan = |t: &mut Town, r: &Runner| {
         let b = r.controller.body(who).expect("the walker");
-        t.plan(b, deck, on_deck).map(|l| l.len()).map_err(|e| e.name)
+        t.plan(b, deck, on_deck)
+            .map(|l| l.len())
+            .map_err(|e| e.name)
     };
 
     // 1. Lying on the ground the sheet is ground cover: walked as the open ground, no floor of its own.
@@ -275,7 +277,10 @@ fn a_sheet_seated_while_the_world_runs_is_a_floor_and_a_flight_set_beside_it_the
             .is_ok()
     };
     assert!(stands(Vec3::new(0, 18_000, 0)), "the deck's middle");
-    assert!(!stands(Vec3::new(1_450_000, 18_000, 0)), "50 mm from its edge");
+    assert!(
+        !stands(Vec3::new(1_450_000, 18_000, 0)),
+        "50 mm from its edge"
+    );
     assert!(!stands(Vec3::new(1_600_000, 18_000, 0)), "past its edge");
 
     // 4. The flight set beside it: its top lands on the sheet's floor.
@@ -344,7 +349,10 @@ fn a_sheet_seated_while_the_world_runs_is_a_floor_and_a_flight_set_beside_it_the
     assert!(t.surfaces.contains_key(&deck));
     let b = r.controller.body(who).expect("the walker");
     assert_eq!(b.pose.frame.node, deck);
-    let down = t.plan(b, ground, start).map(|l| l.len()).map_err(|e| e.name);
+    let down = t
+        .plan(b, ground, start)
+        .map(|l| l.len())
+        .map_err(|e| e.name);
     println!("7. a walk down with the flight gone: {down:?}");
     assert!(down.is_err());
 }
