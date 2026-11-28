@@ -12,7 +12,7 @@ export class CutAuthority{
  direction(before:readonly number[],after:readonly number[]){this.diagnostic={...this.diagnostic,beforeDirection:[...before],afterDirection:[...after]};}
  begin(){this.diagnostic={...this.diagnostic,executed:false};}
  refuse(reason:string){this.clear();this.diagnostic={...this.diagnostic,status:reason,executed:false,preparedSeconds:0};return false;}
- consider(now:number,key:string,ready:boolean,usefulDwell:number,destination:readonly number[],occupancy:string){
+ consider(now:number,key:string,ready:boolean,usefulDwell:number,destination:readonly number[],occupancy:string,benefit=true){
   this.diagnostic={...this.diagnostic,executed:false,usefulDwell,occupancy,destination:[...destination]};
   if(!Number.isFinite(now)||now<this.time)return this.refuse('cut-clock-invalid');this.time=now;
   this.history=this.history.filter(t=>now-t<CUT_LIMITS.window);this.diagnostic.history=[...this.history];
@@ -20,6 +20,7 @@ export class CutAuthority{
   if(key!==this.key||now-this.checked>CUT_LIMITS.preparationGap){this.key=key;this.since=now;}this.checked=now;this.diagnostic.preparedSeconds=now-this.since;
   if(this.history.length>=CUT_LIMITS.count||this.history.length&&now-this.history.at(-1)!<CUT_LIMITS.spacing){this.diagnostic.status='cut-rate-limited';return false;}
   if(now-this.since+1e-9<CUT_LIMITS.persistence){this.diagnostic.status='cut-preparing';return false;}
+  if(!benefit){this.diagnostic.status='cut-prepared-no-benefit';return false;}
   this.history.push(now);this.total++;this.diagnostic={...this.diagnostic,status:'cut-executed',executed:true,total:this.total,history:[...this.history]};this.clear();return true;
  }
 }

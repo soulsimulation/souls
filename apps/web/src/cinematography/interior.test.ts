@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {Group,Mesh,PlaneGeometry,MeshBasicMaterial,Vector3,Matrix4,PerspectiveCamera,BoxGeometry} from 'three';
 import {DisplayedCameraObserver} from './observation.ts';
-import {FollowGeometry,FOLLOW_LIMITS} from './follow-camera.ts';import {InteriorView} from './interior.ts';import type {EnclosureResult} from './enclosure.ts';
+import {FollowGeometry,FOLLOW_LIMITS} from './follow-camera.ts';import {InteriorView,proposeDoorStage,checkDoorStage} from './interior.ts';import type {NearbyOpeningContext,EnclosureResult} from './enclosure.ts';
 const v=(x=0,y=0,z=0)=>new Vector3(x,y,z);
 const room={id:'room',floor:0,y:0,height:4,poly:[[-4,-4],[4,-4],[4,4],[-4,4]]};
 const context=()=>({status:'enclosed',building:'b',room:'room',floor:0,revision:'r',sourceRevision:'s',worldMatrix:new Matrix4().toArray(),region:room,proposals:[[0,1.6,0]]} as unknown as EnclosureResult);
@@ -39,4 +39,20 @@ test('retreat uses usable portrait extent, refuses unavailable framing, and clea
 test('invalid or discontinuous travel discards retreat preparation and refused destinations never replace the anchor',()=>{
  for(const invalid of['unknown','vertical-spike']){const f=retreatFixture();f.p.prepareRetreat(1,f.subject(1),f.camera,f.eye,f.viewport,f.projection,f.check);const validAnchor=f.p.destination()!.eye.clone(),bad=f.subject(1.2);if(invalid==='unknown')bad.travelMps.confidence=NaN;else bad.travelMps.value=[0,5,1];f.p.prepareRetreat(1.05,bad,f.camera,validAnchor,f.viewport,f.projection,f.check);assert.deepEqual(f.p.destination()!.eye.toArray(),validAnchor.toArray());f.p.prepareRetreat(1.3,f.subject(-10),f.camera,validAnchor,f.viewport,f.projection,f.check);assert.deepEqual(f.p.destination()!.eye.toArray(),validAnchor.toArray(),'distant valid root must require a fresh framing cue rather than old progress');}
  for(const refusal of['blocked','unknown'] as const){const f=retreatFixture();f.q.segmentAuthored=()=>refusal;f.p.prepareRetreat(1,f.subject(1),f.camera,f.eye,f.viewport,f.projection,f.check);assert.deepEqual(f.p.destination()!.eye.toArray(),f.eye.toArray());assert.equal(f.p.diagnostic.retreat,'target-'+refusal);}
+});
+
+test('far doorway proposal derives bounded world depth and opposing tangent bias under transformed metadata',()=>{
+ const c={...context(),openingProposals:[{kind:'door' as const,floor:0,at:[0,4] as const,width:1.6,height:2.1,sill:0,from:'room',to:null}]},m=new Matrix4().makeRotationY(.7).multiply(new Matrix4().makeScale(2,1.5,.5));m.setPosition(8,2,-3);c.worldMatrix=m.toArray();
+ const opening=v(0,1.6,4).applyMatrix4(m),centre=v(0,1.6,0).applyMatrix4(m),axis=opening.clone().sub(centre).normalize(),tangent=v(-axis.z,0,axis.x),travel=axis.clone().add(tangent),eye=opening.clone().addScaledVector(axis,20),root=opening.clone().addScaledVector(axis,-3);
+ const stage=proposeDoorStage(c as unknown as NearbyOpeningContext,eye,root,travel,7)!;assert.ok(stage);assert.ok(Math.abs(stage.eye.clone().sub(opening).dot(axis)-8)<1e-8);assert.ok(Math.abs(stage.eye.clone().sub(opening).dot(tangent)+1.5)<1e-8);assert.equal(stage.eye.y,centre.y);assert.equal(stage.executed,false);
+ assert.equal(proposeDoorStage({...c,openingProposals:[...c.openingProposals,...c.openingProposals]} as unknown as NearbyOpeningContext,eye,root,travel,7),null);assert.equal(proposeDoorStage(c as unknown as NearbyOpeningContext,eye,root,travel.clone().negate(),7),null);
+});
+test('complete six-query stage unit fits real shared terrain work and exhausted fresh work refuses',t=>{
+ const root=new Group(),terrain=new PlaneGeometry(128,128,128,128);terrain.rotateX(-Math.PI/2);terrain.attributes.position.setY(0,20);terrain.attributes.position.needsUpdate=true;
+ const wall=new Mesh(new BoxGeometry(.2,4,4),new MeshBasicMaterial());wall.position.set(3,2,0);root.add(new Mesh(terrain,new MeshBasicMaterial()),wall);root.updateMatrixWorld(true);const q=new FollowGeometry(),eye=v(6,2,0),points=[v(0,1,0),v(0,1.6,0)],camera=new PerspectiveCamera(45,390/844,.1,100);camera.position.copy(eye);camera.lookAt(points[0]);camera.updateMatrixWorld(true);
+ const f=retreatFixture(),body=f.subject(0,1),c={...context(),openingProposals:[{kind:'door' as const,floor:0,at:[0,4] as const,width:1.6,height:2.1,sill:0,from:'room',to:null}]};body.transform.positionM=[0,1,0];
+ const stage=proposeDoorStage(c as unknown as NearbyOpeningContext,v(6,2,10),v(0,1,0),v(0,0,1),0)!;assert.ok(stage);
+ for(let i=0;i<100;i++){q.prepare([root],'r');q.segmentAuthored(eye,points[0]);q.exteriorWitness(stage.eye,.2);}
+ q.prepare([root],'r');assert.equal(q.segmentAuthored(eye,eye,.2),'clear');const checked=checkDoorStage(stage,body,camera,eye,points,v(0,0,1),q,.2,()=>0,f.viewport,f.projection);assert.equal(checked.ready,true);assert.equal(checked.benefit,true);assert.equal(checked.frame?.usefulDwell,2);assert.equal(q.stats.queries,6);t.diagnostic(`complete stage unit: ${q.stats.queries} queries, ${q.stats.blockVisits} block visits`);assert.ok(q.stats.blockVisits>2500&&q.stats.blockVisits<=4096,`actual complete work ${q.stats.blockVisits}`);assert.equal(q.stats.unknown,null);
+ for(let i=0;i<8;i++)q.segmentAuthored(stage.eye,points[0]);const exhausted=checkDoorStage(stage,body,camera,eye,points,v(0,0,1),q,.2,()=>0,f.viewport,f.projection);assert.equal(exhausted.ready,false);assert.equal(exhausted.benefit,false);assert.ok(q.stats.blockVisits<=4096);assert.ok(q.stats.unknown);
 });

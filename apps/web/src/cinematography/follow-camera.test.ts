@@ -168,3 +168,35 @@ test('retreat never crosses an authored wall and a gesture cancels its pending d
   camera.position.copy(r.eye);aim.copy(r.aim);camera.lookAt(aim);camera.updateMatrixWorld(true);if(gesture)break;
  }assert.ok(moved);if(!manual)assert.ok(blocked);
 }});
+
+function stageFixture(){
+ const {g,q}=space(),camera=new PerspectiveCamera(45,390/844,.1,100),aim=v(0,1,0),policy=new FollowCamera();camera.position.set(6,5,12);camera.lookAt(aim);camera.updateMatrixWorld(true);
+ const hint={building:'building',revision:'authored',sourceRevision:'source',room:'hall',floor:0,canonical:[0,1,0],worldMatrix:g.matrixWorld.toArray(),region:{id:'hall',floor:0,y:0,height:4,poly:[[-4,-4],[4,-4],[4,4],[-4,4]]},openingProposals:[{kind:'door' as const,floor:0,at:[0,4] as const,width:1.6,height:2.1,sill:0,from:'hall',to:null}],proposals:[]};
+ const context={status:'outside',nearby:hint} as unknown as import('./enclosure.ts').EnclosureResult,body={...subject(),bounds:{min:[-.3,-1,-.2] as [number,number,number],max:[.3,1,.2] as [number,number,number]},travelMps:{value:[.3,0,1] as [number,number,number],confidence:1,source:'derived' as const}};let benefit=false,unknown=false;
+ q.segmentAuthored=(from,to,r=0)=>unknown&&r===0?'unknown':benefit&&r===0&&from.x>5&&to.z>1?'blocked':'clear';q.exteriorWitness=()=>({status:'clear',reason:'test-represented-exterior',witness:[0,20,12]});
+ let clock=0;const step=(view=context,b=body)=>{clock+=1/60;const result=policy.step(b,camera,aim,1/60,q,()=>0,{width:390,height:844,insets:{top:46,bottom:179}},{width:390,height:844,fov:45},view,clock,{ready:true,reason:'test-audited',revision:'source'});camera.position.copy(result.eye);aim.copy(result.aim);camera.lookAt(aim);camera.updateMatrixWorld(true);return result;};
+ return{q,camera,aim,policy,body,hint,context,step,benefit:(value:boolean)=>{benefit=value;},unknown:(value:boolean)=>{unknown=value;}};
+}
+test('prepared stage never translates before benefit and its executed world anchor survives room entry and stop',()=>{
+ const f=stageFixture(),initial=f.camera.position.clone();let r;for(let i=0;i<150;i++){r=f.step();assert.equal(r.cut.executed,false);assert.ok(r.eye.equals(initial),'preparation cannot own translation');}
+ assert.ok(r!.cut.preparedSeconds>=.75,JSON.stringify({cut:r!.cut,stage:r!.interior.stage}));assert.equal(r!.cut.status,'cut-prepared-no-benefit');f.benefit(true);for(let i=0;i<20&&!r!.cut.executed;i++)r=f.step();assert.equal(r!.cut.executed,true);assert.equal(r!.interior.stage?.executed,true);const cutEye=r!.eye.clone();assert.ok(cutEye.distanceTo(initial)>1);
+ const enclosed={...f.context,...f.hint,status:'enclosed',openingProposals:[...f.hint.openingProposals,{...f.hint.openingProposals[0],kind:'arch' as const,at:[4,0] as [number,number]}]};for(let i=0;i<30;i++){r=f.step(enclosed,{...f.body,travelMps:{...f.body.travelMps,value:[0,0,0]}});assert.ok(r.eye.distanceTo(cutEye)<1e-8,'same room stop must retain admitted stage');assert.equal(r.interior.stage?.executed,true);}
+ f.camera.position.add(v(1,1,0));f.aim.add(v(1,0,1));f.camera.lookAt(f.aim);f.camera.updateMatrixWorld(true);f.policy.gesture(f.camera.position,f.aim);const manual=f.camera.getWorldDirection(v());r=f.step(enclosed);assert.equal(r.interior.stage?.executed,false);assert.ok(r.aim.clone().sub(r.eye).normalize().angleTo(manual)<1e-6);
+});
+test('stage motion, unknown queries and context revisions clear preparation; reset retains executed cut history',()=>{
+ for(const mode of['stop','reversal','missing','spike','revision','unknown'] as const){const f=stageFixture();let r;for(let i=0;i<100;i++)r=f.step();assert.ok(r!.cut.preparedSeconds>.75,JSON.stringify({cut:r!.cut,stage:r!.interior.stage}));let body=f.body;
+  if(mode==='stop')body={...body,travelMps:{...body.travelMps,value:[0,0,0]}};if(mode==='reversal')body={...body,travelMps:{...body.travelMps,value:[-.3,0,-1]}};if(mode==='missing')body={...body,travelMps:{...body.travelMps,confidence:0}};if(mode==='spike')body={...body,travelMps:{...body.travelMps,value:[.3,5,1]}};if(mode==='revision')f.q.generation++;if(mode==='unknown')f.unknown(true);
+  for(let i=0;i<(mode==='unknown'?20:1);i++)r=f.step(f.context,body);assert.equal(r!.cut.executed,false);assert.equal(r!.cut.preparedSeconds,0,mode);
+ }
+ const f=stageFixture();f.benefit(true);let r;for(let i=0;i<150;i++){r=f.step();if(r.cut.executed)break;}assert.equal(r!.cut.total,1);f.policy.reset(f.camera.position,f.aim);for(let i=0;i<150;i++)r=f.step();assert.equal(r!.cut.total,1);assert.equal(r!.cut.executed,false);
+});
+
+test('early stage yields missed entry to normal fallback and releases an executed anchor on ordinary exit',()=>{
+ const missed=stageFixture();let r;for(let i=0;i<90;i++)r=missed.step();assert.ok(r!.cut.preparedSeconds>.75);r=missed.step({...missed.context,...missed.hint,status:'enclosed'});assert.equal(r.interior.stage?.target,null);assert.equal(r.cut.executed,false);assert.equal(r.cut.preparedSeconds,0);assert.equal(r.interior.status,'holding','ordinary enclosed search is available immediately');
+ const f=stageFixture();f.benefit(true);for(let i=0;i<150;i++){r=f.step();if(r.cut.executed)break;}assert.equal(r!.cut.total,1);const cutEye=r!.eye.clone(),enclosed={...f.context,...f.hint,status:'enclosed'};f.step(enclosed,{...f.body,travelMps:{...f.body.travelMps,value:[0,0,0]}});
+ r=f.step(f.context,{...f.body,transform:{...f.body.transform,positionM:[0,1,5]},travelMps:{...f.body.travelMps,value:[0,0,1]}});assert.equal(r.interior.stage?.target,null,'nearby metadata cannot extend ownership beyond room exit');assert.ok(r.eye.distanceTo(cutEye)>0,'original outdoor goal resumes through bounded movement');assert.ok(r.eye.distanceTo(cutEye)<=FOLLOW_LIMITS.speed/60+1e-8);
+});
+test('full three-dimensional motion discontinuity requires fresh stable travel before stage reacquisition',()=>{
+ const f=stageFixture();let r;for(let i=0;i<90;i++)r=f.step();assert.ok(r!.interior.stage?.target);r=f.step(f.context,{...f.body,travelMps:{...f.body.travelMps,value:[.3,5,1]}});assert.equal(r.interior.stage?.target,null);assert.equal(r.preview.status,'discontinuity');
+ for(let i=0;i<16;i++){r=f.step();assert.equal(r.interior.stage?.target,null,'horizontal stability must not survive a vertical spike');}for(let i=0;i<4;i++)r=f.step();assert.ok(r!.interior.stage?.target);assert.equal(r!.cut.executed,false);
+});
