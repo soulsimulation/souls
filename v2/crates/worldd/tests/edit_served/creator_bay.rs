@@ -475,6 +475,15 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
             println!("N14DBG reached from {name}: {:?}", v.floors_reached(part(k)).iter().map(|f| replica::world_model::show(*f)).collect::<Vec<_>>());
         }
         println!("N14DBG deck {}", replica::world_model::show(deck));
+        for p in logged(&site.w) {
+            for e in &p.effects {
+                for ev in e.events.iter().flatten() {
+                    if ev.name.as_str() == "souls:move-ended" && ev.fields.get(&1) == Some(&b2.to_value()) {
+                        println!("N14DBG move-ended {:?}", ev.fields);
+                    }
+                }
+            }
+        }
         for l in site._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
             println!("N14DBG {l}");
         }
