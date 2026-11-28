@@ -91,6 +91,32 @@ export class WorldEntityLayer {
    *  in small slices between frames. Edge diffs still wait for it (applyEdge). */
   filling = false;
   private model: WorldModel | null = null;
+  private cutReadyCache: { model: WorldModel; seq: number; revision: number; size: number; value: { ready: boolean; reason: string; revision: string; checked: number } } | null = null;
+  /** Narrow procedural applicability, not a complete-world occupancy certificate.
+   * Async/delegating/asset-backed builders remain unknown even after arrival. */
+  cameraCutReadiness() {
+    const revision=String(this.staticRevision), refuse=(reason:string,checked=0)=>({ready:false,reason,revision,checked});
+    if(!this.active||!this.model||this.building||this.filling||this.resyncing)return refuse('source-pending');
+    if(this.streaming)return refuse('source-streaming');if(this.stats.lastError)return refuse('source-error');
+    const m=this.model,c=this.cutReadyCache;if(c&&c.model===m&&c.seq===this.seq&&c.revision===this.staticRevision&&c.size===m.entities.size)return c.value;
+    let checked=0,value=refuse('source-cap');
+    if(m.entities.size<=2048){value={ready:true,reason:'audited-procedural-representations',revision,checked:0};
+      for(const e of m.entities.values()){
+        checked++;const def=m.resolvedDef(e.def);if(!def){value=refuse('definition-unavailable',checked);break;}
+        if(def.make.kind==='none'||def.make.kind==='parts')continue;
+        const builder=meshFor(def),kind=builder?.gen;
+        // Resolve tag overrides first. These paths synchronously return their geometry;
+        // building's worker prefetch has a synchronous buildingBuffers fallback.
+        if(!kind||!['box/1','kit/2','building/1','stairs/1','landform/1','lake/1','tag:flag'].includes(kind)) {value=refuse('builder-readiness-unknown',checked);break;}
+        if(kind==='landform/1'||kind==='lake/1')continue; // represented by completed terrain/water bake
+        if(kind==='tag:flag'){if(!godFeature('flags'))continue;value=refuse('camera-dependent-marker',checked);break;} // scaled for the new eye at render
+        if(!this.drawn.has(e.id)){value=refuse('representation-unavailable',checked);break;}
+      }
+      value={...value,checked};
+    }
+    this.cutReadyCache={model:m,seq:this.seq,revision:this.staticRevision,size:m.entities.size,value};return value;
+  }
+
   /** Experimental distance streaming (StreamRing.ts): with
    *  a ring, start() draws only the things within `inner` m of the arrival camera, and every frame (streamFrom + update)
    *  streams in what the camera approaches and unloads what it left beyond `outer` (removed from its batch, pool or

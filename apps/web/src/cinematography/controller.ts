@@ -16,6 +16,8 @@ export class FollowController{
  private prior:{key:string;at:number;tick:number;seconds:number;result:ObservationResult}|null=null;
  private activeKey='';private controlMs=0;private preparationMs=0;private candidates=0;private reason='inactive';private sequence=0;private dropped=0;
  private groundInfo:Pick<SceneInfo,'scene'|'shore'>|null|undefined;private groundSampler:((x:number,z:number)=>number|null)|undefined;private groundSource='unavailable';private motion:ReturnType<FollowCamera['step']>['motion']=null;
+ private cutReadiness:{ready:boolean;reason:string;revision:string;checked?:number}|null=null;
+ private cut:ReturnType<FollowCamera['step']>['cut']|null=null;
  private interior:ReturnType<FollowCamera['step']>['interior']|null=null;
  private preview:ReturnType<FollowCamera['step']>['preview']|null=null;private rows:Record<string,unknown>[]=[];
  constructor(enabled:boolean,diagnostics=false){this.enabled=enabled;this.diagnostics=diagnostics;}
@@ -24,17 +26,17 @@ export class FollowController{
  reset(eye?:Vector3,aim?:Vector3){this.enclosure.reset();this.context=null;this.prior=null;this.activeKey='';this.policy.reset(eye,aim);this.geometry.reset();this.reason='reset';}
  gesture(eye:Vector3,aim:Vector3){if(this.enabled)this.policy.gesture(eye,aim);}
  owns(mode:string,selected:boolean,kind:string|undefined,eyes:boolean,shot:boolean,track:boolean){return this.enabled&&mode==='follow'&&selected&&kind==='human'&&!eyes&&!shot&&!track;}
- control(input:FollowInput,step:number,source:()=>{roots:readonly Object3D[];revision:string},ground:(x:number,z:number)=>number|null,groundSource='unspecified'){
-  this.context=null;this.contextInput=null;this.contextMs=0;this.controlMs=this.preparationMs=this.candidates=0;this.motion=null;this.preview=null;this.interior=null;this.groundSource=groundSource;if(!this.enabled)return;
+ control(input:FollowInput,step:number,source:()=>{roots:readonly Object3D[];revision:string;cutReadiness?:{ready:boolean;reason:string;revision:string;checked?:number}},ground:(x:number,z:number)=>number|null,groundSource='unspecified'){
+  this.context=null;this.contextInput=null;this.contextMs=0;this.controlMs=this.preparationMs=this.candidates=0;this.motion=null;this.preview=null;this.interior=null;this.cut=null;this.cutReadiness=null;this.groundSource=groundSource;if(!this.enabled)return;
   const start=performance.now();try{
    if(input.mode!=='follow'||!input.id){if(this.activeKey)this.reset();this.reason='inactive';return;}
    if(this.activeKey!==input.key){this.activeKey=input.key;this.enclosure.reset();this.policy.reset(input.camera.position,input.aim);this.geometry.reset();}
    const p=this.prior,age=p?input.at-p.at:Infinity,gap=p?input.seconds-p.seconds:Infinity;
    if(!p||![input.at,input.seconds,input.tick,p.at,p.seconds,p.tick].every(Number.isFinite)||p.key!==input.key||p.result.status!=='observed'||age<0||age>250||gap<0||gap>.25||p.tick>input.tick){this.policy.reset(input.camera.position,input.aim);this.enclosure.reset();this.reason='depicted-input-stale';return;}
    const subject=p.result.value.subjects.find(s=>s.id===input.id);if(!subject||subject.state!=='present'){this.policy.reset(input.camera.position,input.aim);this.enclosure.reset();this.reason='subject-unavailable';return;}
-   const preparing=performance.now();const {roots,revision}=source();this.geometry.prepare(roots,revision);this.preparationMs=performance.now()-preparing;
+   const preparing=performance.now();const {roots,revision,cutReadiness}=source();this.cutReadiness=cutReadiness??null;this.geometry.prepare(roots,revision);this.preparationMs=performance.now()-preparing;
    const contextStart=performance.now();this.contextInput={tick:p.tick,key:p.key,position:[...subject.transform.positionM]};this.context=this.enclosure.resolve(this.geometry.enclosureSources(),subject.transform.positionM);this.contextMs=performance.now()-contextStart;
-   const pose=this.policy.step(subject,input.camera,input.aim,step,this.geometry,ground,input.viewport,input.projection,this.context);this.reason=pose.reason;this.candidates=pose.candidates;this.motion=pose.motion;this.preview=pose.preview;this.interior=pose.interior;
+   const pose=this.policy.step(subject,input.camera,input.aim,step,this.geometry,ground,input.viewport,input.projection,this.context,input.at/1000,cutReadiness);this.reason=pose.reason;this.candidates=pose.candidates;this.motion=pose.motion;this.preview=pose.preview;this.interior=pose.interior;this.cut=pose.cut;
    input.camera.position.copy(pose.eye);input.aim.copy(pose.aim);input.camera.lookAt(pose.aim);
   }finally{this.controlMs=performance.now()-start;}
  }
@@ -45,7 +47,7 @@ export class FollowController{
   else{this.prior=null;if(this.activeKey)this.reset();this.controlMs=0;}
   if(!this.diagnostics)return;
   const rowStart=performance.now();const s=this.prior?.result.status==='observed'?this.prior.result.value.subjects.find(s=>s.state==='present'):null;
-  const row={sequence:++this.sequence,at:input.at,tick:input.tick,seconds:input.seconds,key:input.key,mode:input.mode,enabled:this.enabled,reason:this.enabled?this.reason:'legacy',controlMs:this.enabled?this.controlMs:legacyMs,observationMs,setupMs,totalMs:(this.enabled?this.controlMs:legacyMs)+observationMs,diagnosticMs:0,preparationMs:this.enabled?this.preparationMs:0,candidates:this.candidates,groundSource:this.groundSource,motion:this.motion,preview:this.preview,interior:this.interior,enclosure:this.context,enclosureInput:this.contextInput,enclosureMs:this.contextMs,geometry:this.enabled?{...this.geometry.stats}:null,viewport:input.viewport?{...input.viewport,insets:{...input.viewport.insets}}:null,eye:input.camera.position.toArray(),aim:input.aim.toArray(),cameraWorld:input.camera.matrixWorld.toArray(),projection:input.camera.projectionMatrix.toArray(),subject:s??null};
+  const row={sequence:++this.sequence,at:input.at,tick:input.tick,seconds:input.seconds,key:input.key,mode:input.mode,enabled:this.enabled,reason:this.enabled?this.reason:'legacy',controlMs:this.enabled?this.controlMs:legacyMs,observationMs,setupMs,totalMs:(this.enabled?this.controlMs:legacyMs)+observationMs,diagnosticMs:0,preparationMs:this.enabled?this.preparationMs:0,candidates:this.candidates,groundSource:this.groundSource,motion:this.motion,preview:this.preview,interior:this.interior,cut:this.cut,cutReadiness:this.cutReadiness,enclosure:this.context,enclosureInput:this.contextInput,enclosureMs:this.contextMs,geometry:this.enabled?{...this.geometry.stats}:null,viewport:input.viewport?{...input.viewport,insets:{...input.viewport.insets}}:null,eye:input.camera.position.toArray(),aim:input.aim.toArray(),cameraWorld:input.camera.matrixWorld.toArray(),projection:input.camera.projectionMatrix.toArray(),subject:s??null};
   if(this.rows.length<FOLLOW_DIAGNOSTIC_CAP)this.rows.push(row);else this.dropped++;row.diagnosticMs=performance.now()-rowStart;row.totalMs+=setupMs+row.diagnosticMs;
  }
  read(){return{schema:'follow-experiment/1',enabled:this.enabled,diagnostics:this.diagnostics,total:this.sequence,dropped:this.dropped,capacity:FOLLOW_DIAGNOSTIC_CAP,rows:this.rows.slice(),scope:'Raw completed-draw rows; controller, caller setup, subject observation and raw row construction synchronous spans. Geometry preparation included; exports measured separately by reader. Page frame spacing is not presented FPS; deferred GC/resident memory unknown.'};}
