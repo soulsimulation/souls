@@ -7610,19 +7610,21 @@ async fn frame_home(
     let got = a.act("part:unseat", c, part_of(f)).await;
     println!("{what}: {got:?}");
     assert_eq!(got.kind, 1, "{what}: out");
-    // Its crew took it from behind its posts, 1.143 m apart, and the world keeps that span: the two carry it that far
-    // apart, straight from place to place.
-    let (pa, pb) = crew_now(s.w, a.soul, b.soul).expect("its crew carries it");
-    let half = (pa.x - pb.x) / 2;
+    // As A3's hold crews carry theirs: each carrier sent on its own walk to its place beside the frame's edges where it
+    // goes, not led ([`heading_walk`]): the crew took it from behind its posts, 1.143 m apart, and a led walk keeps
+    // that span, which puts the one behind on the stand.
     for at in via.iter().chain([&home]) {
-        walk_two(
-            s,
-            a,
-            b,
-            (v3(at.x + half, 0, at.z), v3(at.x - half, 0, at.z)),
-            what,
-        )
-        .await;
+        let (pa, pb) = frame_ends(*at);
+        a.send("eden:walk", s.g, to_point(pa)).await;
+        b.send("eden:walk", s.g, to_point(pb)).await;
+        let (x, y) = (a.end().await, b.end().await);
+        assert_eq!(
+            (x.kind, y.kind),
+            (1, 1),
+            "{what}: sent to {pa:?} and {pb:?}, at {:?} and {:?}: {x:?} {y:?}",
+            body_at(s.w, body_of(s.w, a.soul)),
+            body_at(s.w, body_of(s.w, b.soul))
+        );
     }
     let got = put_part(a, c, into_slot(stand, k)).await;
     assert_eq!(got.kind, 1, "{what}: on its stand: {got:?}");
