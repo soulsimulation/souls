@@ -449,11 +449,11 @@ mod tests {
         let (front, back, side) = (id(1), id(2), id(3));
         let sides = [(side, [0, -400_000])];
         let h = assign(&g, &load, load.held().unwrap(), front, back, &sides).unwrap();
-        assert_eq!(names(&h), ["grip_r", "grip_l", "grip_mid"]);
+        assert_eq!(names(&h), ["grip_r", "grip_l", "grip_l2"]);
         // Lifted the other way round, its + end behind: the front takes the other end.
         let r = load.reversed().unwrap();
         let h = assign(&g, &load, r.held().unwrap(), front, back, &sides).unwrap();
-        assert_eq!(names(&h), ["grip_l", "grip_r", "grip_mid"]);
+        assert_eq!(names(&h), ["grip_l", "grip_r", "grip_r2"]);
         for hold in &h {
             let [a, b] = hold.hands;
             // Its hands either side of its grip along the beam's length (its z), 0.4 m apart: an end's at its grip, the
@@ -479,10 +479,12 @@ mod tests {
     fn a_crew_of_six_holds_each_grip_once_in_join_order_hands_within_its_length() {
         for (family, kind) in [
             ("construction", "timber_bundle"),
+            ("construction", "rack_beam"),
             ("carpentry", "shade_cloth"),
         ] {
             let e = entry(family, kind);
             let (load, g) = (Load::of(&e).unwrap(), grips_of(&e).unwrap());
+            assert_eq!(load.most(), 6, "{kind}: six grips, six carriers");
             let places = load.side_places();
             let sides: Vec<(Id, [i64; 2])> = places
                 .iter()
@@ -512,7 +514,13 @@ mod tests {
             for (hold, (_, place)) in h[2..].iter().zip(&sides) {
                 let edge = z(hold.hands[0]);
                 assert_eq!(edge.signum(), place[1].signum(), "{kind} {}", hold.grip);
-                assert_eq!(edge.abs(), load.half_width, "{kind} {}", hold.grip);
+                // The beam stands taller (102 mm) than it is wide (51 mm): its side's edge is half its width.
+                let half = if kind == "rack_beam" {
+                    25_500
+                } else {
+                    load.half_width
+                };
+                assert_eq!(edge.abs(), half, "{kind} {}", hold.grip);
             }
         }
     }

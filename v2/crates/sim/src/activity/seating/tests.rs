@@ -890,7 +890,7 @@ fn a1_to_a4_two_frames_and_two_beams_seated_held_released_and_taken_back_to_the_
         let mut m = w.mint.clone();
         named(
             w.seating
-                .check(&w.tree, &w.acts, &mut m, act, f, &target, REACH),
+                .check(&w.tree, &w.acts, &mut m, act, f, &target, REACH, &[]),
         )
         .expect("nothing refuses");
         w.move_part(act, ks, f, from, frame_across, Quat::IDENTITY, &target)
@@ -1066,13 +1066,13 @@ fn a5_a_crew_with_a_side_moves_a_part() {
     let mut m = w.mint.clone();
     let r = named(
         w.seating
-            .check(&w.tree, &w.acts, &mut m, act, fa, &t, REACH),
+            .check(&w.tree, &w.acts, &mut m, act, fa, &t, REACH, &[]),
     );
     assert!(r.is_ok(), "a crew of three is a crew: {r:?}");
     let alone = w.crew(ground, &[3]);
     let r = named(
         w.seating
-            .check(&w.tree, &w.acts, &mut m, alone, fa, &t, REACH),
+            .check(&w.tree, &w.acts, &mut m, alone, fa, &t, REACH, &[]),
     );
     assert_eq!(r.err().map(|e| e.0).as_deref(), Some("crew.size"));
 }
@@ -1087,7 +1087,7 @@ fn a5_each_refusal_is_returned_before_anyone_moves() {
         let mut m = w.mint.clone();
         let r = named(
             w.seating
-                .check(&w.tree, &w.acts, &mut m, act, part, target, reach),
+                .check(&w.tree, &w.acts, &mut m, act, part, target, reach, &[]),
         );
         assert_eq!(
             (w.tree.to_state(), w.seating.parts.len()),

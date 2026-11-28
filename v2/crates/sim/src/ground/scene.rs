@@ -782,6 +782,24 @@ pub fn stands_in(
     radius: i64,
     body: &dyn Fn(&str) -> bool,
 ) -> Result<Option<Id>, String> {
+    stands_in_but(tree, ground, part, to, place, turn, radius, body, &[])
+}
+
+/// [`stands_in`], leaving out the bodies `but` (#5067: a crew's carriers who walk beside its part as it is set in
+/// will not stand where they stand now when it is seated; the seating is checked again, with them, when its track
+/// ends).
+#[allow(clippy::too_many_arguments)]
+pub fn stands_in_but(
+    tree: &Tree,
+    ground: Id,
+    part: Id,
+    to: Frame,
+    place: Vec3,
+    turn: Quat,
+    radius: i64,
+    body: &dyn Fn(&str) -> bool,
+    but: &[Id],
+) -> Result<Option<Id>, String> {
     let g = tree.handle(ground).ok_or("no such ground")?;
     let th = tree.handle(to.node).ok_or("no such frame")?;
     let ph = tree.handle(part).ok_or("no such part")?;
@@ -804,7 +822,7 @@ pub fn stands_in(
                 .iter()
                 .copied(),
         );
-        if h == g || !body(n.kind().as_str()) {
+        if h == g || !body(n.kind().as_str()) || but.contains(&n.id()) {
             continue;
         }
         let Ok(w) = xform_to(tree, h, g) else {

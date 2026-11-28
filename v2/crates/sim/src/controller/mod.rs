@@ -995,6 +995,21 @@ impl Controller {
         Ok(())
     }
 
+    /// [`Controller::carry`], taking the place of a track of the world's own the body is already on (none across a
+    /// link): it goes on from where it is (#5067: a carrier walking beside a part whose set-in is stopped turns back
+    /// with it). `crossing-under-way` when it is being carried across a link.
+    pub fn carry_on(&mut self, body: Id, track: Track) -> R<()> {
+        let s = self.slot(body)?;
+        if s.track.as_ref().is_some_and(|t| t.link.is_some()) || track.link.is_some() {
+            return refuse("crossing-under-way", replica::world_model::show(body));
+        }
+        s.input.velocity = Vec3::ZERO;
+        s.touched = true;
+        s.landing = 0;
+        s.track = Some(track);
+        Ok(())
+    }
+
     /// The world's own rule when `body`'s node's ground was rebuilt (G3, #2760): it stands as `placed`, found again on
     /// the new ground where it stood (`moved` when that is anywhere else: never a move), or, standing on none
     /// (`None`), stands still until it is walked out.

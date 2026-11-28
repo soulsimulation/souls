@@ -94,9 +94,9 @@ test('a full spot, a crew too small, a load that fits no bay and nothing lifted 
 test('a side carrier grips beside the n-th grip between the ends, counted from the back', () => {
   const rows = copy([{ id: id(30), kind: 'mars:timber_bundle', name: 'timber-bundle', pos: [11.6e6, 0, 24e6] }, { id: id(31), kind: 'mars:generator', pos: [0, 0, 0], rot: YAW90 }]);
   const grip = (thing, end, n) => carryIntents({ do: 'grip', thing, end, n }, ctxOf(rows));
-  near(grip(id(30), 'right', '1')[0].params[1], [11.6e6 + 700_000, 0, 22.5e6], 'the first, east of it');
-  near(grip(id(30), 'left', '4')[0].params[1], [11.6e6 - 700_000, 0, 25.5e6], 'the fourth, west of it');
-  near(grip(id(31), 'right', '2')[0].params[1], [450_000, 0, -900_000], 'a generator turned east: its right is north');
+  near(grip(id(30), 'right', '1')[0].params[1], [11.6e6 + 800_000, 0, 22.5e6], 'the first, east of it');
+  near(grip(id(30), 'left', '4')[0].params[1], [11.6e6 - 800_000, 0, 25.5e6], 'the fourth, west of it');
+  near(grip(id(31), 'right', '2')[0].params[1], [450_000, 0, -1_000_000], 'a generator turned east: its right is north');
   assert.equal(grip(id(30), 'right', '5').code, 'carry-grip-unknown');
 });
 

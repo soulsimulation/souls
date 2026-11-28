@@ -128,19 +128,21 @@ test('a crew of six takes the 6.1 m frame at its six grips: front, back, and fou
   assert.deepEqual(tall.inner, [-1_649_000, -550_000, 550_000, 1_649_000], 'four grips between its ends');
   assert.equal(tall.halfWidth, 609_500);
   // It stands on the floor at (5, 10) m, to be lifted: its front and back on its own z, as far out as a lift checks its
-  // ends (3.1 m, --from); the sides beside its grips along that line, half its width and REACH off it, alternating.
-  const up = { pos: [5e6, 0, 10e6] }, off = 609_500 + 350_000, floor = true;
+  // ends (3.1 m, --from); the sides beside its grips along that line, half its width and SIDE_REACH off it, alternating.
+  const up = { pos: [5e6, 0, 10e6] }, off = 609_500 + 450_000, floor = true;
   near(gripSpot(up, tall, 'back', 3_100_000, null, floor), [5e6, 10e6 - 3_100_000], 'its back');
   near(gripSpot(up, tall, 'front', 3_100_000, null, floor), [5e6, 10e6 + 3_100_000], 'its front');
   near(gripSpot(up, tall, 'side1', null, null, floor), [5e6 - off, 10e6 - 1_649_000], 'the first side, on its + side');
   near(gripSpot(up, tall, 'side2', null, null, floor), [5e6 + off, 10e6 - 550_000], 'the second, across');
   near(gripSpot(up, tall, 'side4', null, null, floor), [5e6 + off, 10e6 + 1_649_000], 'the fourth');
-  // A beam lying along z has one grip between its ends: one side beside its middle, and no second.
+  // A beam lying along z has four grips between its ends (#5067: six in all): the first side beside the one nearest
+  // its back, the fourth beside the one nearest its front, across. The frame in its stand has none between its ends.
   const walk = (req) => send(req)[0].params[1];
-  near(walk({ do: 'grip', thing: id(2), end: 'side1' }), [2e6 - 51_000 - 350_000, 0, 6e6], 'the beam\'s side, half its height across (as it is carried, on its edge)');
-  const none = send({ do: 'grip', thing: id(2), end: 'side2' });
+  near(walk({ do: 'grip', thing: id(2), end: 'side1' }), [2e6 - 51_000 - 450_000, 0, 6e6 - 650_000], 'the beam\'s first side, half its height across (as it is carried, on its edge)');
+  near(walk({ do: 'grip', thing: id(2), end: 'side4' }), [2e6 + 51_000 + 450_000, 0, 6e6 + 650_000], 'its fourth, across');
+  const none = send({ do: 'grip', thing: id(4), end: 'side1' });
   assert.equal(none.code, 'carry-grip-unknown');
-  assert.match(none.detail, /1 grip between its ends.*a crew of 3 at most/);
+  assert.match(none.detail, /0 grips between its ends.*a crew of 2 at most/);
   assert.equal(requestOf(['carry', 'grip', id(2), 'side', '2']).req.end, 'side2', 'the command line: side <n>');
 });
 

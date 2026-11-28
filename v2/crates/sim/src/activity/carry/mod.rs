@@ -135,6 +135,11 @@ pub const END_CLEAR: i64 = 75_000;
 pub const SWEEP_STEP: i64 = 50_000;
 /// The activity kind's slot the board rides in.
 pub const SLOT: u64 = 1;
+/// How far off its load's side a side carrier's place is, µm (0.135 C5; #5067): 0.11 m more than the room a body's
+/// ground keeps from a part at its height (`crate::ground`: its radius, 0.28 m, and 0.06 m), so a side carrier who
+/// walks a few centimetres off its place still stands on ground when the part is seated beside it (at [`REACH`],
+/// 0.35 m, a rack beam seated at hip height left a side carrier 10 mm of ground), and 0.25 m inside [`GRIP_REACH`].
+pub const SIDE_REACH: i64 = 450_000;
 /// The farthest a carrier may stand from its grip on the plan at the lift, µm: a touch's reach (0.134).
 pub const GRIP_REACH: i64 = 700_000;
 /// How many grips a load has between its ends, at most, that carriers take (0.135 C5): a crew of six, less its front
@@ -518,10 +523,10 @@ impl Load {
     }
 
     /// Where its side carriers stand (0.135 C5), in join order: each beside its grip between the ends, from the back
-    /// toward the front, [`REACH`] off its side, the first on its + side, then alternating. Each `[along, across]`
+    /// toward the front, [`SIDE_REACH`] off its side, the first on its + side, then alternating. Each `[along, across]`
     /// from its middle, µm, in the carry's frame: along its +x, from the back toward the front, and across its +z.
     pub fn side_places(&self) -> Vec<[i64; 2]> {
-        let off = self.half_width + REACH;
+        let off = self.half_width + SIDE_REACH;
         self.inner
             .iter()
             .flatten()

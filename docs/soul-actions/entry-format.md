@@ -119,11 +119,18 @@ standing reach above its feet. No carrier is exempt, at any step:
   faces. A part that lies is measured, and held, by its middle.
 - **Lift** (`carry:lift`): the same check against the same holds, refused `carry-grip-out-of-reach`.
 - **Put** (`part:put`): refused `part.grip-out-of-reach` before anyone moves when any carrier is out of reach where the
-  set-in track starts or would be where it ends. A carrier who stepped away walks back to its grip and the crew puts
-  again. While the set-in runs, a carrier who moves out of reach stops it by the same name and the part goes back.
-- So a set-in that moves the part sideways is seated by the carriers who can reach it at both ends. A rack beam goes
-  into a bay from the bay's mouth (about 0.45 m off its slot's line: the frames' columns stand on that line), which
-  its two end carriers reach; a crew with side carriers is refused there, and its sides let go first.
+  set-in track starts. A carrier who stepped away walks back to its grip and the crew puts again. On the track each
+  carrier stands or walks beside the part, keeping its place at its grip: the world carries its body along the track's
+  own line at its pace, over ground it can stand on, so it is where its hold is all the way. A set-in that moves the
+  part less than 50 mm on the plan moves nobody. Beyond that a side carrier walks with the part where the straight way
+  beside it is ground it can stand on, else it stands; the front and the back stand while they reach their holds at
+  both ends of the track, else they walk with it. A carrier who can neither stand within reach nor walk beside the part
+  refuses the put by the same name before anyone moves. While the set-in runs, a carrier who moves out of reach stops
+  it by that name; the part goes back, and those who walked beside it walk back beside it.
+- A rack beam goes into a bay from the bay's mouth (about 0.45 m off its slot's line: the frames' columns stand on that
+  line, so nobody can stand on it within reach of an end grip). Its two end carriers stand, 0.57 m from their holds
+  when it is seated; its side carriers walk in beside it, those on the bay's side into the open bay. A side carrier's
+  place is 0.45 m off the load's side, so it still stands on ground when the part is seated beside it.
 - Not checked yet: where the part is before a take. It still goes to its carriers' middle in one change of parent.
 
 While it is carried (0.135 C7), with or without a destination named, every step is checked: a step that would take the
