@@ -3144,7 +3144,7 @@ fn a2_parts_rest_at_the_grounds_height() {
             where_is(&w, fa).0,
             ab.0 + 1,
             ab.1 + 1,
-            body_at(&w, body_of(&w, w.souls[ab.0])),
+            stood_or_none(&w, w.souls[ab.0]),
             stood_or_none(&w, w.souls[ab.1])
         );
         both(hands, ab, p, q, what);
