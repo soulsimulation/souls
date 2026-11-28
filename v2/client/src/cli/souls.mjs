@@ -427,11 +427,17 @@ export function requestOf(argv) {
   if (op === 'carry' || op === 'part') {
     // 0.135 C, A (carry/carry.mjs): carry offer|accept|decline|leave|grip|lift|to|set-down|list, part take|unseat|put.
     const words = [...rest], flag = (k) => { const i = words.indexOf(k); if (i < 0) return undefined; const v = words[i + 1]; words.splice(i, 2); return v; };
-    const on = flag('--on'), from = flag('--from'), out = flag('--out'), go = flag('--go');
+    const on = flag('--on'), from = flag('--from'), out = flag('--out'), go = flag('--go'), joins = flag('--joins');
     if (go !== undefined && !Number.isFinite(goTime(go))) return { refused: 'carry-go', detail: '--go <hh:mm:ss UTC | ISO time | Unix ms>: the moment every carrier sets off' };
     const [does, a, b, c] = words;
     Object.assign(req, { op: 'carry', do: does });
-    if (op === 'part') Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c } : { part: b }) });
+    // #5067: part raise <crew> <part> [<bay> <slot>]; part lower <crew> [<part>] [toward x,z]; part put ... --joins a,b
+    if (op === 'part') {
+      const more = words.slice(4).filter((w) => w !== 'toward');
+      Object.assign(req, { kind: 'part', crew: a, ...(does === 'put' ? { into: b, slot: c, ...(joins !== undefined ? { joins } : {}) }
+        : does === 'raise' ? { part: b, ...(c !== undefined ? { into: c, slot: words[4] } : {}) }
+        : does === 'lower' ? { part: b === 'toward' ? undefined : b, toward: c === 'toward' ? more[0] : c } : { part: b }) });
+    }
     else if (does === 'offer') Object.assign(req, { to: words.slice(1), ...(on !== undefined ? { on } : {}) });
     else if (does === 'grip') Object.assign(req, { thing: a, end: b === 'side' && c !== undefined ? `side${c}` : b, ...(b !== 'side' && c !== undefined ? { n: c } : {}), ...(from !== undefined ? { from } : {}), ...(out !== undefined ? { out } : {}) });
     else if (does === 'lift') Object.assign(req, { crew: a, load: b });

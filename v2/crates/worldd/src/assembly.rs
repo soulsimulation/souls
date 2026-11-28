@@ -367,6 +367,31 @@ pub fn ways(
     Ok(walks)
 }
 
+/// Of `parts` seated in `bay` (node `th`), those at the level under its slot `k` (#5067): whose slot points are the
+/// highest at or under slot `k`'s (within 10 mm), in the bay's own frame. All of them when none is under it.
+fn at_level(tree: &Tree, th: replica::tree::Handle, k: u64, parts: Vec<Id>) -> Vec<Id> {
+    let y = |n: u64| sim::ground::scene::slot_point(tree, th, n).map(|p| p.y);
+    let Some(own) = y(k) else { return parts };
+    let height = |id: &Id| {
+        tree.handle(*id)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| n.slot())
+            .and_then(y)
+    };
+    let under = parts
+        .iter()
+        .filter_map(height)
+        .filter(|h| *h <= own + 10_000)
+        .max();
+    match under {
+        Some(top) => parts
+            .into_iter()
+            .filter(|p| height(p).is_some_and(|h| (h - top).abs() <= 10_000))
+            .collect(),
+        None => parts,
+    }
+}
+
 /// The words a put's `part.grip-out-of-reach` ends with, then `x=<mm> z=<mm> mm`, when the put would be admitted with
 /// the crew's node there on its ground (#5067): a contract, read by the client's `part put`.
 pub const ADMITTED_AT: &str = "admitted with the crew's node at";
@@ -861,6 +886,48 @@ impl Assembly {
         Ok(())
     }
 
+    /// The end of a raise into a bay's slot (#5067): crew `activity`'s `part`, standing at `at` (the slot's point on
+    /// the crew's ground, the part slid there), seated in slot `k` of `bay` with its crew holding it, their node under it.
+    /// Checked as a seating is (`slot.occupied`, `site.occupied`, the bay's rules), then written on `tree` and waiting
+    /// in [`Assembly::ready`] as a seating. A standing part in a bay is joined to nothing by default, as a put's is.
+    #[allow(clippy::too_many_arguments)]
+    pub fn settle_into(
+        &mut self,
+        tree: &mut Tree,
+        acts: &Activities,
+        mint: &mut Minter,
+        now: Micros,
+        by: (Id, Id),
+        activity: Id,
+        part: Id,
+        (bay, k, at): (Id, u64, Vec3),
+        ground: Id,
+        reach: i64,
+    ) -> R<()> {
+        self.aim(tree, activity, ground)?;
+        let target = Target {
+            to: Frame {
+                node: bay,
+                slot: Some(k),
+            },
+            place: Vec3::ZERO,
+            turn: Quat::IDENTITY,
+            at,
+            joins: Vec::new(),
+            hold: true,
+        };
+        let done = self
+            .seating
+            .check(tree, acts, &mut mint.clone(), activity, part, &target, reach, &[])
+            .and_then(|()| self.seating.put(tree, acts, mint, now, activity, part, &target));
+        if let Err(r) = done {
+            self.seating.parts.clear();
+            return Err(r);
+        }
+        self.drain(by, activity, Step::Seated);
+        Ok(())
+    }
+
     /// `part:put` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
     /// part to `to`'s slot `slot` (or to `point` in `to`'s frame), joined to `joins` (by default, a bearing part to the
     /// bay's standing parts, a resting part to its bearing ones). `carriers`: everyone holding the part, each within
@@ -976,8 +1043,14 @@ impl Assembly {
                     n.slot().is_some() && if rests { s.bears(k) } else { s.stands(k) }
                 })
                 .map(|n| n.id())
-                .collect(),
+                .collect::<Vec<_>>(),
             None => Vec::new(),
+        };
+        // #5067: a resting part joins only those at its own level: the ones whose slots are highest at or under its
+        // own (a joist the two beams it lies on, not the two below them).
+        let joins = match (rests, slot) {
+            (true, Some(k)) => at_level(tree, th, k, joins),
+            _ => joins,
         };
         let mut joined = Vec::new();
         for other in joins {

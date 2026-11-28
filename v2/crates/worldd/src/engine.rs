@@ -245,6 +245,9 @@ pub struct Engine {
     led: BTreeMap<Id, Led>,
     /// Why each led carry broke off (its load set down by the world), until [`Engine::led_over`] reads it.
     broke: BTreeMap<Id, &'static str>,
+    /// Why and when each crew's carry last broke off, its part set down (#5067): a put by a crew that holds nothing
+    /// says so, never a bare `part.not-held`.
+    set_down_why: BTreeMap<Id, (&'static str, Micros)>,
     /// Acts held while a carry's node is on a lift's or a set-down's track (#5067), by the carry: a set-down or a put
     /// asked during its lift, the last member's leave during its set-down (its node holds the load until it rests).
     /// Each runs again when the track ends ([`Engine::reruns`]), answered then.
@@ -730,6 +733,37 @@ fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
 }
 
 impl Engine {
+    /// [`break_off`], its why kept for the crew's next put ([`Engine::not_held`]).
+    #[allow(clippy::too_many_arguments)]
+    fn broke_off(
+        &mut self,
+        carry: &mut Carry,
+        tree: &mut Tree,
+        now: Micros,
+        here: Option<((Vec3, replica::pose::Quat), Option<i64>)>,
+        why: &'static str,
+        by: Option<(Id, Id)>,
+    ) -> R<()> {
+        break_off(carry, &mut self.activities, tree, now, here, why, by)?;
+        self.set_down_why.insert(carry.activity, (why, now));
+        Ok(())
+    }
+
+    /// `part.not-held` for crew `activity`'s put (#5067): why its part was set down, when it broke off on the way.
+    fn not_held(&self, activity: Id) -> Refusal {
+        match self.set_down_why.get(&activity) {
+            Some((why, at)) => refusal(
+                "part.not-held",
+                format!(
+                    "{} holds nothing: its carry broke off and its part was set down ({why}, at {at} µs); next: take \
+                     it again (part take <crew> <part>), every carrier at its grip",
+                    show(activity)
+                ),
+            ),
+            None => refusal("part.not-held", show(activity)),
+        }
+    }
+
     /// The engine carrying each load whose kind `entries` states as its entry says (0.135 C2): `entries` is the
     /// world's kinds, an object of entries; one that is not a load (no bounds, fewer than two grips) is left out. The
     /// entries are kept, so a touch reaches a seated body at its seat (0.135 E21, [`feet_of`]).
@@ -804,6 +838,7 @@ impl Engine {
             entries: Json::Null,
             led: BTreeMap::new(),
             broke: BTreeMap::new(),
+            set_down_why: BTreeMap::new(),
             held: BTreeMap::new(),
             rerun: Vec::new(),
             answering: BTreeMap::new(),
@@ -1287,10 +1322,9 @@ impl Engine {
                 let ((ground, f), (_, k)) = (stands(c, front)?, stands(c, back)?);
                 let by = (a.id, a.soul);
                 if a.verb == Verb::Put {
-                    let carry = self
-                        .carries
-                        .get(&activity)
-                        .ok_or_else(|| refusal("part.not-held", show(activity)))?;
+                    let Some(carry) = self.carries.get(&activity) else {
+                        return Err(self.not_held(activity));
+                    };
                     // #5067: a put waits for the lift's track to end; none while the load goes down.
                     if carry.lifting() {
                         self.hold(activity, a);
@@ -1803,9 +1837,7 @@ impl Engine {
             }
             return Ok(());
         }
-        if let Err(r) = break_off(
-            &mut carry,
-            &mut self.activities,
+        if let Err(r) = self.broke_off(&mut carry,
             tree,
             now,
             None,
@@ -2147,9 +2179,7 @@ impl Engine {
                 .iter()
                 .find_map(|m| stands(c, m.body).ok())
                 .map(|(_, at)| at.y);
-            match break_off(
-                &mut carry,
-                &mut self.activities,
+            match self.broke_off(&mut carry,
                 tr,
                 now,
                 Some((here, floor)),
@@ -2221,7 +2251,7 @@ impl Engine {
                     let Some(mut carry) = self.carries.remove(&a) else {
                         continue;
                     };
-                    match break_off(&mut carry, &mut self.activities, tr, now, None, why, None) {
+                    match self.broke_off(&mut carry, tr, now, None, why, None) {
                         // A crew's part set down is no longer its own (0.135 A2).
                         Ok(()) => {
                             if carry.lowering() {
@@ -2327,9 +2357,7 @@ impl Engine {
                 let Some(mut carry) = self.carries.remove(&a) else {
                     continue;
                 };
-                match break_off(
-                    &mut carry,
-                    &mut self.activities,
+                match self.broke_off(&mut carry,
                     tr,
                     now,
                     None,
@@ -2629,9 +2657,7 @@ impl Engine {
                 }
                 continue;
             }
-            match break_off(
-                &mut carry,
-                &mut self.activities,
+            match self.broke_off(&mut carry,
                 tree,
                 now,
                 None,

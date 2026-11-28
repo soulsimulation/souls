@@ -238,6 +238,37 @@ export function slotPoint(at, entry, slot) {
   return { n: k + 1, name: names[k], point: [p[0], p[2]], yaw: Number.isInteger(s.yaw_mdeg) ? s.yaw_mdeg : 0 };
 }
 
+/** How near a free slot's place a lying part's foot (its origin) must be for `part raise` to raise it into the slot,
+ *  µm: worldd's own bound for a raise into a slot (`raise.not-at-slot`). */
+export const RAISE_INTO = 150_000;
+
+/** The free slot of a bay in the copy that takes `part`'s kind, its place nearest the part's foot within RAISE_INTO:
+ *  {bay, n, name}, or null. `ctx.loose()` lists what stands on the open ground, `ctx.seated(bay)` what fills its slots. */
+export function raiseSlot(ctx, part) {
+  const { kinds, kindOf, placeOf } = ctx, at = placeOf(part), kind = String(kindOf(part) ?? '').split('@')[0];
+  if (!at) return null;
+  let best = null;
+  for (const bay of ctx.loose?.() ?? []) {
+    const entry = kinds[kindOf(bay)], b = placeOf(bay);
+    if (!entry?.slots || !b || bay === part) continue;
+    const taken = new Set((ctx.seated?.(bay) ?? []).map((p) => p.slot));
+    for (const [name, slot] of Object.entries(entry.slots)) {
+      if (!(slot.kinds ?? []).some((k) => String(k).split('@')[0] === kind)) continue;
+      const s = slotPoint(b, entry, name);
+      if (!s || taken.has(s.n)) continue;
+      const d = Math.hypot(s.point[0] - at.pos[0], s.point[1] - at.pos[2]);
+      if (d <= RAISE_INTO && (!best || d < best.d)) best = { bay, n: s.n, name, d };
+    }
+  }
+  return best && { bay: best.bay, n: best.n, name: best.name };
+}
+
+/** The part a crew lowers when none is named: the standing part its node is under, else the one in its slot. */
+function lowered(ctx, crew) {
+  const under = ctx.parentOf?.(crew);
+  return (under && under !== ctx.ground ? under : null) ?? ctx.heldBy?.(crew) ?? null;
+}
+
 /** A point word, `x,z` in metres, as µm; null when it is not one. */
 export function pointOf(word) {
   const m = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(String(word ?? ''));
@@ -297,19 +328,49 @@ export function carryIntents(req, ctx) {
     // #5067: the Soul who asks is the lifter. It stands beside the part's top end to raise it (carry grip <part> top) and
     // beside its base to lower it; the other carrier, the footer, stands beside the base on the other side (carry grip
     // <part> foot). The world walks the lifter beside the part as it turns; raised, the crew holds it standing.
-    if (req.do === 'raise') return id(req.part) ? [{ verb: 'part:raise', target: req.crew, params: { 1: req.part } }] : usage;
+    // #5067: raised into a bay's slot (parameters 4 and 5): the one named, or with none named a free slot of a bay in
+    // the copy that takes the part's kind, its place within RAISE_INTO of the part's foot (the world checks its turn).
+    if (req.do === 'raise') {
+      if (!id(req.part)) return usage;
+      const params = { 1: req.part };
+      if (req.into !== undefined) {
+        const at = id(req.into) && placeOf(req.into), s = at && slotPoint(at, kinds[kindOf(req.into)], req.slot);
+        if (!s) return no('part-slot-unknown', `${req.into} has no slot ${req.slot ?? '(none named)'} in its entry here`);
+        Object.assign(params, { 4: req.into, 5: s.n });
+      } else {
+        const s = raiseSlot(ctx, req.part);
+        if (s) Object.assign(params, { 4: s.bay, 5: s.n });
+      }
+      return [{ verb: 'part:raise', target: req.crew, params }];
+    }
+    // `part lower <crew> [<part>] [toward x,z]`: the part and a direction together, or either. With no direction, away
+    // from the bay the part stands in, else toward the part's own back.
     if (req.do === 'lower') {
-      const toward = req.part !== undefined && !id(req.part) ? pointOf(req.part) : null, at = toward && ctx.crewMiddle?.(req.crew);
-      if (req.part !== undefined && !id(req.part) && !toward) return usage;
-      // toward a point: the direction from the crew to it, on the plan (the part's own front when none is named)
-      const params = id(req.part) ? { 1: req.part } : toward && at ? { 3: [Math.round(toward[0] - at[0]), 0, Math.round(toward[1] - at[1])] } : {};
+      const words = [req.part, req.toward].filter((w) => w !== undefined && w !== 'toward');
+      const part = words.find(id), toward = words.map(pointOf).find(Boolean) ?? null;
+      if (words.some((w) => !id(w) && !pointOf(w))) return usage;
+      const held = part ?? lowered(ctx, req.crew), at = held && placeOf(held);
+      const params = part ? { 1: part } : {};
+      let dir = null;
+      if (toward) {
+        const from = at ? [at.pos[0], at.pos[2]] : ctx.crewMiddle?.(req.crew);
+        if (from) dir = [toward[0] - from[0], toward[1] - from[1]];
+      } else if (at) {
+        const bay = ctx.parentOf?.(held), b = bay && bay !== ground && placeOf(bay);
+        const back = turn(at.rot ?? [ONE, 0, 0, 0], [0, 0, -M]);
+        dir = b ? [at.pos[0] - b.pos[0], at.pos[2] - b.pos[2]] : [back[0], back[2]];
+      }
+      if (dir && (dir[0] || dir[1])) params[3] = [Math.round(dir[0]), 0, Math.round(dir[1])];
       return [{ verb: 'part:lower', target: req.crew, params }];
     }
     if (req.do !== 'put') return usage;
     if (id(req.into)) {
       const at = placeOf(req.into), s = at && slotPoint(at, kinds[kindOf(req.into)], req.slot);
       if (!s) return no('part-slot-unknown', `${req.into} has no slot ${req.slot ?? '(none named)'} in its entry here`);
-      return [{ verb: 'part:put', target: req.crew, params: { 1: req.into, 2: s.n } }];
+      // `--joins a,b`: the parts it is joined to, when its kind's default is not the one wanted.
+      const joins = req.joins === undefined ? null : String(req.joins).split(',').filter(Boolean);
+      if (joins && !joins.every(id)) return no('part-joins', '--joins <id,id,...>: the parts it is joined to');
+      return [{ verb: 'part:put', target: req.crew, params: { 1: req.into, 2: s.n, ...(joins ? { 4: joins } : {}) } }];
     }
     const p = req.into === 'here' ? ctx.crewMiddle(req.crew) : pointOf(req.into);
     if (!p) return req.into === 'here' ? no('part-crew-unseen', `${req.crew} holds nothing the copy places`) : usage;
