@@ -8,6 +8,7 @@
 import init, { StreamPlayer, readPointer } from 'replica';
 import * as replica from 'replica';
 import { decode, encode } from 'cborg';
+import { sha256Hex } from '@souls/world-compiler';
 import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from './sound-record.ts';
 import { readChanged } from './changed.ts';
@@ -263,7 +264,8 @@ async function run(stream: URL) {
     if (!p.generation) { player = new StreamPlayer(header); active = undefined; return; }
     if (!/^[0-9a-f]{64}$/.test(p.generation) || p.baseline !== p.generation) throw new Error('stream-generation-record');
     const baseline = await get(new URL(path(p, 'baseline'), stream));
-    if (!baseline || hex(new Uint8Array(await crypto.subtle.digest('SHA-256', baseline as BufferSource))) !== p.baseline) throw new Error('stream-baseline-hash');
+    // Private HTTP viewers may lack SubtleCrypto; keep exact SHA-256 verification on both paths.
+    if (!baseline || (globalThis.crypto?.subtle ? hex(new Uint8Array(await crypto.subtle.digest('SHA-256', baseline as BufferSource))) : sha256Hex(baseline)) !== p.baseline) throw new Error('stream-baseline-hash');
     refuseFormat(baseline);
     const nextPlayer = StreamPlayer.fromBaseline(header, baseline);
     let nodes: NodeRec[], nextVersion: number;
