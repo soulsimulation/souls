@@ -18,7 +18,10 @@
 //! - **Words.** `souls:carry-track` with `souls:raise` or `souls:lower` at the start (a raise turned back says
 //!   `souls:lower` with why), `souls:raised` or `souls:lowered` at the end; `souls:carry-grips` in the phase
 //!   `souls:raise` or `souls:lower`, then `souls:held` or `souls:released`.
-//! - Not kept across a restart: a part found riding its crew's slot is set down as a carry's load is.
+//! - **A restart part way.** A raise is not stored. A world started again finds a part riding its crew's slot unturned
+//!   at its foot, the node turned off the upright ([`Raise::resume`]), and lowers it from where it is on the same
+//!   track, by itself, until it lies; then it is put down and let go. It is never left leaning. A part standing in
+//!   its crew's slot (a raise on its last tick, or a part carried standing) is set down standing, as a carry's is.
 
 use replica::effects::{Actor, Cause};
 use replica::ids::Id;
@@ -392,6 +395,64 @@ impl Engine {
             // A take refused at its commit: nothing was taken.
             _ => {}
         }
+    }
+
+    /// A world started again found `load` riding crew `activity`'s slot, its node at `here` on `ground` (#5067):
+    /// whether it is a raise part way, taken up again as a lowering that goes on by itself until the part lies. `carry`
+    /// is the node's writer, given back when it is no raise.
+    pub(super) fn raise_resumed(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        load: Id,
+        ground: Id,
+        here: (Vec3, replica::pose::Quat),
+        carry: Carry,
+        now: Micros,
+    ) -> Option<Carry> {
+        let node = tree.handle(load).and_then(|h| tree.node(h));
+        let spec = node.and_then(|n| self.raise_specs.get(plain(n.kind().as_str())).copied());
+        // As a raise's take holds it: at its foot, unturned in the slot.
+        let at_foot = node.and_then(|n| n.place()).is_some_and(|p| {
+            p.position == Vec3::ZERO && p.orientation == replica::pose::Quat::IDENTITY
+        });
+        let found = match spec.filter(|_| at_foot) {
+            Some(spec) => Raise::resume(spec, here.0, here.1).ok().flatten(),
+            None => None,
+        };
+        let Some((geo, r)) = found else {
+            return Some(carry);
+        };
+        let members: Vec<Id> = self
+            .activities
+            .members(activity)
+            .unwrap_or(&[])
+            .iter()
+            .map(|m| m.body)
+            .collect();
+        let ra = Raising {
+            geo,
+            part: load,
+            ground,
+            lifter: members.first().copied().unwrap_or(activity),
+            footer: members.get(1).copied().unwrap_or(activity),
+            up: false,
+            r,
+            by: (activity, activity),
+            reach: 0,
+            carry: Some(carry),
+            // Nobody is walked: the part goes down by itself.
+            walking: true,
+            settling: false,
+            still: 0,
+            driven: true,
+            waited: 0,
+            since: now,
+            grip: ("foot".to_owned(), Vec3::ZERO),
+        };
+        self.turned_back(tree, activity, &ra, "souls:world-restarted", now);
+        self.raising.insert(activity, ra);
+        None
     }
 
     /// The world's word that a raise turned back, and why: `souls:carry-track` with `souls:lower`.

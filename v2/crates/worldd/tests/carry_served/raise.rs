@@ -71,7 +71,19 @@ fn samples(dir: &Path, node: Id) -> Vec<(Vec3, replica::pose::Quat)> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn raise_two_souls_carry_a_lying_upright_raise_it_hold_it_and_lower_it() {
-    let d = scratch("craise");
+    raise_and_lower("craise", false).await;
+}
+
+/// A world stopped while the upright is part way up and started again never leaves it leaning: it finds the raise in
+/// its log and lowers the part from where it is, on the same track (the foot where it was, no sample a jump), until
+/// it lies; then it is put down and let go.
+#[tokio::test(flavor = "multi_thread")]
+async fn raise_a_restart_part_way_lays_the_upright_down_again_never_leaning() {
+    raise_and_lower("crestart", true).await;
+}
+
+async fn raise_and_lower(tag: &str, restart: bool) {
+    let d = scratch(tag);
     let facts = world(&d);
     let socket = d.join("s");
     let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
@@ -205,8 +217,6 @@ async fn raise_two_souls_carry_a_lying_upright_raise_it_hold_it_and_lower_it() {
         .act("part:raise", carry, BTreeMap::from([(1, frame.to_value())]))
         .await
         .expect("the raise begins");
-    said(&dir, &served, carry, "souls:raised", 1, 30).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
     // The track: a sample a tick, the foot where it was on the plan, the top never more than 60 mm from the last.
     let top = |q: replica::pose::Quat| dir_of(q, Vec3::new(0, spec.height, 0));
     let checked = |track: &[(Vec3, replica::pose::Quat)], what: &str| {
@@ -229,6 +239,55 @@ async fn raise_two_souls_carry_a_lying_upright_raise_it_hold_it_and_lower_it() {
         println!("{what}: {} samples, its top at most {} mm a tick", track.len(), step / 1000);
         assert!(step <= 60_000, "{what}: no jump: {step} µm in a tick");
     };
+    if restart {
+        // Part way up (40 samples, some two seconds): the world stops, and starts again.
+        let end = Instant::now() + Duration::from_secs(20);
+        while samples(&dir, carry).len() < before + 40 {
+            assert!(Instant::now() < end, "the raise never got part way");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        drop(served);
+        let part_way = samples(&dir, carry);
+        let lean = top(part_way.last().unwrap().1);
+        println!(
+            "stopped part way: {} samples, its top {} mm up of {}",
+            part_way.len() - before,
+            lean.y / 1000,
+            spec.height / 1000
+        );
+        assert!(lean.y > 100_000 && lean.y < spec.height - 100_000, "leaning: {lean:?}");
+        let served = super::grips::serve_again(&dir, &socket);
+        served.line("listening ", 180);
+        said(&dir, &served, carry, "souls:lowered", 1, 40).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let all = samples(&dir, carry);
+        checked(&all[before..], "raised part way, then lowered by the world started again");
+        let laid = moves_of(&dir, frame).last().cloned().expect("laid down");
+        let y = dir_of(laid.orientation, Vec3::new(0, M, 0));
+        println!(
+            "after the restart: lying at ({}, {}, {}) mm, its length {y:?}; phases {:?}; grips {:?}",
+            laid.position.x / 1000,
+            laid.position.y / 1000,
+            laid.position.z / 1000,
+            phases(&dir, carry),
+            grips_said(&dir, carry)
+        );
+        assert_eq!(laid.frame.node, ground);
+        assert!(y.y.abs() <= 20_000, "it lies, never left leaning: {y:?}");
+        assert!(
+            (laid.position.x - foot.x).abs() <= 1_000 && (laid.position.z - foot.z).abs() <= 1_000,
+            "its foot where it was: {:?}",
+            laid.position
+        );
+        assert_eq!(
+            grips_said(&dir, carry).last().map(|g| g.0.clone()),
+            Some("souls:released".to_owned())
+        );
+        drop(served);
+        return;
+    }
+    said(&dir, &served, carry, "souls:raised", 1, 30).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     let all = samples(&dir, carry);
     let up = &all[before..];
     checked(up, "raised");

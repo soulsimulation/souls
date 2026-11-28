@@ -2076,7 +2076,7 @@ impl Engine {
             let Some((ground, audience, here)) = found else {
                 continue;
             };
-            let mut carry = Carry::new(
+            let carry = Carry::new(
                 activity,
                 load,
                 ground,
@@ -2084,6 +2084,11 @@ impl Engine {
                 self.header.clone(),
                 self.rules.clone(),
             );
+            // #5067: a raise part way goes on down its own track until the part lies; never set down leaning.
+            let Some(mut carry) = self.raise_resumed(tr, activity, load, ground, here, carry, now)
+            else {
+                continue;
+            };
             // 0.135 C4: set down the way it is held, as its entry states it.
             if let Some((l, held)) = tr.handle(load).and_then(|h| tr.node(h)).and_then(|n| {
                 Some((

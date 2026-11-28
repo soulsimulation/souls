@@ -413,7 +413,7 @@ async fn grips_crews_of_two_four_and_six_keep_their_grips_through_a_leave_and_a_
 }
 
 /// `worldd serve` again on the world in `dir`, on `socket`.
-fn serve_again(dir: &Path, socket: &Path) -> Served {
+pub(super) fn serve_again(dir: &Path, socket: &Path) -> Served {
     let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
         .args(["serve", "--dir"])
         .arg(dir)

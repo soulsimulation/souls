@@ -220,6 +220,40 @@ impl Raise {
         Ok(Raise::sided(spec, at, lie, stand, along, x, lifter))
     }
 
+    /// The raise a part is on, found from its crew's node alone (a world started again part way): the node at `p`
+    /// turned `q` on its ground, the part riding it unturned at its foot. Where it would stand and how it would lie
+    /// are read from the turn; how far it is raised is the `r` whose tilt is nearest. None when the node only turns
+    /// about the upright: a part standing in its crew's slot, as a crew carries one, is no raise part way.
+    pub fn resume(spec: Spec, p: Vec3, q: Quat) -> R<Option<(Raise, i64)>> {
+        let y = q.rotate(Vec3::new(0, M, 0)).map_err(pose_refusal)?;
+        if y.y >= M - M / 100 {
+            return Ok(None);
+        }
+        let x = plan(q, Vec3::new(M, 0, 0))?;
+        let stand = super::yaw_toward(x)?;
+        let front = plan(stand, Vec3::new(0, 0, M))?;
+        let back = i128::from(y.x) * i128::from(front[0]) + i128::from(y.z) * i128::from(front[1]) < 0;
+        let half = 759_250_125;
+        let quarter = Quat::new(half, if back { -half } else { half }, 0, 0).map_err(pose_refusal)?;
+        let lie = stand.then(quarter).map_err(pose_refusal)?;
+        let along = if back { [-front[0], -front[1]] } else { front };
+        // The tilt only rises as `r` falls: the least `r` that rises no more than the part does.
+        let (mut lo, mut hi) = (0, spec.height);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if spec.tilt(mid)[1] > y.y.max(0) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let r = if y.y >= M { 0 } else { hi };
+        let up = i128::from(spec.half_thick) * i128::from(spec.tilt(r)[0]) / i128::from(M);
+        let foot = Vec3::new(p.x, p.y - up as i64, p.z);
+        let lifter = Vec3::new(p.x + x[0], p.y, p.z + x[1]);
+        Ok(Some((Raise::sided(spec, foot, lie, stand, along, x, lifter), r)))
+    }
+
     fn sided(spec: Spec, foot: Vec3, lie: Quat, stand: Quat, along: [i64; 2], x: [i64; 2], lifter: Vec3) -> Raise {
         let d = i128::from(lifter.x - foot.x) * i128::from(x[0])
             + i128::from(lifter.z - foot.z) * i128::from(x[1]);
@@ -423,6 +457,36 @@ mod tests {
         }
         // Within both: all the way at once.
         assert_eq!(s.toward(1_000_000, 1_010_000), 1_010_000);
+    }
+
+    /// A world started again finds a raise from its crew's node: the same foot, the same lying and standing turns, and
+    /// how far it was raised, within a few millimetres of the lifter's walk; a node that only turns about the upright
+    /// is no raise.
+    #[test]
+    fn a_raise_part_way_is_found_again_from_its_node() {
+        let s = upright();
+        let half = 759_250_125;
+        let lie = Quat::new(half, half, 0, 0).unwrap();
+        let at = Vec3::new(5 * M, s.half_thick, -3 * M);
+        let lifter = Vec3::new(5 * M + s.beside(), 0, -3 * M + s.height);
+        let up = Raise::up(s, at, lie, lifter).unwrap();
+        for r in [s.height, 2_000_000, 1_500_000, 900_000, 600_000] {
+            let (p, q) = up.node(r).unwrap();
+            let (found, at_r) = Raise::resume(s, p, q).unwrap().expect("a raise");
+            assert!((at_r - r).abs() <= 60_000, "raised to {at_r}, was {r}");
+            assert_eq!((found.along, found.stand), (up.along, up.stand), "at {r}");
+            assert!(
+                (found.foot.x, found.foot.z) == (up.foot.x, up.foot.z) && found.foot.y.abs() <= 1_000,
+                "its foot: {:?}",
+                found.foot
+            );
+            let (a, b) = (found.node(at_r).unwrap(), (p, q));
+            let tip = |q: Quat| q.rotate(Vec3::new(0, s.height, 0)).unwrap();
+            let (ta, tb) = (tip(a.1), tip(b.1));
+            let off = (i128::from(ta.x - tb.x).pow(2) + i128::from(ta.y - tb.y).pow(2) + i128::from(ta.z - tb.z).pow(2)).isqrt();
+            assert!(off <= 40_000, "no jump as it goes on: its top {off} µm off at {r}");
+        }
+        assert_eq!(Raise::resume(s, up.foot, up.stand).unwrap(), None);
     }
 
     /// A part whose length is not flat is not raised, and one not upright is not lowered, each by name.
