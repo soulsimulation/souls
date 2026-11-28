@@ -291,7 +291,7 @@ impl Deck {
         let [ba, bb] = self.bents;
         let rails = self.rails;
         self.walk(
-            &[(0, Deck::at(1_350, -1_500)), (1, Deck::at(-1_350, -1_500))],
+            &[(0, Deck::at(1_250, -1_500)), (1, Deck::at(-1_250, -1_500))],
             "Souls 1 and 2 beside bent 1's edges",
         );
         let hold_a = self.crew(0, &[1]);
@@ -302,7 +302,7 @@ impl Deck {
         let got = self.leave(0, hold_a);
         self.ok(got, "Soul 1 lets go of bent 1");
         self.walk(
-            &[(0, Deck::at(1_350, 1_500)), (2, Deck::at(-1_350, 1_500))],
+            &[(0, Deck::at(1_250, 1_500)), (2, Deck::at(-1_250, 1_500))],
             "Souls 1 and 3 beside bent 2's edges",
         );
         let hold_b = self.crew(0, &[2]);
@@ -1089,7 +1089,20 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     // Frame 1's back face is its outer one (it stands at the bay's -z end).
     let perch = k.places[0][0];
     let walker = {
-        k.walk(&[(4, Bay::at(0, -3_200))], "Soul 5 to the ladder's foot");
+        // DIAG: where every body is before and after the walk to the ladder's foot.
+        for s in 0..5 {
+            let b = body_of(&k.w, k.w.souls[s]);
+            println!("DIAG before: Soul {} at {:?}", s + 1, body_ticks(&k.w, b).last());
+        }
+        let foot = Bay::at(0, -3_200);
+        println!("DIAG goal {foot:?}");
+        k.hands[4].walk_to(k.w.ground, foot);
+        let got = socket_end(&mut k.hands[4].s);
+        for s in 0..5 {
+            let b = body_of(&k.w, k.w.souls[s]);
+            println!("DIAG after: Soul {} at {:?}", s + 1, body_ticks(&k.w, b).last());
+        }
+        k.ok(got, "Soul 5 to the ladder's foot");
         body_of(&k.w, k.w.souls[4])
     };
     assert!(
