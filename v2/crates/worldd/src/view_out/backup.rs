@@ -245,6 +245,44 @@ impl Spool {
         self.write(key, bytes)
     }
 
+    /// [`Spool::object`] into a part's `group` (#2803 follow-up): named by the chain at once, as there, and written
+    /// to be synced with the part's other files.
+    pub(super) fn object_into(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        group: &mut super::Group<'_>,
+    ) -> super::R<()> {
+        let there = {
+            let mut named = named(&self.live);
+            named.since.insert(key.to_owned());
+            self.path(key).is_file() || self.kept(key).is_file()
+        };
+        if there {
+            return Ok(());
+        }
+        let path = self.path(key);
+        if let Some(p) = path.parent() {
+            std::fs::create_dir_all(p).map_err(super::io)?;
+        }
+        group.whole(&path, bytes)
+    }
+
+    /// The chain's head into a part's `group`, named after its objects; the thread is told once it is
+    /// ([`Spool::poke`]).
+    pub(super) fn head_into(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        group: &mut super::Group<'_>,
+    ) -> super::R<()> {
+        let path = self.path(key);
+        if let Some(p) = path.parent() {
+            std::fs::create_dir_all(p).map_err(super::io)?;
+        }
+        group.whole(&path, bytes)
+    }
+
     /// Keeps `bytes`, read from the store under `key`, on this disk: the next restart reads them here.
     pub(super) fn keep(&self, key: &str, bytes: &[u8]) {
         let path = self.kept(key);
@@ -313,7 +351,7 @@ impl Spool {
         })
     }
 
-    fn poke(&self) {
+    pub(super) fn poke(&self) {
         // Never waits: a wake already queued covers this one.
         if let Some(w) = &self.wake {
             let _ = w.try_send(());

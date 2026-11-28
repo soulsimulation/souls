@@ -160,7 +160,7 @@ front. The phases are `souls:lift` (a take's track, the part on its way into its
 (lifted, or a take once `souls:lifted`), `souls:return` (a refused seating's way back, until it ends), `souls:raise` and
 `souls:lower` (a raise's track), `souls:held` (seated or raised, its crew still holding it: a frame in its bay) and
 `souls:released` (set down, seated or broken off; the last holds kept). A put keeps `souls:carry` on its set-in's track,
-said as a track of its own: `souls:carry-track` `souls:seat` with its start and end, then `souls:seated` with the same
+said as a track of its own: `souls:carry-track` `souls:fit` with its start and end, then `souls:fitted` with the same
 times at the commit (`souls:set-in` is no longer said for a put). The set-in moves the crew's node a motion sample a tick
 to the pose that seats the part exactly, its turn blended, at 0.4 m/s and at least 0.6 s; an unseat's way out goes at the
 same pace. A carrier who leaves while the crew goes on holding takes only its own hold away. A load that stands as it

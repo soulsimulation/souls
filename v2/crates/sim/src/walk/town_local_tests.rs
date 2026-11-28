@@ -858,6 +858,168 @@ fn a_wall_near_a_square_edge_equals_the_whole_in_each_class() {
     }
 }
 
+/// The facts `text` with a deck as Eden's commons deck is exported (#5216): a thing of one floor with no room, 3 m by
+/// 2 m from (x, z) m, 0.24 m up (above a step, so a floor of its own and no ground cover).
+fn with_deck(text: &str, (x, z): (i64, i64)) -> String {
+    use replica::rules::json::{Value as Json, parse};
+    let (x0, z0, x1, z1) = (x * 1000, z * 1000, x * 1000 + 3000, z * 1000 + 2000);
+    let area = format!("[[{x0}, {z0}], [{x1}, {z0}], [{x1}, {z1}], [{x0}, {z1}]]");
+    let mut facts = parse(text).unwrap();
+    let Json::Obj(top) = &mut facts else {
+        panic!("facts")
+    };
+    for (k, v) in top.iter_mut() {
+        match (k.as_str(), v) {
+            ("kinds", Json::Arr(a)) => a.push(
+                parse(&format!(
+                    r#"{{"ref": "core-deck@1", "hash": "{}", "name": "core:deck", "form": "area", "layer": "surface",
+                        "door": false, "mesh": false, "slots": 0}}"#,
+                    replica::encode::to_hex(&replica::ids::sha256(b"souls/testworld/core-deck@1"))
+                ))
+                .unwrap(),
+            ),
+            ("things", Json::Arr(a)) => a.push(
+                parse(&format!(
+                    r#"{{"id": "fixture-deck", "def": "core-deck@1", "ref": "core-deck@1", "parent": null,
+                        "pose": [0, 0, 0, 0], "world": [0, 0, 0, 0], "scale_ppm": 1000000, "name": "a deck",
+                        "worldShape": true, "shape": {{"area": {area}}},
+                        "floors": [{{"level": 0, "y": 240, "polygon": {area}, "tag": "deck", "abs": true}}]}}"#
+                ))
+                .unwrap(),
+            ),
+            _ => {}
+        }
+    }
+    facts.to_json()
+}
+
+/// #5216: a deck's one floor removed (Eden's commons deck, 27 Nov) left a thing with no floor, which no rebuild read
+/// alone, so the whole ground was built for it. A whole build lists such a thing as no building: it leaves the town
+/// as a removed building does, its squares cut again alone, and the town equals the whole in each class.
+#[test]
+fn a_deck_whose_one_floor_is_removed_is_cut_alone_and_equals_the_whole() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let (x, z) = clear_row(&town_of(&w.text));
+    let text = with_deck(&w.text, (x + 4, z + 3));
+    let im = import_eden::load(&text).expect("the world loads");
+    let (deck, floor) = (im.nodes["fixture-deck"], im.nodes["fixture-deck/floor-0"]);
+    let mut t = town_of(&text);
+    t.prepare_classes(CLASSES).unwrap();
+    assert!(
+        t.surfaces.contains_key(&floor) && t.buildings.iter().any(|b| b.thing == deck),
+        "the deck's floor is walked as a floor of its own"
+    );
+    let squares = t.basis().open.squares.len();
+    let p = part_on(&t, floor, vec![Change::Remove { node: floor }]);
+    let (r, _) = rebuilt(&t, &p);
+    assert!(
+        !r.whole() && r.whole_classes().is_empty(),
+        "the floor's removal is rebuilt locally, not whole ({:?})",
+        r.why
+    );
+    // The work is the deck's own squares (it lies within one or two, with its clearance), not the world's.
+    assert!(
+        (1..=4).contains(&r.squares()) && r.squares() < squares && r.buildings() == 1,
+        "{} of {squares} squares cut again, {} buildings read",
+        r.squares(),
+        r.buildings()
+    );
+    t.install(r, &p)
+        .unwrap_or_else(|e| panic!("install refused: {}: {}", e.name, e.detail));
+    assert!(
+        !t.surfaces.contains_key(&floor) && !t.buildings.iter().any(|b| b.thing == deck),
+        "the deck left the town's buildings with its floor"
+    );
+    let mut w = whole_of(&t);
+    let d = differences(&mut t, &mut w, 300);
+    assert!(d.is_empty(), "the local rebuild equals the whole: {d:?}");
+    // The next edit beside it is cut alone too, on what the town now holds.
+    let p = wall_at(&t, Vec3::new((x + 9) * M, 0, (z + 4) * M));
+    let (whole, why, _) = apply(&mut t, &p);
+    assert!(!whole, "a wall beside it is rebuilt locally ({why:?})");
+    let mut w = whole_of(&t);
+    let d = differences(&mut t, &mut w, 300);
+    assert!(
+        d.is_empty(),
+        "after the wall, the town equals the whole: {d:?}"
+    );
+}
+
+/// #5216: two changes far apart in one part (a creator's batch) are each cut about themselves, and the squares
+/// between them are left as they are: the work is the changes', not the box that holds them both. The town equals
+/// the whole in each class.
+#[test]
+fn two_walls_far_apart_in_one_part_cut_only_their_own_squares_and_equal_the_whole() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let mut t = town_of(&w.text);
+    t.prepare_classes(CLASSES).unwrap();
+    let (x, z) = clear_row(&t);
+    // The clear row is 50 m long: one wall near each end, 44 m apart (more than two squares of 16 m).
+    let (a, b) = (
+        Vec3::new((x + 3) * M, 0, (z + 4) * M),
+        Vec3::new((x + 47) * M, 0, (z + 4) * M),
+    );
+    let both = |t: &Town| {
+        let (Changes::Changes(one), Changes::Changes(two)) = (
+            wall_at(t, a).effects[0].body.clone(),
+            wall_at(t, b).effects[0].body.clone(),
+        ) else {
+            panic!("a wall is one effect of changes")
+        };
+        let mut changes: Vec<Change> = one.into_iter().map(|c| c.change).collect();
+        for c in two {
+            let Change::Create {
+                kind,
+                pose,
+                audience,
+                fields,
+                ..
+            } = c.change
+            else {
+                panic!("a wall is created")
+            };
+            changes.push(Change::Create {
+                node: new_id(t, 11),
+                kind,
+                pose,
+                audience,
+                fields,
+            });
+        }
+        part(t, changes)
+    };
+    // What each wall cuts again alone, on the same town.
+    let alone: BTreeSet<(i32, i32)> = [a, b]
+        .into_iter()
+        .flat_map(|at| rebuilt(&t, &wall_at(&t, at)).0.cut_squares())
+        .collect();
+    let p = both(&t);
+    let (r, _) = rebuilt(&t, &p);
+    assert!(
+        !r.whole() && r.whole_classes().is_empty(),
+        "two walls are rebuilt locally ({:?})",
+        r.why
+    );
+    let cut: BTreeSet<(i32, i32)> = r.cut_squares().into_iter().collect();
+    assert_eq!(
+        cut, alone,
+        "the two walls together cut again what each cuts alone, and nothing between them"
+    );
+    let span = |f: fn(&(i32, i32)) -> i32| {
+        let v: Vec<i32> = cut.iter().map(f).collect();
+        (v.iter().max().unwrap() - v.iter().min().unwrap() + 1) as usize
+    };
+    assert!(
+        cut.len() < span(|s| s.0) * span(|s| s.1),
+        "fewer squares than the box that holds both walls: {cut:?}"
+    );
+    t.install(r, &p)
+        .unwrap_or_else(|e| panic!("install refused: {}: {}", e.name, e.detail));
+    let mut w = whole_of(&t);
+    let d = differences(&mut t, &mut w, 300);
+    assert!(d.is_empty(), "the local rebuild equals the whole: {d:?}");
+}
+
 #[test]
 #[ignore = "needs the exported Eden facts file"]
 fn eden_building_path_and_wall_rebuild_times() {

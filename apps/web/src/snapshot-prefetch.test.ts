@@ -43,6 +43,22 @@ test('page arrival: a page the new engine runs fetches its named replica and its
   for (const bad of [undefined, 3, '//elsewhere.example/replica.js', 'https://elsewhere.example/x/replica.js', '/w/eden/../replica.js', '/w/eden/v2/replica/x/other.js']) assert.deepEqual(run(bad), [], String(bad));
 });
 
+test('#4986: the replica the launcher saw on the asset CDN is fetched from there at entry; anything else from the origin', () => {
+  const origin = '/w/eden/v2/replica/5a3078cd4de2c2bd/replica.js', cdn = 'https://cdn.soul.game/assets/replica/5a3078cd4de2c2bd/replica.js';
+  const run = (v2ReplicaCdn: unknown, search = '') => {
+    const calls: unknown[] = [];
+    const ctx: Record<string, unknown> = { location: { pathname: '/w/eden', search }, __simConfig: { worldEngine: true, v2Views: false, v2Replica: origin, v2ReplicaCdn }, fetch: (u: unknown) => { calls.push(u); return Promise.resolve(new Response('')); } };
+    ctx.window = ctx;
+    vm.runInNewContext(entryPrefetchScript(''), ctx);
+    return { calls, left: ctx.__simReplica };
+  };
+  // fetched from the CDN, and the decision left for the page: the CDN's address with the origin's copy after a #
+  assert.deepEqual(run(cdn), { calls: [cdn, cdn.replace('replica.js', 'replica_bg.wasm')], left: `${cdn}#${origin}` });
+  const fromOrigin = { calls: [origin, origin.replace('replica.js', 'replica_bg.wasm')], left: undefined };
+  assert.deepEqual(run(cdn, '?replicacdn=0'), fromOrigin, 'the visitor asked for the origin');
+  for (const other of [undefined, 'https://cdn.soul.game/assets/replica/0000000000000000/replica.js', 'https://elsewhere.example/assets/replica/5a3078cd4de2c2bd/replica.js', `${cdn}?x=1`, ['x']]) assert.deepEqual(run(other), fromOrigin, String(other));
+});
+
 test('entry script: a failed prefetch leaves no unhandled rejection and still hands the failure to its taker', async () => {
   const ctx: Record<string, unknown> = { location: { pathname: '/w/eden-2026' }, fetch: () => Promise.reject(new TypeError('offline')) };
   ctx.window = ctx;
