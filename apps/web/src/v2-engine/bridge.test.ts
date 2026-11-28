@@ -6,6 +6,8 @@ import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { BEHIND_US, CHUNK, PLAY_DELAY, V2Bridge, doingOf } from './bridge.ts';
 import { DT, TICK_US } from './takes.ts';
 import { defaultLookOf, entityWithLook } from './take-bodies.ts';
+import { setCarryHeading } from './carry-heading.ts';
+import { Quaternion, Vector3 } from 'three';
 
 /** The body's take entity: its id with the letter that gives it the v2 page's default look (take-bodies.ts). */
 const E = entityWithLook('v2_b_7', defaultLookOf('b.7'));
@@ -20,6 +22,112 @@ const floor = node('w.2', 'w.1', [0, 3_000_000, 0]);
 const body = node('b.7', 'w.2', [1_000_000, 0, 0], { kind: 'souls:body@1', soul: 'soul-abc-7', name: 'Ada', at: T0 });
 const part = (n: number, samples: [string, string, number | null, number, number, number, number][], extra: object = {}) =>
   ({ t: 'part' as const, p: { number: n, from: T0 + n * 500_000, to: T0 + (n + 1) * 500_000, nodes: [], removed: [], samples, ...extra } });
+
+// Real bridge -> recorded chunk -> ordinary take replay, with the worker's native parent/slot/local-Q records.
+function standingSlotProjection({ cold = false, posture = 'stand', known = true, updates = false, aimed = false, reenter = false, leaveToSeat = false, centered = false, parentPitch = 0, localRoll = 0 } = {}) {
+  const bridge = new V2Bridge({ rulesVersion: 'test/1' });
+  const yaw = (r: number) => [Math.cos(r / 2) * Q, 0, Math.sin(r / 2) * Q, 0] as [number, number, number, number];
+  const kind = 'fixture:platform@1', parentYaw = Math.PI / 2, localYaw = Math.PI / 6;
+  const slotZ = centered ? 0 : -350, occupiedX = centered ? 3_000_000 : 2_650_000;
+  const parentQ = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), parentYaw).multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), parentPitch));
+  const localQ = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), localYaw).multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), localRoll));
+  const wireQ = (q: Quaternion) => [q.w * Q, q.x * Q, q.y * Q, q.z * Q] as [number, number, number, number];
+  const platform = node('p.1', 'w.0', [3_000_000, 0, 1_000_000], { kind, rot: wireQ(parentQ), slots: [[1, 0, 100, slotZ, 83000, 1]] });
+  const entry = node('k.1', null, [0, 0, 0], { kind: 'souls:kind@1', defines: kind,
+    entry: new TextEncoder().encode(JSON.stringify({ owner: 'thing', slots: { place: { admits: 'body', at_mm: [0, 100, slotZ], posture, yaw_mdeg: 83000 } } })) });
+  const approach = node('b.7', 'w.0', [5_000_000, 0, 1_000_000], { kind: 'souls:body@1', soul: 'soul-abc-7', at: T0 });
+  const occupied = { ...approach, parent: 'p.1', slot: 1, pos: [0, 0, 0] as [number, number, number], rot: wireQ(localQ), at: T0 + 1_000_000 };
+  const chair = node('c.2', 'w.0', [8_000_000, 0, 1_000_000], { kind: 'fixture:chair@1', slots: [[1, 0, 470, 0, 0, 1]] });
+  const chairEntry = { ...entry, id: 'k.2', defines: 'fixture:chair@1', entry: new TextEncoder().encode(JSON.stringify({ owner: 'thing', slots: { seat: { admits: 'body', at_mm: [0, 470, 0], posture: 'sit' } } })) };
+  bridge.receive({ t: 'snapshot', s: { nodes: [world, platform, ...(known ? [entry] : []), ...(leaveToSeat ? [chair, chairEntry] : []), cold ? { ...occupied, at: T0 } : approach], removed: [] } });
+  let oldChunk = '';
+  for (let n = 0; n < 17; n++) {
+    const samples: [string, string, number | null, number, number, number, number][] = !cold && n < 2
+      ? [['b.7', 'w.0', null, T0 + n * 500_000, 5_000_000 - n * 500_000, 0, 1_000_000]] : [];
+    const nodes = !cold && n === 2 ? [occupied] : updates && !reenter && n === 6 ? [{ ...platform, rot: yaw(Math.PI), at: T0 + 3_250_000 }]
+      : updates && n === 10 ? [leaveToSeat ? { ...occupied, parent: 'c.2', at: T0 + 5_000_000 } : reenter ? { ...occupied, at: T0 + 5_050_000 } : { ...approach, pos: [occupiedX, 0, 1_000_000], at: T0 + 5_000_000 }] : [];
+    if (updates && !leaveToSeat && n >= 10 && n <= (reenter ? 10 : 12)) samples.push(['b.7', 'w.0', null, T0 + n * 500_000, occupiedX + (n - 10) * 500_000, 0, 1_000_000]);
+    if (reenter && n === 10) samples.push(['b.7', 'p.1', 1, T0 + 5_050_000, 0, 0, 0]);
+    if (updates && !reenter && n === 6) samples.push(['b.7', 'p.1', 1, T0 + 3_100_000, 0, 0, 0]);
+    bridge.receive(part(n, samples, { nodes, ...(aimed && n === 4 ? { moves: [{ body: 'b.7', name: 'souls:point', start: T0 + 2_000_000,
+      ends: [T0 + 2_300_000, T0 + 4_500_000], target: 'w.0', run: 'aim' }] } : {}) }));
+    if (n === 5) oldChunk = JSON.stringify(bridge.view.takes.chunks.find(c => c.fromTick === T0 / TICK_US + 20));
+  }
+  const at = (seconds: number) => {
+    const tick = T0 / TICK_US + seconds / DT, c = bridge.view.takes.chunks.find(c => c.fromTick <= tick && tick < c.toTick)!;
+    assert(c, `published chunk at ${seconds}`);
+    return sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT).entities[E];
+  };
+  const forward = new Vector3(1, 0, 0).applyQuaternion(parentQ.clone().multiply(localQ));
+  const point = new Vector3(0, .1, slotZ / 1000).applyQuaternion(parentQ).add(new Vector3(3, 0, 1));
+  return { bridge, at, oldChunk, expected: Math.atan2(forward.z, forward.x), expectedPoint: point.toArray() };
+}
+
+test('standing slot keeps authoritative parent/local facing, platform height and cold/backward/adjacent replay', () => {
+  for (const cold of [false, true]) {
+    const f = standingSlotProjection({ cold });
+    for (const seconds of [4, 2, 3.5, 2.45, 2.5, 0.8, 3]) {
+      const e = f.at(seconds);
+      if (!cold && seconds < 1) { assert.equal(e.activity, 'walk'); continue; }
+      assert.ok(Math.abs(e.yaw - f.expected) < .002, `native composed Q at ${seconds}: ${e.yaw}`);
+      assert.deepEqual(e.p, [2.65, .1, 1], 'slot and height retain their recorded position');
+      assert.equal(e.activity, 'idle'); assert.equal(e.state.seatHeight, undefined);
+    }
+    assert.notEqual(f.at(2).yaw, -(Math.PI / 2 + 83000 / 1000 * Math.PI / 180), 'slot yaw is not an extra child transform');
+  }
+});
+
+test('a published release and reentry fifty milliseconds later retain the attained turn without a snap', () => {
+  const f = standingSlotProjection({ updates: true, reenter: true });
+  const angle = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  assert(angle(f.at(5.025).yaw, f.at(4.95).yaw) > .01, 'the actual free interval starts its ordinary turn-out');
+  assert(angle(f.at(5.05 - .00001).yaw, f.at(5.05 + .00001).yaw) < .001, 'reentry begins from the attained public-time turn');
+  assert(angle(f.at(5.025).yaw, f.at(5.5).yaw) > .01, 'reentry returns to the authoritative composed facing');
+});
+
+test('standing facing composes full parent/local quaternions before projecting yaw', () => {
+  const f = standingSlotProjection({ cold: true, parentPitch: .4, localRoll: .2 });
+  const e = f.at(3);
+  assert.ok(Math.abs(e.yaw - f.expected) < .002, 'noncommuting native rotations agree with independent quaternion composition');
+  e.p.forEach((v, i) => assert.ok(Math.abs(v - f.expectedPoint[i]) <= .001, 'facing preserves the existing native slot transform'));
+});
+
+test('standing facing follows timestamped parent changes, releases on a native cut, and never rewrites a published take', () => {
+  const f = standingSlotProjection({ updates: true, aimed: true, centered: true });
+  const before = f.at(2.5), after = f.at(4), cut = f.at(5.5);
+  assert.ok(Math.abs(before.yaw - f.expected) < .002, 'later parent and aimed move do not overwrite earlier native facing');
+  assert.ok(Math.abs(f.at(3.2).yaw - f.expected) < .002, 'a later parent pose cannot lend its final quaternion to an earlier body sample in the same part');
+  const delta = ((after.yaw + Math.PI + Math.PI / 6) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+  assert.ok(Math.abs(delta) < .002, `parent turn composed at its own time: ${after.yaw}`);
+  assert.deepEqual(before.p, after.p, 'facing adds no movement path');
+  assert.equal(cut.activity, 'walk'); assert.ok(Math.abs(f.at(5.9).yaw) < .002, 'after turning out, ordinary movement owns facing');
+  const difference = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  for (const boundary of [1, 2, 3, 4.5, 5]) {
+    for (let i = -1; i < 13; i++) {
+      const a = f.at(boundary + i * DT), b = f.at(boundary + (i + 1) * DT);
+      assert(difference(a.yaw, b.yaw) <= 1.5 * Math.PI / .6 * DT + .005, `bounded existing turn interpolation around ${boundary}, tick ${i}`);
+    }
+  }
+  assert(difference(f.at(1.05).yaw, f.at(.95).yaw) > .001, 'entry actually begins turning');
+  assert(difference(f.at(1.05).yaw, f.at(2).yaw) > .1, 'entry does not snap to final native facing');
+  assert.equal(f.oldChunk, JSON.stringify(f.bridge.view.takes.chunks.find(c => c.fromTick === T0 / TICK_US + 20)));
+});
+
+test('standing facing preserves unknown, seated, lying and main-owned carried headings', () => {
+  const unknown = standingSlotProjection({ known: false }), seated = standingSlotProjection({ posture: 'sit' }), lying = standingSlotProjection({ posture: 'lie' });
+  assert.equal(unknown.at(3).activity, 'sit'); assert.equal(unknown.at(3).p[1], 0, 'unknown retains legacy slot projection');
+  assert.equal(seated.at(3).activity, 'sit'); assert.equal(seated.at(3).p[1], 0);
+  assert.notEqual(seated.at(3).yaw, seated.expected, 'seat facing keeps its own slot-yaw owner');
+  assert.equal(lying.at(3).activity, 'lie'); assert.equal(lying.at(3).p[1], 0);
+  const reseated = standingSlotProjection({ updates: true, leaveToSeat: true }).at(5);
+  assert.equal(reseated.activity, 'sit'); assert.ok(Math.abs(reseated.yaw - Math.PI / 2) < .002, 'new seat owns facing immediately, without a standing release tail');
+  try {
+    setCarryHeading(() => .37);
+    const carried = standingSlotProjection();
+    assert.ok(Math.abs(carried.at(3).yaw - .37) < .002, 'existing carried-heading hook wins');
+    assert.deepEqual(carried.at(3).p, [2.65, .1, 1]);
+  } finally { setCarryHeading(null); }
+});
 
 test('a body in a turned building is drawn in the world frame, with the page\'s Soul and entity ids', () => {
   const b = new V2Bridge({ rulesVersion: 'test/1' });

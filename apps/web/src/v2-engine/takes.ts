@@ -27,6 +27,8 @@ const WALKING = 0.05;
 export type WorldSample = { at: number; p: [number, number, number]; seat?: Seat; on?: (t: number) => [number, number, number] | null };
 /** The world turned a standing body at world time `at` (µs), from one heading to another (radians, atan2(dz, dx)). */
 export type Turn = { at: number; from: number; to: number };
+/** A declared standing slot's composed native facing at world time µs; null releases that authority. */
+export type StandingFacing = { at: number; heading: number | null; from: number };
 /** One Soul's body as the chunks need it. */
 export type Body = {
   /** The take's entity id. */
@@ -42,6 +44,7 @@ export type Body = {
   heading: number;
   /** Each time the world turned it where it stood (its record's orientation changed in place), in time order. */
   turns?: Turn[];
+  standing?: StandingFacing[];
   /** World time (µs) from which it is not drawn: the public copy can no longer place it (a frame that is not public, or
    *  it left); absent while it is drawn. */
   until?: number;
@@ -155,6 +158,18 @@ function turnFrom(to: Turn, from: number, t: number): number {
   return from + d * u * u * (3 - 2 * u);
 }
 
+/** Recorded standing-slot authority, including its deterministic turn-in, independent of sampling order. */
+export function standingFacingAt(records: readonly StandingFacing[] | undefined, t: number, ordinary?: number, stationary = true): number | null {
+  let last: StandingFacing | undefined;
+  for (const r of records ?? []) { if (r.at > t) break; last = r; }
+  if (!last || last.heading !== null && !stationary) return null;
+  const target = last.heading ?? ordinary;
+  if (target === undefined) return null;
+  const facing = turnFrom({ at: last.at, from: last.from, to: target }, last.from, t);
+  // Leaving hands facing back to the ordinary motion/gesture through the same turn interpolation.
+  return last.heading === null && Math.abs(Math.atan2(Math.sin(facing - target), Math.cos(facing - target))) < 1e-9 ? null : facing;
+}
+
 /** How long a let-go hand hold stays in the take after it ends, µs: the old renderer lowers both arms over it
  *  (mars/viewer/engine/social/hand-hold.ts RELEASE_SECONDS, HAND_STATE_TAIL). */
 const HOLD_TAIL = 2_600_000;
@@ -219,7 +234,9 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       const g = walking ? null : gestureNow(b.gestures, t), other = g?.target && g.target !== b.node ? byNode.get(g.target) : undefined;
       const op = other ? positionAt(other.samples, t) : null;
       const aim: [number, number] | null = op && !g?.hold ? [op[0], op[2]] : g?.toward && !seatAt(b.samples, t) ? g.toward : null;
-      const drawn = aim && Math.hypot(aim[0] - p[0], aim[1] - p[2]) > 1 ? Math.atan2(aim[1] - p[2], aim[0] - p[0]) : heading;
+      const ordinary = aim && Math.hypot(aim[0] - p[0], aim[1] - p[2]) > 1 ? Math.atan2(aim[1] - p[2], aim[0] - p[0]) : heading;
+      const standing = !seatAt(b.samples, t) && carryHeading(b.entity, t) === null ? standingFacingAt(b.standing, t, ordinary, !walking) : null;
+      const drawn = standing ?? ordinary;
       // Dancers on one beat move in step: each names the first of them (by entity) its partner, whose phase the old
       // renderer shares between partners; that first one names none.
       const lead = g?.run && g.activity && LOOPS.has(g.activity)
