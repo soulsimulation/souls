@@ -75,8 +75,12 @@ const BEAM_SLOTS = ['beam_low_l', 'beam_high_l', 'beam_low_r', 'beam_high_r'];
  *  told by eye, with the stands, both rows of beams and the 6.1 m frame's carry in view. */
 export const CAMERA6 = { position: [9, 5.5, 39.5], target: [4, 0.8, 28.5], fov: 50 };
 const SIX = ['ada', 'bo', 'cy', 'di', 'ed', 'fy'];
-/** Where a beam's carriers stand from its middle (m): outside the bay's frames, which stand at its slots' ends. */
-const BEAM_FROM = '1.8';
+/** Where a beam's carriers stand from its middle (m): 0.35 m beyond its end grips, within `part take`'s 0.7 m of
+ * their holds (#5067; 1.8 m and 2.2 m were 0.7 m and 1.1 m off and are refused `part.grip-out-of-reach`). */
+const BEAM_FROM = '1.45';
+/** How far off a seated beam's line its carriers stand to take it out (m): at the bay's mouth, clear of the frames'
+ * columns, which stand on that line. */
+const BEAM_OUT = '0.45';
 const GOD = join(REPO_ROOT, 'v2/client/src/creator/souls-god.mjs');
 
 /** The template's facts with its own rack yard, exported with the Mars map. Nothing is added. → the facts' path */
@@ -268,7 +272,7 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
   // The two low beams by Ada and Bo, each joined to both frames.
   const crewC = await crew('ada', 'bo');
   for (const [beam, slot] of [[beams[0], 'beam_low_l'], [beams[1], 'beam_low_r']]) {
-    await both(['ada', 'carry', 'grip', beam, 'back', '--from', '2.2'], ['bo', 'carry', 'grip', beam, 'front', '--from', '2.2']);
+    await both(['ada', 'carry', 'grip', beam, 'back'], ['bo', 'carry', 'grip', beam, 'front']);
     await run('ada', 'part', 'take', crewC, beam);
     await both(['ada', 'carry', 'to', crewC, bay, slot], ['bo', 'carry', 'to', crewC, bay, slot]);
     await run('ada', 'part', 'put', crewC, bay, slot);
@@ -289,7 +293,7 @@ export async function buildAndTakeDown({ run, both }, bodies, { bay, stand, fa, 
   // Bo and Di lift the beams out, the right one first, and lay each where it lay.
   const crewD = await crew('bo', 'di');
   for (const [k, beam] of [[1, beams[1]], [0, beams[0]]]) {
-    await both(['bo', 'carry', 'grip', beam, 'back', '--from', '2.2'], ['di', 'carry', 'grip', beam, 'front', '--from', '2.2']);
+    await both(['bo', 'carry', 'grip', beam, 'back', '--from', BEAM_FROM, '--out', BEAM_OUT], ['di', 'carry', 'grip', beam, 'front', '--from', BEAM_FROM, '--out', BEAM_OUT]);
     await run('bo', 'part', 'unseat', crewD, beam);
     await both(['bo', 'carry', 'to', crewD, homes[k]], ['di', 'carry', 'to', crewD, homes[k]]);
     await run('bo', 'part', 'put', crewD, homes[k]);

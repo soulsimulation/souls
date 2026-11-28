@@ -123,12 +123,23 @@ pub const HALF_WIDTH: i64 = 150_000;
 pub const REACH: i64 = 350_000;
 /// Between the two carriers' centres, µm.
 pub const SPAN: i64 = 2 * (HALF_LENGTH + REACH);
-/// The board's height above its carriers' feet while carried, µm.
-pub const HEIGHT: i64 = 900_000;
+/// The board's height above its carriers' feet while carried, µm (#5067: 1.05 m, where a standing body holds a load
+/// up to 0.3 m in front of it without bending its knees, so a carrier a few centimetres off its place still stands
+/// upright; at 0.9 m no hold let it).
+pub const HEIGHT: i64 = 1_050_000;
+/// The nearest a carrier's place is to its end grip along a low load, µm, and how far beyond the load's end it is
+/// then at least ([`Load::reach`]).
+pub const REACH_NEAR: i64 = 250_000;
+pub const END_CLEAR: i64 = 75_000;
 /// The sweep's step along the route, µm.
 pub const SWEEP_STEP: i64 = 50_000;
 /// The activity kind's slot the board rides in.
 pub const SLOT: u64 = 1;
+/// How far off its load's side a side carrier's place is, µm (0.135 C5; #5067): 0.11 m more than the room a body's
+/// ground keeps from a part at its height (`crate::ground`: its radius, 0.28 m, and 0.06 m), so a side carrier who
+/// walks a few centimetres off its place still stands on ground when the part is seated beside it (at [`REACH`],
+/// 0.35 m, a rack beam seated at hip height left a side carrier 10 mm of ground), and 0.25 m inside [`GRIP_REACH`].
+pub const SIDE_REACH: i64 = 450_000;
 /// The farthest a carrier may stand from its grip on the plan at the lift, µm: a touch's reach (0.134).
 pub const GRIP_REACH: i64 = 700_000;
 /// How many grips a load has between its ends, at most, that carriers take (0.135 C5): a crew of six, less its front
@@ -478,9 +489,32 @@ impl Load {
         Ok((plan, [HEIGHT - e.y, HEIGHT + e.y]))
     }
 
-    /// Where its back and front carriers stand along the carry, from its middle: [`REACH`] beyond each grip.
+    /// Where a carrier at the grip `along` its length (µm from its middle) holds it: the middle of its two hands, each
+    /// [`grips::HAND_HALF`] from the grip and kept within its length, as [`grips::assign`] places them (#5067). A grip
+    /// nearer its end than a hand's width is held that much nearer its middle (a timber bundle's end grip, 0.1 m), so
+    /// the lift's checks and a seating's measure a carrier's reach to the same place.
+    pub fn hold_along(&self, along: i64) -> i64 {
+        let h = self.half_length;
+        ((along - grips::HAND_HALF).clamp(-h, h) + (along + grips::HAND_HALF).clamp(-h, h)) / 2
+    }
+
+    /// How far beyond its end grip each end carrier stands, µm (#5067). [`REACH`] for a load that blocks a walking body
+    /// where it is set down (a body's ground keeps 0.34 m from it: nearer, its own carriers would stand on none). For
+    /// one too low to block (a beam, a rail, a cloth, a frame laid flat): as near as [`REACH_NEAR`], so its far hand is
+    /// 0.35 m ahead of it and it stands upright, but never nearer the load's end than [`END_CLEAR`] beyond it (the
+    /// load is not carried through its carrier). B9's board, of no entry, keeps [`REACH`].
+    pub fn reach(&self) -> i64 {
+        let low = self.rest > 0 && 2 * self.rest <= crate::ground::BODY_LOW * 1000;
+        if !low {
+            return REACH;
+        }
+        let over = self.half_length - self.grips[1].max(-self.grips[0]);
+        (over + END_CLEAR).clamp(REACH_NEAR, REACH)
+    }
+
+    /// Where its back and front carriers stand along the carry, from its middle: [`Load::reach`] beyond each grip.
     pub fn places(&self) -> [i64; 2] {
-        [self.grips[0] - REACH, self.grips[1] + REACH]
+        [self.grips[0] - self.reach(), self.grips[1] + self.reach()]
     }
 
     /// How many carriers it takes at most (0.135 C5): one at each grip.
@@ -489,10 +523,10 @@ impl Load {
     }
 
     /// Where its side carriers stand (0.135 C5), in join order: each beside its grip between the ends, from the back
-    /// toward the front, [`REACH`] off its side, the first on its + side, then alternating. Each `[along, across]`
+    /// toward the front, [`SIDE_REACH`] off its side, the first on its + side, then alternating. Each `[along, across]`
     /// from its middle, µm, in the carry's frame: along its +x, from the back toward the front, and across its +z.
     pub fn side_places(&self) -> Vec<[i64; 2]> {
-        let off = self.half_width + REACH;
+        let off = self.half_width + SIDE_REACH;
         self.inner
             .iter()
             .flatten()
@@ -503,7 +537,8 @@ impl Load {
 
     /// The checks before the lift of its side carriers (0.135 C5), after [`Load::check`]'s: `crew` carriers, more than
     /// its grips refused `carry-crew-too-large`; and each side carrier in `sides` (in join order, where it stands on the
-    /// open ground's plan, µm) within [`GRIP_REACH`] of its grip's edge on the side it stands, or refused
+    /// open ground's plan, µm) within [`GRIP_REACH`] of where it holds the load ([`Load::hold_along`] its grip, at the
+    /// load's edge as it is held on the side it stands: [`grips::assign`]'s contact, #5067), or refused
     /// `carry-grip-out-of-reach`, naming it. The load's middle at `middle`, its grips along `axis` (the front's and the
     /// back's line when none), from the back at `back` toward the front at `front`.
     pub fn check_sides(
@@ -523,14 +558,17 @@ impl Load {
         }
         let a = axis.unwrap_or([front[0] - back[0], front[1] - back[1]]);
         let l = len(a);
+        // Its edge as it is held: half what it takes up across the carry, not the larger of its other two sides (a
+        // beam's 51 mm, not its 102 mm height).
+        let across = self.held_half()?.z;
         for ((who, at), along) in sides.iter().zip(self.inner.iter().flatten()) {
-            let u = scale(a, *along, l);
+            let u = scale(a, self.hold_along(*along), l);
             let grip = [middle[0] + u[0], middle[1] + u[1]];
-            // Its edge on the carrier's side: across the axis by half the load's width.
+            // Its edge on the carrier's side: across the axis by half the load's extent that way.
             let d = [at[0] - grip[0], at[1] - grip[1]];
             let plus =
                 i128::from(a[0]) * i128::from(d[1]) - i128::from(a[1]) * i128::from(d[0]) > 0;
-            let n = scale([-a[1], a[0]], self.half_width, l);
+            let n = scale([-a[1], a[0]], across, l);
             let edge = if plus {
                 [grip[0] + n[0], grip[1] + n[1]]
             } else {
@@ -576,8 +614,9 @@ impl Load {
         }
     }
 
-    /// [`Load::check`] but the way: its crew and its grips. worldd's engine has the way ([`Load::way_to`]) found off
-    /// the clock and answers the lift when it comes back.
+    /// [`Load::check`] but the way: its crew and its grips, each end carrier within [`GRIP_REACH`] of where it holds
+    /// the load ([`Load::hold_along`] its grip). worldd's engine has the way ([`Load::way_to`]) found off the clock and
+    /// answers the lift when it comes back.
     pub fn check_lift(
         &self,
         crew: usize,
@@ -593,11 +632,12 @@ impl Load {
             );
         }
         let d = [front[0] - back[0], front[1] - back[1]];
-        // 0.135 C4: the grips lie along the load's own long axis, so carriers beside it are not at its grips.
+        // 0.135 C4: the grips lie along the load's own long axis, so carriers beside it are not at its grips. #5067:
+        // each is measured to where it holds the load (`Load::hold_along`), as its hold is said and a seating checks it.
         let a = axis.unwrap_or(d);
         for (who, at, along) in [
-            ("front", front, self.grips[1]),
-            ("back", back, self.grips[0]),
+            ("front", front, self.hold_along(self.grips[1])),
+            ("back", back, self.hold_along(self.grips[0])),
         ] {
             let u = scale(a, along, len(a));
             let grip = [middle[0] + u[0], middle[1] + u[1]];
@@ -1152,6 +1192,10 @@ pub struct Carry {
     pub way: Vec<turn::Ends>,
     /// The lift's or the set-down's track the node is on, if any (#5067).
     pub hoist: Option<Hoist>,
+    /// Whether a lift's track broken off goes back to where the load lay ([`Hoist::rest`]). Not for a part taken out
+    /// of a slot or a stand ([`Carry::take_up`]): it was unjoined as it was taken, so set back there it would hang;
+    /// it goes straight down from where it is, to rest on the ground.
+    pub back: bool,
 }
 
 /// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
@@ -1204,6 +1248,7 @@ impl Carry {
             raise: 0,
             way: Vec::new(),
             hoist: None,
+            back: true,
         }
     }
 
@@ -1287,6 +1332,29 @@ impl Carry {
     ) -> R<Option<(Micros, Micros)>> {
         match self.hoist {
             Some(h) if h.phase != Phase::Lift => return Ok(None),
+            Some(h) if !self.back => {
+                // Straight down from where the node is on its track, to rest under it on its carriers' floor (the
+                // track's end is between them at carrying height).
+                let floor = match (self.track.last(), here) {
+                    (Some(&(_, c, _)), _) => c.y - HEIGHT,
+                    (None, Some((_, Some(f)))) => f,
+                    _ => h.to.0.y - HEIGHT,
+                };
+                let under = Vec3::new(h.at.0.x, floor, h.at.0.z);
+                self.hoist = None;
+                return self
+                    .lower_from(
+                        tree,
+                        at,
+                        node,
+                        h.at,
+                        h.at.0.y - floor,
+                        (under, h.at.1),
+                        Phase::Release(why),
+                        None,
+                    )
+                    .map(Some);
+            }
             Some(h) => {
                 let (to, rest) = (h.from, h.rest);
                 let t1 = at + hoist_time(h.at.0.y - to.0.y);
@@ -1437,7 +1505,7 @@ impl Carry {
     }
 
     /// The frame's pose for carriers at `front` and `back` (µm, the open ground's frame).
-    fn pose(front: Vec3, back: Vec3) -> R<(Vec3, Quat)> {
+    pub fn pose(front: Vec3, back: Vec3) -> R<(Vec3, Quat)> {
         let c = Vec3::new(
             (front.x + back.x) / 2,
             (front.y + back.y) / 2 + HEIGHT,
@@ -1510,6 +1578,41 @@ impl Carry {
             to: (c, q),
             at: from,
             rest: (self.ground, lay.0, lay.1),
+            by: None,
+            transfer: None,
+            floor,
+        });
+        Ok((at, t1))
+    }
+
+    /// A take's track (#5067): the crew's node, set where its part was as it was taken (`from`: the part in its slot is
+    /// exactly where it was, so its change of parent moved nothing), goes into its carriers' hands at `to` as a lift's
+    /// does ([`Hoist`], [`Carry::step`]): one motion sample a tick, never in one step, however far the part stood from
+    /// their middle. `span`: between its carriers at the take. `rest`: the ground the part was on and its place there,
+    /// where a take broken off sets it back when it rested on that ground ([`Carry::back`]); one taken out of a slot or
+    /// a stand goes straight down instead. It takes [`hoist_time`] of how far it goes. Returns the track's times.
+    pub fn take_up(
+        &mut self,
+        at: Micros,
+        from: (Vec3, Quat),
+        to: (Vec3, Quat),
+        span: i64,
+        rest: (Id, Vec3, Quat),
+    ) -> R<(Micros, Micros)> {
+        let d = |a: i64, b: i64| i128::from(a - b).pow(2);
+        let far = (d(to.0.x, from.0.x) + d(to.0.y, from.0.y) + d(to.0.z, from.0.z)).isqrt();
+        let t1 = at + hoist_time(i64::try_from(far).unwrap_or(i64::MAX));
+        let floor = self.low(from)?.min(self.low(to)?);
+        self.track.push((at, to.0, to.1));
+        self.span = span;
+        self.hoist = Some(Hoist {
+            phase: Phase::Lift,
+            t0: at,
+            t1,
+            from,
+            to,
+            at: from,
+            rest,
             by: None,
             transfer: None,
             floor,

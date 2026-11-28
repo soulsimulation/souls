@@ -39,17 +39,29 @@
    "at_mm": [0, 51, 1372],
    "yaw_mdeg": 0
   },
-  "grip_mid": {
+  "grip_l2": {
    "role": "grip",
-   "at_mm": [0, 51, 0]
+   "at_mm": [0, 51, -650]
+  },
+  "grip_l1": {
+   "role": "grip",
+   "at_mm": [0, 51, -250]
+  },
+  "grip_r1": {
+   "role": "grip",
+   "at_mm": [0, 51, 250]
+  },
+  "grip_r2": {
+   "role": "grip",
+   "at_mm": [0, 51, 650]
   },
   "grip_l": {
    "role": "grip",
-   "at_mm": [0, 51, -1097]
+   "at_mm": [0, 51, -1197]
   },
   "grip_r": {
    "role": "grip",
-   "at_mm": [0, 51, 1097]
+   "at_mm": [0, 51, 1197]
   }
  },
  "geometry": {
@@ -74,7 +86,7 @@
   "ever": true
  },
  "text": {
-  "card": "A 2.7 m rack beam: two carry it, then seat it between two standing frames."
+  "card": "A 2.7 m rack beam: two to six carry it, then seat it between standing frames."
  },
  "card": {
   "text": "card"

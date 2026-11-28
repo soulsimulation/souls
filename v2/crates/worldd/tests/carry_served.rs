@@ -31,7 +31,7 @@ use replica::intents::{Hello, Intent, PROTOCOL, Target};
 use replica::pose::{Pose, Vec3};
 use replica::rules::json;
 use replica::world_model::plain;
-use sim::activity::carry::{Load, REACH};
+use sim::activity::carry::Load;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -63,6 +63,11 @@ fn construction(file: &str) -> json::Value {
 fn beam_at() -> Vec3 {
     let x = testworld::YARD_X + 2_000 + 3 * testworld::BEAM_PITCH;
     Vec3::new(x * 1000, 0, testworld::YARD_Z * 1000)
+}
+/// Where the first side carrier stands at the beam ([`beam_at`], front north): beside its first grip between its ends.
+fn beside_first(l: &Load) -> Vec3 {
+    let o = worldd::engine::on_plan(l.side_places()[0], [0, M]);
+    Vec3::new(beam_at().x + o[0], 0, beam_at().z + o[1])
 }
 /// The loose upright, standing on the open ground 3 m north of the beams' line, west of the stand.
 fn upright_at() -> Vec3 {
@@ -1242,12 +1247,12 @@ async fn c6_four_souls_carry_a_6_m_upright_laid_flat_and_three_are_too_few() {
     let (places, bodies) = carry_tall(&mut crew, &souls, &dir, ground, tall, at, "eden").await;
 
     // 0.135 C5 on the served carry: the beam, crew two, three grips. Souls 1 and 2 at its ends and Soul 3 beside its
-    // middle grip lift it; Soul 3 leaves the world (a retire), and the carry goes on with two, 25 m east.
+    // first grip between them lift it; Soul 3 leaves the world (a retire), and the carry goes on with two, 25 m east.
     let beam = im.nodes["yard-beam-4"];
     let beam_entry = construction("rack_beam.json");
     let bl = Load::of(&beam_entry).unwrap();
     let [back, front] = bl.places();
-    let beside = Vec3::new(beam_at().x + bl.half_width + REACH, 0, beam_at().z);
+    let beside = beside_first(&bl);
     let spots = [
         spot(beam_at(), front, true),
         spot(beam_at(), back, true),
@@ -1916,7 +1921,7 @@ async fn group_a_carrier_lets_go_mid_walk() {
     let places = [
         spot(beam_at(), front, true),
         spot(beam_at(), back, true),
-        Vec3::new(beam_at().x + bl.half_width + REACH, 0, beam_at().z),
+        beside_first(&bl),
     ];
     for (s, p) in crew.iter_mut().zip(&places) {
         s.send("eden:walk", ground, point(*p)).await;
