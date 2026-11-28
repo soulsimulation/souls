@@ -3545,7 +3545,12 @@ impl Engine {
         live: &Tree,
     ) {
         // #5067: a raise's or a lowering's own commits.
-        if self.raising.contains_key(&r.activity) {
+        if self.raising.contains_key(&r.activity)
+            && matches!(
+                r.step,
+                crate::assembly::Step::Taken | crate::assembly::Step::Seated
+            )
+        {
             self.raise_written(r, written, now, live);
             return;
         }

@@ -44,8 +44,11 @@ pub const RAISE: &str = "souls:raise";
 pub const LOWER: &str = "souls:lower";
 /// How near its end the lifter's walk has to come for the part to finish its turn, µm.
 const NEAR: i64 = 60_000;
-/// How many ticks a part may stay still on its way before it goes on without its lifter.
+/// How many ticks a part may stay still on its way before it goes on without its lifter, for good.
 const STILL: u32 = 100;
+/// How many ticks a commit (the take's, or a part stood up) may be out before the world stops waiting for it: a take
+/// is given up, a part stood up is laid down again. A track always ends, so its crew can always leave.
+const WAIT: u32 = 200;
 /// Half the distance between a carrier's two hands along its post, µm.
 const HAND_HALF: i64 = 100_000;
 
@@ -68,9 +71,12 @@ pub struct Raising {
     carry: Option<Carry>,
     /// Whether the world has started the lifter's walk this way.
     walking: bool,
-    /// Whether its end's commit is out, and for how many ticks it has not moved.
+    /// Whether its end's commit is out, for how many ticks it has not moved, whether it goes on without its lifter,
+    /// and for how many ticks it has waited for a commit.
     settling: bool,
     still: u32,
+    driven: bool,
+    waited: u32,
     /// When its track began.
     since: Micros,
     /// The grip the lifter is said to hold: the kind's highest, its name and its point (the foot when it names none).
@@ -224,6 +230,8 @@ impl Engine {
             walking: false,
             settling: false,
             still: 0,
+            driven: false,
+            waited: 0,
             since: now,
             grip,
         };
@@ -426,14 +434,33 @@ impl Engine {
             let Some(mut ra) = self.raising.remove(&activity) else {
                 continue;
             };
-            let done = match ra.carry.is_some() && !ra.settling {
-                true => self
+            let moving = ra.carry.is_some() && !ra.settling;
+            ra.waited = if moving { 0 } else { ra.waited + 1 };
+            let done = match (moving, ra.waited > WAIT) {
+                (true, _) => self
                     .raise_step(tree, c, town, activity, &mut ra, now)
                     .unwrap_or_else(|e| {
                         eprintln!("worldd: a raise's tick was not written: {e}");
                         false
                     }),
-                false => false,
+                // A take whose commit never came back: nothing was taken as far as the world knows; given up.
+                (false, true) if ra.carry.is_none() => {
+                    eprintln!("worldd: {}'s raise was given up: its take never came back", show(activity));
+                    if let Some(asm) = self.asm.as_mut() {
+                        asm.ended(activity);
+                    }
+                    true
+                }
+                // A part stood up whose commit never came back: laid down again.
+                (false, true) => {
+                    ra.settling = false;
+                    ra.up = false;
+                    ra.walking = false;
+                    ra.waited = 0;
+                    self.turned_back(tree, activity, &ra, "souls:raise-refused", now);
+                    false
+                }
+                (false, false) => false,
             };
             if !done {
                 self.raising.insert(activity, ra);
@@ -469,6 +496,7 @@ impl Engine {
         if ra.up && !reaches {
             ra.up = false;
             ra.walking = false;
+            ra.still = 0;
             self.turned_back(tree, activity, ra, "souls:carrier-out-of-reach", now);
         }
         let end = ra.geo.lifter_at(ra.goal());
@@ -511,8 +539,9 @@ impl Engine {
         }
         // The part follows its lifter, only ever the way it is going, a step a tick at most. With no lifter on its
         // ground it goes on by itself: never left part way.
+        ra.driven |= ra.still >= STILL;
         let want = match lf {
-            Some(l) if apart(l, end) <= NEAR || ra.still >= STILL => ra.goal(),
+            Some(l) if apart(l, end) <= NEAR || ra.driven => ra.goal(),
             Some(l) => ra.geo.r_of(l),
             None => ra.goal(),
         };
@@ -524,14 +553,15 @@ impl Engine {
         let step = next - ra.r;
         ra.still = if step == 0 { ra.still.saturating_add(1) } else { 0 };
         if step != 0 {
-            ra.r = next;
-            let (p, q) = ra.geo.node(ra.r)?;
+            // Written first: a sample not written leaves the part where its last sample has it.
+            let (p, q) = ra.geo.node(next)?;
             if let Some(carry) = ra.carry.as_mut() {
                 carry.turn_to(tree, now, p, q)?;
                 self.activities
                     .stream
                     .extend(carry.log.parts.drain(..).flatten());
             }
+            ra.r = next;
         }
         // Each carrier faces its hold.
         if let (Some(l), Some(f)) = (lf, ff) {
@@ -554,8 +584,9 @@ impl Engine {
                     .extend(carry.log.parts.drain(..).flatten());
             }
             let word = (now, Actor::World, Cause::World);
+            // It is down: from here nothing keeps its crew. A word not said is said so on the world's own lines.
             self.activities.next = tree.next();
-            self.activities.carry_track(
+            if let Err(e) = self.activities.carry_track(
                 tree,
                 activity,
                 ra.part,
@@ -563,7 +594,9 @@ impl Engine {
                 (ra.since, now),
                 None,
                 word,
-            )?;
+            ) {
+                eprintln!("worldd: a lowered part was not said lowered: {e}");
+            }
             if let Err(e) = regrip(
                 &mut self.activities,
                 tree,
