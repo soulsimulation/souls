@@ -151,19 +151,13 @@ async fn the_world_says_what_its_default_body_is_made_of_and_no_edit_changes_it(
     // A placed thing's first fields may not name the field either.
     let (got, _) = send(
         &mut ws,
-        edit_intent(
-            &w,
-            creator,
-            3,
-            got.version,
-            {
-                let mut place = wall(&w, -30, 30);
-                if let Op::Place { fields, .. } = &mut place {
-                    fields.insert(F_DEFAULT_FAMILY, forged.clone());
-                }
-                place
-            },
-        ),
+        edit_intent(&w, creator, 3, got.version, {
+            let mut place = wall(&w, -30, 30);
+            if let Op::Place { fields, .. } = &mut place {
+                fields.insert(F_DEFAULT_FAMILY, forged.clone());
+            }
+            place
+        }),
     )
     .await;
     assert_eq!(
@@ -196,5 +190,9 @@ async fn the_world_says_what_its_default_body_is_made_of_and_no_edit_changes_it(
     .await;
     assert_eq!((got.kind, got.reason.as_str()), (2, DEFAULT_FAMILY_REFUSED));
     assert_eq!(published(&w), held);
-    assert_eq!(writes(&w), 1, "a restart of the unchanged world writes nothing");
+    assert_eq!(
+        writes(&w),
+        1,
+        "a restart of the unchanged world writes nothing"
+    );
 }
