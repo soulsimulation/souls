@@ -232,6 +232,48 @@ fn a_walker_sent_to_a_point_in_a_pocket_is_granted_the_nearest_place_beside_it()
     }
 }
 
+/// #2803: tables that keep no record (a served world's, [`Spots::forget_record`]) grant, refuse and release exactly
+/// as tables that keep one, and hold no entry however many passes are written.
+#[test]
+fn tables_that_keep_no_record_answer_the_same_and_hold_no_entry() {
+    let id = |n| Id::new(replica::ids::Scope([0x67; 16]), n).unwrap();
+    let ask = |n: u64, x, t| Ask {
+        who: id(n),
+        order: id(n + 100),
+        node: node(),
+        from: Vec3::new(x, 0, 0),
+        target: target(t),
+        carried: false,
+    };
+    let (mut kept, mut bare) = (Spots::new(), Spots::new());
+    // Forgotten after a first pass: what was kept until then is dropped too.
+    let first = [ask(1, 5_000_000, 0), ask(2, -5_000_000, 0)];
+    kept.write(&mut Pocket, &first, 0).unwrap();
+    bare.write(&mut Pocket, &first, 0).unwrap();
+    assert_eq!(bare.record, kept.record);
+    assert!(!bare.record.is_empty());
+    bare.forget_record();
+    assert!(bare.record.is_empty());
+    for pass in 1..200i64 {
+        // Each pass, each walker asks for the target it did not ask for last: a release and a grant each.
+        let (t1, t2) = ((pass % 2) * 20_000_000, ((pass + 1) % 2) * 20_000_000);
+        let asks = [ask(1, 5_000_000, t1), ask(2, -5_000_000, t2)];
+        kept.write(&mut Pocket, &asks, pass).unwrap();
+        bare.write(&mut Pocket, &asks, pass).unwrap();
+        for a in asks {
+            let place = kept.of(a.who, &a.target);
+            assert!(place.is_some(), "an answer");
+            assert_eq!(bare.of(a.who, &a.target), place, "the same answer");
+        }
+    }
+    assert!(
+        kept.record.len() >= 400,
+        "the record grows with every pass: {}",
+        kept.record.len()
+    );
+    assert!(bare.record.is_empty(), "a record not kept holds no entry");
+}
+
 /// Standable everywhere, but an island within 8 m of the origin no walk from outside reaches (a floor with no way up),
 /// counting the walks that find no way: each would be a route search over the asker's whole part. With `knows`, it
 /// tells a place cut off without a walk ([`Ground::may_reach`], as the town's map parts do).

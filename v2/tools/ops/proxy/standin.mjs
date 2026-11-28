@@ -18,8 +18,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openLauncher } from '../../../../tools/world-launcher/launcher.mjs';
 import { migrateRegistry } from '../../../../tools/world-launcher/reslug.mjs';
-import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../../../apps/server/test/clerk-fixture.ts';
-import { testPort } from '../../../../apps/server/test/test-port.ts';
+import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../../../tools/lib/clerk-fixture.ts';
+import { testPort } from '../../../../tools/lib/test-port.ts';
 import { createAgents } from '../../origin/agents.mjs';
 import { createOrigin } from '../../origin/origin.mjs';
 import { build } from '../../../client/served/build.mjs';
@@ -44,7 +44,7 @@ writeFileSync(join(dir, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
 const envFile = join(dir, 'clerk.env'), templatesDir = join(dir, 'templates'), dataDir = join(dir, 'data');
 mkdirSync(templatesDir);
 writeFileSync(envFile, [`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}`, `CLERK_ISSUER_URL=${ISSUER}`, `CLERK_AUTHORIZED_PARTIES=${PUBLIC},${PRIMARY}`,
-  `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${join(repo, 'apps/server/test/clerk-jwks-preload.mjs')}`, 'BRAIN_MODE=fake', ''].join('\n'));
+  `SIM_TEST_JWKS_FILE=${join(dir, 'jwks.json')}`, `NODE_OPTIONS=--import=${join(repo, 'tools/lib/clerk-jwks-preload.mjs')}`, 'BRAIN_MODE=fake', ''].join('\n'));
 const launcherCfg = { port: port.launcher, range: [P0, P0 + 8], dataDir, templatesDir, webDir: todayWeb, authEnvFile: envFile, publicOrigin: PUBLIC,
   clerkSatellite: 'soul.game', clerkSignInUrl: `${PRIMARY}/sign-in`, eager: 0, log: () => {} };
 let L = await openLauncher(launcherCfg);

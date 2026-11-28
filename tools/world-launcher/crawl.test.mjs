@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { CRAWLERS, NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
 import { openLauncher } from './launcher.mjs';
 import { defaultCommand } from './children.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 test('robots.txt names every crawler, allows the site, disallows the private paths and points at the sitemap', () => {
   const t = robotsTxt({ origin: 'https://soul.game' });

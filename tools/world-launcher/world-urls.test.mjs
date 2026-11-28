@@ -12,7 +12,7 @@ import { openLauncher } from './launcher.mjs';
 import { archiveWorld, restoreWorld, addGodToken } from './worldops.mjs';
 import { notTestWorld } from './op-souls.mjs';
 import { SNAPSHOT_EPOCH_FILE } from '../../apps/server/src/edge-snapshot.ts';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const mappings = [['eden-2026', 'eden'], ['my-mars-college-2026-3', 'mars-college-2026'], ['mars-2027', 'mars-college-2027']];
 const fixture = () => ({ schema: 'world-launcher-registry/1', other: 'preserved', worlds: mappings.map(([slug]) => ({ slug, name: slug, template: 'empty', createdAt: 1, owner: 'synthetic-owner', limits: { look: 7 }, worldHeapMb: 2048 })) });

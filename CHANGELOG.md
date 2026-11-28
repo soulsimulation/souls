@@ -6,6 +6,42 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.148.0 (2026-11-27)
+
+### Features
+
+- A retired Soul rises up a column of white light and leaves, as it used to, instead of vanishing.
+- A Soul outdoors that asks to sit on any chair or bench is told which place holds them, by its name, and how far it is.
+
+### Fixes
+
+- A world no longer stops when 1,000 Souls act at once, and with 1,000 Souls far fewer of its ticks run late. (#5199)
+- A world whose server is running low on disk space now says so before the disk is full, on the health page and in its log, and, where its log is already saved off the machine, gives that space back sooner.
+- A thing whose timer can no longer do its job (a bell already hushed) says why on the thing, and timers in a world with no Souls in it fire on time, so the thing never stays stuck.
+- Souls keep steady footing when an off-screen animation resumes.
+- Souls keep both feet grounded during push-ups when their resting stance crosses the body midline.
+- Deferred public-stream playback retains validated motion samples and move events while batching state-digest verification.
+- An agent's Souls folder guide and `status` name each world by its own name, such as Eden 2026, instead of its address key.
+- A release no longer refuses to move a world whose recent activity ends on a slow edit: the release's rehearsal now waits for the last recorded act as long as the world itself would.
+- From this build on, a world restarted on an older build refuses a saved state it cannot fully read, instead of running on without the parts it skipped. That skipping is how Eden lost its hills and slopes from the world's own state on 25 November; the page still drew them.
+- A world with 1,000 Souls acting evenly no longer stalls for seconds, or stops, when Souls start actions that pick the nearest thing around them.
+- On a new-engine world a Soul's card says "listening now" only while its agent is reading its messages and "Thinking…" only once the agent read yours; otherwise it says the message waits for the agent and until when, and a read message left unanswered says when it was read.
+- A world on the new engine opens with its real time of day: no sunny midday for the first seconds of a visit at night.
+- A world's creator can apply a reviewed fix batch to a world whose ground came without its terrain, or whose deck is an older build, so live Eden's roof planters, tower lamps, lighthouse, villa tower, counter and commons deck fixes apply.
+- A world placed from an import keeps its creator able to open God Mode, and an operator can give an ownerless world to its owner.
+- New Mars camp worlds stock all four beams needed to finish the pallet rack.
+- A thing a world's creator moves onto another surface is drawn at its new place, not back where it was, when the page sees its removal and its new place a moment apart.
+- A New world that is not made within 15 minutes now ends with "create-failed" and frees its name, instead of holding it for good; and New world keeps working after many quick retries.
+- One client flooding a world with sync requests can no longer slow every other Soul's acts: past a bound it is told `agent.slow-down` and its requests never reach the world, and one the world leaves unanswered for 10 s is told `sync.timed-out`.
+- In God Mode, a second Undo in a row works after undoing a weather change or Lightning, and Redo gives both back.
+- In God Mode, Undo takes back a weather change or a lightning strike, giving the sky before it back.
+- Worlds brought over from the old site no longer count toward your New world limit, and the site owner has none.
+- A world restarts in about the same time however long it has run, and its memory no longer grows with its history.
+
+### Performance
+
+- A busy world with 1,000 Souls keeps its pace when many of them sit, kneel, lie down or put something down in the same moment.
+
 ## 0.146.0 (2026-11-27)
 
 ### Features

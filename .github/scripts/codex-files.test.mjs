@@ -19,23 +19,21 @@ test('globRegExp: * stays in a segment, ** crosses them, {a,b} picks one; dots a
   assert.ok(!globRegExp('x/{p,q-r}.ts').test('x/pq-r.ts'));
 });
 
-test('the checked-in list: each owned file fails, its tests and neighbours do not, WorldEntityLayer only warns', () => {
+test('the checked-in list: each shared pose file fails; its tests, its neighbours and the carry files main owns do not', () => {
   const owned = [
     'mars/viewer/app/engine-view/humans.ts', 'mars/viewer/app/engine-view/posture-transition.ts',
     'mars/viewer/app/engine-view/activity-poses.ts', 'mars/viewer/app/engine-view/take-replay.ts',
     'apps/web/src/v2-engine/bridge.ts', 'apps/web/src/v2-engine/takes.ts', 'apps/web/src/v2-engine/take-gestures.ts',
-    'apps/web/src/v2-engine/take-parts.ts', 'apps/web/src/v2-engine/use-v2-souls.ts', 'apps/web/src/v2-engine/creator-kinds.ts',
-    'apps/web/src/v2-engine/source/worker.ts', 'v2/crates/replica/src/stream/public.rs', 'v2/crates/replica/src/stream/deep/x.rs',
   ];
   for (const file of owned) assert.equal(check({ files: [file], labels: [], rules, claude: true }).failing.length, 1, file);
   const free = [
     'mars/viewer/app/engine-view/posture.ts', 'apps/web/src/v2-engine/takes.test.ts', 'apps/web/src/v2-engine/other.ts',
     'v2/crates/replica/src/lib.rs', 'v2/crates/sim/src/stream/x.rs', 'apps/web/src/WorldEntityLayer.test.ts',
+    // main's from 27 Nov: carrying and racks with their page and reader files
+    'apps/web/src/v2-engine/take-parts.ts', 'apps/web/src/v2-engine/use-v2-souls.ts', 'apps/web/src/v2-engine/creator-kinds.ts',
+    'apps/web/src/v2-engine/source/worker.ts', 'v2/crates/replica/src/stream/public.rs', 'apps/web/src/WorldEntityLayer.ts',
   ];
   for (const file of free) assert.deepEqual(check({ files: [file], labels: [], rules, claude: true }), { ok: true, exempt: '', failing: [], warnings: [] }, file);
-  const shared = check({ files: ['apps/web/src/WorldEntityLayer.ts'], labels: [], rules, claude: true });
-  assert.equal(shared.ok, true);
-  assert.deepEqual(shared.warnings.map(w => w.file), ['apps/web/src/WorldEntityLayer.ts']);
 });
 
 test('a lane PR (Claude trailer) touching takes.ts fails; a Codex PR with no label passes; codex:files-ok passes', () => {
