@@ -3120,6 +3120,19 @@ fn a2_parts_rest_at_the_grounds_height() {
     // the world): Soul `ab.1` keeps the hold alone (a seated frame's holder may not just let go).
     let seat = |hands: &mut [Hand], ab: (usize, usize), what: &str| {
         let (p, q) = frame_ends_of(&w, fa);
+        println!(
+            "{what}: frame A at {:?}, its ends {p:?} {q:?}",
+            where_is(&w, fa).2
+        );
+        for (k, s) in w.souls.iter().enumerate() {
+            let b = body_of(&w, *s);
+            println!(
+                "{what}: Soul {} body {} at {:?}",
+                k + 1,
+                replica::world_model::show(b),
+                body_at(&w, b)
+            );
+        }
         both(hands, ab, p, q, what);
         let c = crew(hands, ab);
         let got = hands[ab.0].act("part:take", c, part(fa));
