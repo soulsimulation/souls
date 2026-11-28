@@ -6,7 +6,7 @@ import { resolve, join } from 'node:path';
 import { createServer } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { createTestRunner, runOwnedAttempt } from './owned-attempt.mjs';
+import { createTestRunner, runOwnedAttempt, journeyCap } from './owned-attempt.mjs';
 import { verifyAccountArtifacts } from './v2-account-fixture.mjs';
 import { createHash } from 'node:crypto';
 
@@ -613,4 +613,12 @@ test('late onOpened then setup rejection closes the real context without rewriti
     assert.match(evidence.setupError, /calibration-aborted-after-open/);
     if (closeFails) assert.match(evidence.error, /late-close-failed/);
   }
+});
+test('a survey cycle may run its journey for up to 600 s; any other cycle keeps 90 s', async t => {
+  const f = setup(t);
+  await assert.rejects(f.runner({ ...f.o, journeyTimeoutMs: 90001 }), /timeout-out-of-bounds/);
+  const survey = { ...f.o, cycle: { ...f.o.cycle, id: 'survey-long-build' } };
+  await assert.rejects(f.runner({ ...survey, journeyTimeoutMs: 600001 }), /timeout-out-of-bounds/);
+  const r = await f.runner({ ...survey, journeyTimeoutMs: 600000 }); assert.equal(r.status, 'PASS');
+  assert.equal(journeyCap(survey), 600000); assert.equal(journeyCap(f.o), 90000); assert.equal(journeyCap({ cycle: { id: 'corrective-survey-' } }), 90000);
 });
