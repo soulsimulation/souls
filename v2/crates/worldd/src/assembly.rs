@@ -331,7 +331,21 @@ pub fn ways(
     turn: Quat,
     walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
 ) -> R<Vec<Walk>> {
+    ways_turning(carriers, ends, from, to, (turn, turn), walkable)
+}
+
+/// [`ways`] for a set-in whose node turns from `turns.0` where it starts to `turns.1` where it ends (#5067: the part
+/// seated turned as its slot is): each carrier's reach at the end is judged with the end's turn.
+pub fn ways_turning(
+    carriers: &[Carrier],
+    ends: [Id; 2],
+    from: Vec3,
+    to: Vec3,
+    (turn, end_turn): (Quat, Quat),
+    walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
+) -> R<Vec<Walk>> {
     out_of_reach(carriers, (from, turn))?;
+    let turn = end_turn;
     let (dx, dz) = (to.x - from.x, to.z - from.z);
     let far = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
     if far <= i128::from(WALK_LEAST) {
@@ -399,6 +413,8 @@ fn at_level(tree: &Tree, th: replica::tree::Handle, k: u64, parts: Vec<Id>) -> V
 pub const ADMITTED_AT: &str = "admitted with the crew's node at";
 /// The step and the extent of [`admitted_from`]'s search about where the part goes, µm.
 const ADMIT_STEP: i64 = 50_000;
+/// How far inside a carrier's reach the place [`admitted_from`] names leaves each one who stands, µm.
+const ADMIT_MARGIN: i64 = 50_000;
 
 /// Where, nearest `from` on the plan, crew `carriers` (ends `ends`) whose node goes from there to `to` on a set-in
 /// would be admitted (#5067): the whole crew moved together, each carrier the same way as its node, and [`ways`] asked
@@ -407,7 +423,7 @@ pub fn admitted_from(
     carriers: &[Carrier],
     ends: [Id; 2],
     from: (Vec3, Quat),
-    to: Vec3,
+    (to, end_turn): (Vec3, Quat),
     walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
 ) -> Option<Vec3> {
     // Moving the whole crew keeps every carrier's reach where the set-in starts: one out of reach there is not helped.
@@ -434,9 +450,26 @@ pub fn admitted_from(
             })
             .collect();
         let at = Vec3::new(x, from.0.y, z);
-        ways(&moved, ends, at, to, from.1, walkable)
-            .ok()
-            .map(|_| at)
+        // With a margin: every carrier who stands to the end (walks for no one) is [`ADMIT_MARGIN`] inside its reach
+        // there, judged with its feet that much further off its grip, so a walk that ends a few centimetres off still
+        // reaches.
+        let walks = ways_turning(&moved, ends, at, to, (from.1, end_turn), walkable).ok()?;
+        let standing: Vec<Carrier> = moved
+            .iter()
+            .filter(|c| !walks.iter().any(|w| w.body == c.body))
+            .map(|c| {
+                let g = end_turn.rotate(c.grip).unwrap_or(c.grip);
+                let grip = [to.x + g.x, to.z + g.z];
+                let (dx, dz) = (i128::from(c.feet.x - grip[0]), i128::from(c.feet.z - grip[1]));
+                let d = (dx * dx + dz * dz).isqrt().max(1);
+                let k = |v: i128| (v * (d + i128::from(ADMIT_MARGIN)) / d) as i64;
+                Carrier {
+                    feet: Vec3::new(grip[0] + k(dx), c.feet.y, grip[1] + k(dz)),
+                    ..*c
+                }
+            })
+            .collect();
+        out_of_reach(&standing, (to, end_turn)).is_ok().then_some(at)
     })
 }
 
@@ -1077,12 +1110,12 @@ impl Assembly {
             Some([f, b, ..]) => [f.body, b.body],
             _ => return Err(refusal("crew.size", show(activity))),
         };
-        let mut walks = match ways(carriers, ends, from.0, end.0, from.1, walkable) {
+        let mut walks = match ways_turning(carriers, ends, from.0, end.0, (from.1, end.1), walkable) {
             Ok(w) => w,
             // #5067: refused, it says where the crew's node would be admitted from, nearest where it is: the same
             // admission (`ways`) with the whole crew there, so a client carries it there and asks again.
             Err(mut r) if r.name == "part.grip-out-of-reach" => {
-                if let Some(p) = admitted_from(carriers, ends, from, end.0, walkable) {
+                if let Some(p) = admitted_from(carriers, ends, from, end, walkable) {
                     r.detail = format!("{}; {ADMITTED_AT} x={} z={} mm", r.detail, p.x / 1000, p.z / 1000);
                 }
                 return Err(r);
@@ -1589,12 +1622,12 @@ mod tests {
         assert!(r.detail.contains(&show(id(1))), "{}", r.detail);
         // #5067 item 4: refused, the nearest place the crew's node would be admitted from, the same `ways` with the
         // whole crew there: with nobody able to walk, where every carrier stands within reach where the set-in ends.
-        let at = admitted_from(&crew, ends, (from, turn), far, &walled).expect("a place");
+        let at = admitted_from(&crew, ends, (from, turn), (far, turn), &walled).expect("a place");
         assert!(ways(&crew.map(|c| Carrier { feet: Vec3::new(c.feet.x + at.x, 0, c.feet.z + at.z), ..c }), ends, at, far, turn, &walled).is_ok());
         assert!(at.x > 0 && at.x < far.x && at.z == 0 && at.y == from.y, "toward where it goes: {at:?}");
         // Nowhere within a metre of where it goes, a crew none of whose carriers reaches its hold at the start.
         let off = [c(1, 0, 3_000_000, 0, 1_097_000), crew[1]];
-        assert_eq!(admitted_from(&off, ends, (from, turn), far, &walled), None);
+        assert_eq!(admitted_from(&off, ends, (from, turn), (far, turn), &walled), None);
         // Out of reach where the track would start: refused whoever could walk.
         let mut off = crew;
         off[1].feet.z -= 400_000;
