@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { decode, idText } from '../../../v2/client/src/brief/copy.mjs';
+import { decode } from '../../../apps/web/node_modules/cborg/cborg.js';
 import { nativeCameraMode } from './camera-native-page.mjs';
 import { discoverConference, performConference, performSlotPointComponent } from '../../playtest/conference/rehearse.mjs';
 import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
@@ -13,6 +13,28 @@ import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pair
 const states = new Map();
 const names = ['Presenter', 'Cedar', 'Maple', 'Willow', 'Birch'];
 const save = (paths, file, value) => writeFileSync(join(paths.dir, file), JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
+
+// R1 public snapshot projection only; CBOR decoding is the page's existing dependency.
+export function conferenceLectureRecord(snapshot, nativeLecture) {
+  const nodes = decode(snapshot, { useMaps: true });
+  assert(Array.isArray(nodes), 'conference public snapshot records missing');
+  const records = nodes.filter(record => {
+    assert(record instanceof Map, 'conference public record malformed');
+    const id = record.get(1);
+    assert(Array.isArray(id) && id.length === 2 && id[0] instanceof Uint8Array && id[0].length === 16,
+      'conference public scoped identity malformed');
+    const counter = id[1];
+    assert(typeof counter === 'bigint' ? counter >= 0n && counter <= 0xffffffffffffffffn
+      : Number.isSafeInteger(counter) && counter >= 0, 'conference public identity counter malformed');
+    return `${Buffer.from(id[0]).toString('hex')}-${counter}` === nativeLecture;
+  });
+  assert.equal(records.length, 1, 'conference native lectern public record missing or ambiguous');
+  const record = records[0], fields = record.get(6), text = new TextDecoder();
+  assert(typeof record.get(2) === 'string' && fields instanceof Map, 'conference public lecture fields malformed');
+  return { id: nativeLecture, kind: record.get(2),
+    ...(fields.get(1) instanceof Uint8Array ? { origin: text.decode(fields.get(1)) } : {}),
+    ...(fields.get(2) instanceof Uint8Array ? { def: text.decode(fields.get(2)) } : {}) };
+}
 
 // Read only the fixture's already published public view with the same validated player as the page.
 export async function conferencePublicLecture({ paths, recipe, nativeLecture }) {
@@ -43,12 +65,7 @@ export async function conferencePublicLecture({ paths, recipe, nativeLecture }) 
       player.play(read(file(String(player.next()))));
     }
     player.verify();
-    const records = decode(player.snapshot()).filter(n => idText(n.get(1)) === nativeLecture);
-    assert.equal(records.length, 1, 'conference native lectern public record missing or ambiguous');
-    const record = records[0], fields = record.get(6), text = new TextDecoder();
-    return { id: nativeLecture, kind: record.get(2),
-      ...(fields.get(1) instanceof Uint8Array ? { origin: text.decode(fields.get(1)) } : {}),
-      ...(fields.get(2) instanceof Uint8Array ? { def: text.decode(fields.get(2)) } : {}), inputs, parts };
+    return { ...conferenceLectureRecord(player.snapshot(), nativeLecture), inputs, parts };
   } finally { player.free(); }
 }
 

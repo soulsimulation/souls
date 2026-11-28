@@ -3,10 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
-import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools, conferenceNativeLectureBinding, conferenceLecternIdentity, conferenceExecution, conferenceComponentStage, conferenceComponentJourney, conferenceRenderedArms, SLOT_POINT_COMPONENT } from './conference-native-page.mjs';
+import { conferenceLectureRecord, conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools, conferenceNativeLectureBinding, conferenceLecternIdentity, conferenceExecution, conferenceComponentStage, conferenceComponentJourney, conferenceRenderedArms, SLOT_POINT_COMPONENT } from './conference-native-page.mjs';
 import { explainConference, rehearsalTemplate, performConference, performSlotPointComponent } from '../../playtest/conference/rehearse.mjs';
 import { drawnLoad, bodyGeometry } from '../../playtest/carry-contact/oracle.mjs';
-import { describeThing } from '../../../v2/client/src/creator/thing.mjs';
+const exportedReplies = JSON.parse(readFileSync(new URL('../../playtest/conference/exported-replies.fixture.json', import.meta.url)));
+import { decode, encode } from '../../../apps/web/node_modules/cborg/cborg.js';
 const THREE = createRequire(new URL('../../../mars/viewer/package.json', import.meta.url))('three');
 const clearanceTools = options => conferenceClearanceTools({ vector: () => new THREE.Vector3(), drawnLoad, bodyGeometry, ...options });
 function rigidFixture(geometry = new THREE.BoxGeometry(1,1,1)) {
@@ -14,6 +15,26 @@ function rigidFixture(geometry = new THREE.BoxGeometry(1,1,1)) {
   return {scene,root,mesh,layer:{drawn:new Map([['lectern',{obj:root}]]),instancer:{pools:new Map()}}};
 }
 const vertex = p => ({ p, mesh:'actual-skin',index:7 });
+
+test('public WASM snapshot consumer preserves scoped identity and rejects malformed or ambiguous records', () => {
+  const bytes = Uint8Array.from(Buffer.from(exportedReplies.publicLectureSnapshotHex, 'hex'));
+  const id = '11111111111111111111111111111111-17';
+  assert.deepEqual(conferenceLectureRecord(bytes, id), { id, kind: 'eden:hall_lecture@12201658a09a27ad0493df7cc08cad406564425dead81444776878c2ba537d183b1c', origin: 'e_11111111', def: 'core-hall_lecture@2' });
+  const records = decode(bytes, { useMaps: true });
+  assert.throws(() => conferenceLectureRecord(encode([...records, ...records]), id), /missing or ambiguous/);
+  assert.throws(() => conferenceLectureRecord(bytes, id + '0'), /missing or ambiguous/);
+  for (const counter of [-1, '17', 1.5]) {
+    const changed = decode(bytes, { useMaps: true }); changed[0].get(1)[1] = counter;
+    assert.throws(() => conferenceLectureRecord(encode(changed), id), /counter malformed/);
+  }
+  const large = decode(bytes, { useMaps: true }), counter = 18446744073709551615n;
+  large[0].get(1)[1] = counter;
+  assert.equal(conferenceLectureRecord(encode(large), `11111111111111111111111111111111-${counter}`).id.endsWith('-18446744073709551615'), true);
+  const shortScope = decode(bytes, { useMaps: true }); shortScope[0].get(1)[0] = new Uint8Array(8);
+  assert.throws(() => conferenceLectureRecord(encode(shortScope), id), /scoped identity malformed/);
+  const badFields = decode(bytes, { useMaps: true }); badFields[0].set(6, []);
+  assert.throws(() => conferenceLectureRecord(encode(badFields), id), /fields malformed/);
+});
 
 test('canonical native lecture binding selects physical geometry despite a same-name landmark', async () => {
   const binding = await conferenceNativeLectureBinding({ checkout: resolve(new URL('../../../', import.meta.url).pathname), nativeLecture: 'fictional-native-lecture.17', node: { id: 'fictional-native-lecture.17', kind: 'eden:hall_lecture' }, name: 'presentation-lectern' });
@@ -320,13 +341,9 @@ for (const [options, reason] of [[{ names: {} }, /named thing/], [{ readID: 'unr
   });
 }
 
-test('creator proof accepts the ordinary describeThing projection without inventing a readback revision', async () => {
+test('creator proof consumes a retained ordinary exported reply without inventing a readback revision', async () => {
   const kinds = { 'eden:conference_question@pin': { admits: ['thing'] } };
-  const readback = describeThing('returned-id', { kinds, nodes: [
-    { id: 'actual-ground', kind: 'eden:ground', parent: null },
-    { id: 'returned-id', kind: 'eden:conference_question', parent: 'actual-ground', at: [12000, 0, 12000] },
-  ] }, {});
-  readback.at = readback.at.map(n => n / 1000); // The ordinary creator CLI prints millimetres as metres.
+  const readback = structuredClone(exportedReplies.creator);
   assert.equal(Object.hasOwn(readback, 'revision'), false);
   const result = await proveConferenceCreator({ creator: creatorReplies({ kinds, readback }) });
   assert.equal(result.kind, 'eden:conference_question@pin'); assert.equal(result.readbackKind, readback.kind);

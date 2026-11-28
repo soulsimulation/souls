@@ -6,24 +6,16 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { completed, discoverConference, performConference, rehearsalTemplate, conferenceMemberships, performSlotPointComponent } from './rehearse.mjs';
 
-import { brief } from '../../../v2/client/src/brief/brief.mjs';
-import { doingLines } from '../../../v2/client/src/together/members.mjs';
+const exportedReplies = JSON.parse(readFileSync(new URL('./exported-replies.fixture.json', import.meta.url)));
 
-// The same current client projection that the daemon uses for ordinary `look`.
+// Real exported standing/active and cleared replies. Alternate activity words below are explicit synthetic controls.
 function projectedLook(words = []) {
-  const rows = new Map([
-    ['world', { id: 'world', name: 'World', kind: 'souls:place', parent: null, path: [], children: 1 }],
-    ['room', { id: 'room', name: 'Room', kind: 'souls:room', parent: 'world', path: ['World'], children: 2 }],
-    ['body', { id: 'body', name: 'Reader', kind: 'souls:body', soul: 'reader', parent: 'room', path: ['World', 'Room'], children: 0 }],
-    ['other', { id: 'other', name: 'Partner', kind: 'souls:body', parent: 'room', path: ['World', 'Room'], children: 0 }],
-  ]);
-  for (const [i, word] of words.entries()) rows.set(`group${i}`, { id: `group${i}`, name: word,
-    kind: `eden:${word.replaceAll('-', '_')}_activity`, parent: 'room', path: ['World', 'Room'], children: 0, started: true,
-    members: [{ body: 'body', soul: 'reader', role: 'eden:first' }, { body: 'other', role: 'eden:second' }] });
-  return { ok: true, ...brief(rows, { me: 'body', now: 'standing', doing: doingLines(rows, ['reader', 'body']) }) };
+  const reply = structuredClone(exportedReplies.look[words.length ? 'active' : 'clear']);
+  if (words.length) reply.in = reply.in.map(line => line.replace('speaker-introduction', words[0]));
+  return reply;
 }
 
-test('current client look separates standing body state from active native memberships and omits cleared memberships', () => {
+test('exported look consumer separates standing body state from active native memberships and omits cleared memberships', () => {
   const active = projectedLook(['speaker-introduction']);
   assert.equal(active.doing, 'standing'); assert(Array.isArray(active.in));
   assert(conferenceMemberships(active).some(line => line.includes('speaker-introduction')), 'standing does not mean introduction ended');
