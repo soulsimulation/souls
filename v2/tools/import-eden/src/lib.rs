@@ -1100,7 +1100,7 @@ pub fn way_rows(
         }
     };
     let mut stairs = Vec::new();
-    let mut row = |kind: &str, path: [[i64; 2]; 2], bottom: i64, top: i64, width: i64, to: i64| {
+    let mut row = |kind: &str, path: &[[i64; 2]], bottom: i64, top: i64, width: i64, to: i64| {
         let k = stairs.len();
         stairs.push(J::Obj(vec![
             ("id".to_owned(), J::s(&format!("{id}-{kind}-{k}"))),
@@ -1109,7 +1109,7 @@ pub fn way_rows(
             ("to".to_owned(), n(to)),
             (
                 "path".to_owned(),
-                J::Arr(path.into_iter().map(pt).collect()),
+                J::Arr(path.iter().copied().map(pt).collect()),
             ),
             ("width".to_owned(), n(width)),
             ("y0".to_owned(), n(bottom)),
@@ -1118,12 +1118,21 @@ pub fn way_rows(
     };
     for s in &w.stairs {
         let to = level_at(s.top, s.to);
-        row("stairs", [s.from, s.to], s.bottom, s.top, s.width, to);
+        row("stairs", &[s.from, s.to], s.bottom, s.top, s.width, to);
     }
+    // A ladder up a face is its rungs (N14): its row gives its foot twice, so the world climbs it straight up there
+    // (`sim::links`), not along a slope from the foot to the face.
     for l in &w.ladders {
         let path = l.path(half);
         let to = level_at(l.top, path[1]);
-        row("ladder", path, l.bottom, l.top, l.width, to);
+        row(
+            "ladder",
+            &[path[0], path[0], path[1]],
+            l.bottom,
+            l.top,
+            l.width,
+            to,
+        );
     }
     (floors, stairs)
 }
