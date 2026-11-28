@@ -1473,30 +1473,34 @@ impl Bodies {
         }
     }
 
-    /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
-    /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
-    /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
     /// A walk to point `p` of the open ground (FOR-FABLE 14, `walk x,z`): to the ground a body may stand on at that
     /// point on the plan, the open ground's or a floor's, whichever is nearest the walker's own level (a Soul on a
     /// frame's standing place sent to a point 2 m from its foot climbs down; one on a deck sent to a point on it stays
-    /// up). A point with no such ground under it is walked to as before when ground a body stands on is within a
-    /// walker's goal tolerance of it ([`STOPPED_SHORT_MM`], ended `walk.goal-moved`); farther, it is refused
-    /// `walk.no-ground-there`, naming the nearest point the walker may stand on and reach.
+    /// up). A point in a doorway's or a stair's clearance is walked to as before (#5254: moved out to a walker's
+    /// clearance, ended `walk.goal-moved`), and so is one with no ground under it within a walker's goal tolerance
+    /// of ground a body stands on ([`STOPPED_SHORT_MM`]); farther, it is refused `walk.no-ground-there`, naming the
+    /// nearest point the walker may stand on and reach on the spot tables' rings out to 7 m (map lookups only).
     fn ground_point(&mut self, body: Id, p: Vec3) -> R<Target> {
         let ground = self.town.ground;
         let Some(b) = self.runner.controller.body(body).cloned() else {
             return Ok(Target::new(ground, p));
         };
+        if self.town.passage_at(ground, p).is_some() {
+            return Ok(Target::new(ground, p));
+        }
         let view = self.town.view_for(body)?;
         if let Some((node, at)) = view.level_under(&b, p) {
             return Ok(Target::new(node, at));
         }
         let near = i64::try_from(STOPPED_SHORT_MM).unwrap_or(0) * 1000;
-        if view.stand_near(ground, p, near, Some(&b)).is_some() {
+        if view
+            .standable_near(&b, p, sim::spots::REACH_PITCH, near)
+            .is_some()
+        {
             return Ok(Target::new(ground, p));
         }
-        let far = sim::spots::PITCH * sim::spots::RINGS;
-        let nearest = match view.stand_near(ground, p, far, Some(&b)) {
+        let (pitch, far) = (sim::spots::PITCH, sim::spots::PITCH * sim::spots::RINGS);
+        let nearest = match view.standable_near(&b, p, pitch, far) {
             Some(s) => format!(
                 "the nearest point to stand on: x={} z={} mm",
                 s.x / 1000,
@@ -1514,6 +1518,9 @@ impl Bodies {
         })
     }
 
+    /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
+    /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
+    /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
     fn goal(&mut self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
             if node == self.town.ground {

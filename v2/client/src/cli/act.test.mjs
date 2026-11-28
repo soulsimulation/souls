@@ -364,6 +364,11 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.deepEqual([jog.ok, jog.phase], [true, 'done'], `the jog ends with a receipt: ${JSON.stringify(jog)}`);
   const sprint = souls(home, ['act', chair, 'gait=sprint', '--wait']);
   assert.deepEqual([sprint.ok, sprint.phase, sprint.reason], [false, 'refused', 'move.unknown-gait'], JSON.stringify(sprint));
+  // FOR-FABLE 14: `walk x,z` goes as a walk on the open ground with the point, [x, 0, z] µm: one 50 km off the test
+  // world's ground is the world's refusal by that name; a point walk is only an act's first.
+  const nowhere = souls(home, ['walk', '50000,0', '--wait']);
+  assert.deepEqual([nowhere.ok, nowhere.phase, nowhere.reason], [false, 'refused', 'walk.no-ground-there'], JSON.stringify(nowhere));
+  assert.equal(souls(home, ['act', chair, 'walk:1,2']).code, 'act-walk-point-first');
 
   // D1: act --wait returns once the receipt has its final phase, or the world's refusal by name.
   const walk = souls(home, ['act', chair, '--wait']);
