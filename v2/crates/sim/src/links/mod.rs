@@ -598,6 +598,25 @@ fn apron(patch: &Patch, end: Vec3, dir: [i64; 2]) -> Option<Vec3> {
     })
 }
 
+/// A ladder's line as it is climbed (N14): `rungs` is its foot (on the run, at the bottom) and its top's height; the
+/// line rises straight up at the foot to the top's height, then goes across as before. A line without the foot (no
+/// ends) and any other link's line are as given.
+fn up_rungs(mut line: Vec<Vec3>, rungs: Option<(Vec3, i64)>) -> Vec<Vec3> {
+    let Some((foot, y1)) = rungs else {
+        return line;
+    };
+    if let Some(i) = line.iter().position(|p| *p == foot) {
+        let top = Vec3::new(foot.x, y1, foot.z);
+        if line.get(i + 1) != Some(&top) {
+            line.insert(i + 1, top);
+        }
+        for p in &mut line[i + 2..] {
+            p.y = p.y.max(y1);
+        }
+    }
+    line
+}
+
 /// The unit (µm per metre) from `a` to `b` on the ground plane.
 fn unit(a: Vec3, b: Vec3) -> [i64; 2] {
     let (dx, dz) = (b.x - a.x, b.z - a.z);
@@ -845,6 +864,9 @@ impl Building {
                     })
                     .collect();
                 let k = line.len();
+                // A ladder is climbed up the rungs (N14): straight up at its foot, in front of the face, then across
+                // onto its top. Its ends are found along the run as a flight's; the line climbed gets the rise.
+                let rungs = (kind == Kind::Ladder).then_some((line[0], y1));
                 let patch = |f: Id| floors.get(&f).map(|(_, p)| p);
                 let lo = patch(nodes[0]).map(|p| apron(p, line[0], unit(line[1], line[0])));
                 // A ladder's top against a face lands on the floor it leans over (a frame's standing place, racks T6):
@@ -955,7 +977,7 @@ impl Building {
                             stair: Some(LooseStair {
                                 kind,
                                 from: nodes[0],
-                                line: std::mem::take(&mut line),
+                                line: up_rungs(std::mem::take(&mut line), rungs),
                                 top,
                                 half,
                             }),
@@ -974,7 +996,7 @@ impl Building {
                     owner,
                     width,
                     ends,
-                    line,
+                    line: up_rungs(line, rungs),
                     door: None,
                     blocked,
                 });

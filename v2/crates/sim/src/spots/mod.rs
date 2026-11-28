@@ -5,9 +5,9 @@
 //!   ring with one, when those have none: a pond's bank), `⌊2πk⌋` places on ring `k` (so
 //!   neighbours on a ring are at least about a pitch apart), the target itself ring 0. A place is kept only where the
 //!   target's node has walkable ground ([`Ground::stand`]), and never in a doorway or on a stair
-//!   ([`Ground::passage`]); but a target in a doorway's or a stair's clearance has the nearest points that clear the
-//!   passage itself by the body's radius and margin ([`Ground::in_passage_itself`], #5254), so a walk there is moved
-//!   off only as far as that, and says how far (`walk.goal-moved`). That rule is about the engine's choice only: a body whose own order is to stay in a
+//!   ([`Ground::passage`]); a target in a doorway's or a stair's clearance has the nearest points [`CLEAR`] off the
+//!   passage ([`Ground::in_passage_itself`], #5254; A3), so a walk there is moved off to them, and says how far
+//!   (`walk.goal-moved`). That rule is about the engine's choice only: a body whose own order is to stay in a
 //!   doorway is not a walker here, and nothing here refuses it.
 //! - **One table per target, owned by the target's node** ([`Spots::owners`]); a place has one holder. A walker never
 //!   writes it: it marks what it asks (the walk skill's `Mark::spot`), and at the start of each tick the owner reads
@@ -100,9 +100,9 @@ pub trait Ground {
     fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
     /// Whether `p` on `node` lies in a doorway or on a stair.
     fn passage(&self, node: Id, p: Vec3) -> bool;
-    /// Whether a body standing at `p` on `node` would be in a doorway or on a stair itself: within its radius and
-    /// margin of the passage, not [`CLEAR`] (#5254). A target in a passage ([`Ground::passage`]) is stood at only as
-    /// far off as this needs. A ground that cannot tell says [`Ground::passage`].
+    /// Whether a body standing at `p` on `node` would be in a doorway or on a stair: within [`CLEAR`] of the passage
+    /// (#5254; A3). A target in a passage ([`Ground::passage`]) is stood at as far off as this needs. A ground that
+    /// cannot tell says [`Ground::passage`].
     fn in_passage_itself(&self, node: Id, p: Vec3) -> bool {
         self.passage(node, p)
     }
@@ -405,10 +405,9 @@ impl Table {
         let passage = g.passage(target.node, t);
         let clear = stands && !passage;
         // #5254: a target in a doorway's or a stair's clearance (on ground a body stands on, or in the opening itself)
-        // is stood at only as far off as clears the passage itself ([`Ground::in_passage_itself`]: the body's radius
-        // and margin, not [`CLEAR`]): its places in the passage's clearance and clear of the passage itself, on fine
-        // rings [`NEAR_PITCH`] apart from the target itself out to twice [`CLEAR`], numbered after the target on its
-        // ring 0; beyond the clearance the full rings' places stand, as before. The nearest is granted first, and the
+        // is stood at [`CLEAR`] off the passage ([`Ground::in_passage_itself`]; A3: no standing place narrows a
+        // doorway or a stair for others): its places clear of it, on fine rings [`NEAR_PITCH`] apart from the target
+        // itself out to twice [`CLEAR`], numbered after the target on its ring 0. The nearest is granted first, and the
         // walk says how far it was moved, and why (`walk.goal-moved`). Fine places are a body's room apart from every
         // holder, as the full rings' pitch keeps theirs (below).
         if passage {
@@ -428,8 +427,8 @@ impl Table {
                     let Some((at, world)) = g.stand(target.node, p) else {
                         continue;
                     };
-                    // In the passage's clearance (beyond it the full rings' places stand), clear of the passage itself.
-                    if !g.passage(target.node, at) || g.in_passage_itself(target.node, at) {
+                    // Clear of the passage by [`CLEAR`] (A3: no standing place within a walker's clearance of it).
+                    if g.in_passage_itself(target.node, at) {
                         continue;
                     }
                     places.push(Place {

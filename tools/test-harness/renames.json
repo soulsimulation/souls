@@ -631,6 +631,7 @@
       "to": "legacy position-only sampling interpolates without inventing orientation",
       "reason": "Intended contract change: full native quaternions provide orientation; legacy position-only sampling still interpolates position but no longer invents heading from travel. The replacement preserves interpolation coverage without asserting fabricated orientation.",
       "pr": "#5187"
-    }
+    },
+    {"step": "V4-web", "from": "0–3 available owned Souls stay inline with creation; four collapse the entire group into a pile", "to": "0–3 available owned Souls stay inline; four or more fold the chips into a pile, New Soul stays in the bar", "reason": "New Soul stays in the bar with 4+ Souls (the pile folds the chips only); same test, renamed, now also checks 5 Souls", "pr": "#5331"}
   ]
 }

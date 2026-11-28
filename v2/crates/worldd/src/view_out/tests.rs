@@ -239,6 +239,7 @@ fn kill_child() {
 }
 
 #[test]
+#[allow(clippy::disallowed_methods)] // A child process on the real clock: the wait for its rewrites is real time.
 fn a_writer_killed_mid_write_leaves_no_broken_part() {
     let h = header();
     let base = scratch("kill");
@@ -252,13 +253,24 @@ fn a_writer_killed_mid_write_leaves_no_broken_part() {
             .stdout(std::process::Stdio::null())
             .spawn()
             .expect("the child");
-        std::thread::sleep(Duration::from_millis(150 + (round * 37) % 250));
+        // On the child, not the wall clock (on a loaded machine a debug child takes longer than a fixed sleep to pack its
+        // parts): killed once it is rewriting the last part (its part 4 is there), at a moment that varies by round.
+        let dir = root.join(stream::dir(&h, &key(&h)));
+        let until = std::time::Instant::now() + Duration::from_secs(60);
+        while !dir.join("4").exists() {
+            assert!(
+                child.try_wait().expect("the child's state").is_none(),
+                "the child ended before its rewrites"
+            );
+            assert!(
+                std::time::Instant::now() < until,
+                "the child rewrites its last part"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis((round * 37) % 50));
         child.kill().expect("killed");
         let _ = child.wait();
-        let dir = root.join(stream::dir(&h, &key(&h)));
-        if !dir.exists() {
-            continue;
-        }
         let hb = fs::read(root.join(stream::header_path(&h))).expect("the header");
         Header::read(&hb).expect("the header is whole");
         for (name, bytes) in files(&dir) {
@@ -5238,4 +5250,307 @@ fn a_writer_opening_removes_what_a_killed_group_left() {
         "a text write's temporary is not the group's"
     );
     fs::remove_dir_all(&d).unwrap();
+}
+
+/// #5282: the stream writer's cuts at 1,000 agents were made cheaper without changing a byte. A fixed seed's log (Souls
+/// made, words said, fields set, links and timers made and ended, things taken out, parts cut by world time) is
+/// written by the public writer, and every file of its generation, its baseline and the reader's state hash to what
+/// main wrote before the change (e72df671e). Also: every part read back in place says the sequences and times
+/// `stream_effect` reads whole, and the references found in place are `references`'.
+///
+/// The pin was taken by running this test on main's writer: `view_out/mod.rs` as at e72df671e, with this branch's
+/// `seq_at`, `refs_into` and `refs_of` appended (the test calls them; the writer there does not), and this
+/// `tests.rs`. The test then fails only on the pin, printing main's hash.
+#[test]
+fn i5282_a_fixed_seed_writes_the_parts_main_wrote() {
+    let (all, parts, whole) = i5282_run();
+    assert!(parts > 40, "parts written: {parts}");
+    assert!(
+        whole > 0 && whole < parts,
+        "both kinds of cut: {whole} whole of {parts}"
+    );
+    let got = replica::encode::to_hex(&replica::ids::sha256(&all));
+    println!(
+        "5282 fixed seed: {parts} parts, {whole} whole, {} bytes, sha256 {got}",
+        all.len()
+    );
+    assert_eq!(got, I5282_MAIN, "the parts differ from main's");
+}
+
+/// The SHA-256 of [`i5282_run`]'s files on main (e72df671e), before #5282.
+const I5282_MAIN: &str = "ccabf406b648d0f725e01fadba202dadbbfdbd748cdd4424c21b43ced0970c7a";
+
+fn i5282_run() -> (Vec<u8>, u64, u64) {
+    let h = header();
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
+    let d = scratch("5282-fixed-seed");
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let words = Arc::new(
+        Store::open_dir(
+            &d.join("words"),
+            replica::ids::Minter::at(Scope([59; 16]), 0),
+        )
+        .unwrap(),
+    );
+    let mut out = PublicWriter::open_spooled(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: Some(words.clone()),
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+        Closed::default(),
+        None,
+    )
+    .unwrap();
+    let everyone = Audience::Everyone;
+    let id = |space: u8, n: u64| Id::new(Scope([space; 16]), n + 1).unwrap();
+    let change = |seq: u64, node: Id, audience: Audience, c: Change| {
+        w3e_effect(
+            seq,
+            node,
+            audience,
+            Body::Changes(vec![ChangeRec {
+                change: c,
+                rest: Rest::new(),
+            }]),
+        )
+    };
+    // A fixed seed (a 64-bit LCG): which Soul acts, and how.
+    let mut seed: u64 = 5282;
+    let mut next = |n: u64| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (seed >> 33) % n
+    };
+    let souls = 24u64;
+    let (mut live, mut links, mut timers) = (
+        vec![false; souls as usize],
+        std::collections::BTreeMap::new(),
+        std::collections::BTreeMap::new(),
+    );
+    // Soul 0 now and then flies to a spot of the zone and lands a second later: the cuts it spans are whole.
+    let destination = Pose {
+        frame: Frame {
+            node: h.zone,
+            slot: None,
+        },
+        position: Vec3::new(5, 0, 5),
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: h.zone,
+            height: 0,
+        },
+    };
+    let mut flight: Option<(Id, u64)> = None;
+    // Souls 20 to 23 hold no links or timers; now and then one is taken out, for good.
+    let mut gone = vec![false; souls as usize];
+    let mut seq = 0u64;
+    for record in 0..400u64 {
+        let mut effects = Vec::new();
+        if let Some((transfer, due)) = flight
+            && record == due
+        {
+            effects.push(w3e_effect(
+                seq,
+                h.zone,
+                everyone,
+                Body::Transfer(replica::effects::TransferRec::Arrive {
+                    transfer,
+                    carried: Vec::new(),
+                }),
+            ));
+            seq += 1;
+            flight = None;
+        } else if flight.is_none() && live[0] && record % 37 == 36 {
+            let transfer = id(0xd0, seq);
+            let node = id(0xa0, 0);
+            effects.push(w3e_effect(
+                seq,
+                node,
+                everyone,
+                Body::Transfer(replica::effects::TransferRec::Leave {
+                    transfer,
+                    node,
+                    lineage: h.lineage,
+                    zone: h.zone,
+                    pose: destination,
+                }),
+            ));
+            seq += 1;
+            flight = Some((transfer, record + 20));
+        }
+        for _ in 0..1 + next(4) {
+            let mut s = next(souls);
+            if s == 0 && flight.is_some() || gone[s as usize] {
+                s = 1;
+            }
+            let node = id(0xa0, s);
+            if !live[s as usize] {
+                // A Soul made, public or (one in five) private, with words on it.
+                let audience = if s % 5 == 4 {
+                    Audience::Of(node)
+                } else {
+                    everyone
+                };
+                effects.push(w3e_create(&h, seq, node, h.zone, audience));
+                seq += 1;
+                let said = words
+                    .write(
+                        format!("words of {s} at {record}").as_bytes(),
+                        audience,
+                        node,
+                    )
+                    .unwrap();
+                effects.push(change(seq, node, audience, set(node, 5, said.to_value())));
+                seq += 1;
+                live[s as usize] = true;
+            } else {
+                let audience = if s % 5 == 4 {
+                    Audience::Of(node)
+                } else {
+                    everyone
+                };
+                let plain = s < 20;
+                if !plain && record % 53 == 52 {
+                    effects.push(change(seq, node, audience, Change::Remove { node }));
+                    gone[s as usize] = true;
+                    seq += 1;
+                    continue;
+                }
+                match next(20) {
+                    0..=11 => effects.push(change(
+                        seq,
+                        node,
+                        audience,
+                        set(node, 1, Value::Uint(next(1000))),
+                    )),
+                    12..=13 => {
+                        let said = words
+                            .write(
+                                format!("more of {s} at {record}").as_bytes(),
+                                audience,
+                                node,
+                            )
+                            .unwrap();
+                        effects.push(change(seq, node, audience, set(node, 5, said.to_value())));
+                    }
+                    14..=15 => {
+                        // A link between two public Souls.
+                        let t = next(souls);
+                        let to = id(0xa0, t);
+                        if t != s
+                            && live[t as usize]
+                            && s % 5 != 4
+                            && t % 5 != 4
+                            && s != 0
+                            && t != 0
+                            && plain
+                            && t < 20
+                        {
+                            let link = id(0xb0, seq);
+                            links.insert(link, node);
+                            effects.push(change(
+                                seq,
+                                node,
+                                everyone,
+                                Change::Link {
+                                    link,
+                                    ty: h.kinds[0].clone(),
+                                    ends: [node, to],
+                                    owner: replica::world_model::End::First,
+                                    audience: everyone,
+                                },
+                            ));
+                        } else {
+                            effects.push(change(seq, node, audience, set(node, 1, Value::Uint(1))));
+                        }
+                    }
+                    16 => match links.pop_first() {
+                        Some((link, owner)) => {
+                            effects.push(change(seq, owner, everyone, Change::Unlink { link }))
+                        }
+                        None => {
+                            effects.push(change(seq, node, audience, set(node, 1, Value::Uint(2))))
+                        }
+                    },
+                    17..=18 if s != 0 && plain => {
+                        let timer = id(0xc0, seq);
+                        timers.insert(timer, node);
+                        effects.push(w3e_effect(
+                            seq,
+                            node,
+                            audience,
+                            Body::Timers(vec![replica::effects::TimerRec::Set {
+                                timer,
+                                due: 100_000_000 + seq as i64,
+                                name: Name::new("souls:light").unwrap(),
+                            }]),
+                        ));
+                    }
+                    17..=18 => {
+                        effects.push(change(seq, node, audience, set(node, 1, Value::Uint(4))))
+                    }
+                    _ => match timers.pop_first() {
+                        Some((timer, owner)) => effects.push(w3e_effect(
+                            seq,
+                            owner,
+                            if (0..souls).any(|i| id(0xa0, i) == owner && i % 5 == 4) {
+                                Audience::Of(owner)
+                            } else {
+                                everyone
+                            },
+                            Body::Timers(vec![replica::effects::TimerRec::Clear { timer }]),
+                        )),
+                        None => {
+                            effects.push(change(seq, node, audience, set(node, 1, Value::Uint(3))))
+                        }
+                    },
+                }
+                seq += 1;
+            }
+        }
+        let bytes = w3e_packet(&h, effects);
+        actual.apply_bytes(&bytes).unwrap();
+        // Each record read back in place says what it says whole.
+        for e in &Part::read(&bytes).unwrap().effects {
+            let v = e.to_value();
+            assert_eq!(
+                seq_at(&h, &v).unwrap(),
+                (e.envelope.sequence, e.envelope.at)
+            );
+            assert_eq!(refs_of(&v), references(&v));
+        }
+        out.push(record, &bytes).unwrap();
+    }
+    out.flush().unwrap();
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let state = out.public_player().state().clone();
+    assert_eq!(refs_of(&state), references(&state));
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    all.extend(&out.baseline);
+    all.extend(wire(state).unwrap());
+    let parts = out.public_player().next();
+    let _ = fs::remove_dir_all(&d);
+    (all, parts, out.whole_cuts)
 }

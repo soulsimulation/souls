@@ -142,7 +142,8 @@
 //   nothing received for 10 s, 60 s on a link found slow) is let go at once, and acts wait for the next sign-in
 //   (#4980). One whose frames still arrive while a sync's answer is late is behind, not gone: it stays, says
 //   `gap.why` `behind`, and its acts go on it (#4979: on a link slower than the world's speech, reconnecting only fell
-//   behind again). One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
+//   behind again). Frames heard only in the first second of the sync were already on their way and are no such
+//   sign: a network that stalls then is let go 10 s after the last of them, not found slow. One the gateway let go for a full queue is closed as `agent.behind` (1013): it signs in again at
 //   once, and answers say `gap.why` `behind` until its copy is current again (#4979). A `wait` under way is told when
 //   a signed-in socket is lost (`{"kind":"disconnected","say":..}`, with `"why":"behind"` then) and when the next is
 //   current (`{"kind":"reconnected", "gap_ms":..}`), once each a gap (#4977). Every frame is built and read by
@@ -171,7 +172,7 @@ import { stats, transcriptOf } from '../stats/stats.mjs';
 import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, metresFrom, query } from './reads.mjs';
-import { climbNamed, climbOffers, placeAt, placesIn, rowsWithPlaces, waysOf } from '../view/ways.mjs';
+import { climbNamed, climbOffers, nothingToStandOn, placeAt, placesIn, rowsWithPlaces, waysOf } from '../view/ways.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { aboardOf, aboardWords } from '../check/aboard.mjs';
 import { otherSlot, wireArgs } from '../check/other-slot.mjs';
@@ -198,7 +199,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote, offerPlace } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
 import { activitiesIn, activityNamed, kindsListed, touchOf } from '../together/together.mjs';
-import { GO_MOST_MS, NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, workLines } from '../carry/carry.mjs';
+import { GO_MOST_MS, NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, pointOf, workLines } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
@@ -411,6 +412,9 @@ let laggingAt = null; // when the socket, frames still arriving, was found behin
 // SLOW_QUIET with nothing received (#4979), not SYNC_WITHIN (#4980's bound on a link that kept up).
 let slowLink = false;
 const SLOW_QUIET = 60_000;
+// A frame heard within this of a sync's start was on its way before an answer could be late, as on any link: it shows
+// the socket was alive when it asked, not that frames still arrive ahead of a late answer (`awaitAnswer`).
+const IN_FLIGHT = 1_000;
 const traceFile = openTrace(rt.dir);
 const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
 // A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
@@ -712,7 +716,8 @@ function closeMail(id, state, outcome) {
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
-  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: carried.splice(0) };
+  // settledAt: once what was on its way when the sync began has been heard (`awaitAnswer`).
+  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), settledAt: Infinity, version: null, waiters: carried.splice(0) };
   forgetTaken(copy); // records an earlier sync took and never finished
   if (cutAt !== null && cutWhy !== 'behind') cutWhy = 'syncing'; // #4979: behind says why until it is current
   awaitAnswer(sock);
@@ -723,17 +728,23 @@ function startSync(sock, kind) {
  * The sync's next answer is due within SYNC_WITHIN of the last frame the socket received, not of the ask (#4979): a
  * socket whose frames keep arriving is alive, only behind (a link slower than what the world sends, the speech it
  * hears included, which is never dropped), and says so (`gap.why` `behind`) instead of reconnecting in a loop, where
- * each new socket fell behind again. One that received nothing for SYNC_WITHIN is given up at once (#4980).
+ * each new socket fell behind again. One that received nothing for SYNC_WITHIN is given up at once (#4980); frames
+ * heard as the sync began (within IN_FLIGHT of it) were on their way already and do not show it behind.
  */
 function awaitAnswer(sock) {
   clearTimeout(syncing.timer);
+  const mine = syncing;
   const due = () => {
     if (!syncing) return;
     // On a link found slow a single frame can take longer than SYNC_WITHIN to arrive whole (a sync's records at 512
     // B/s), so silence counts only past SLOW_QUIET there; a new socket on it would only start that backlog again.
     const quiet = performance.now() - sock.heardAt, bound = slowLink ? SLOW_QUIET : SYNC_WITHIN;
     if (quiet >= bound) { sock.giveUp('sync: no answer; reconnecting'); return; }
-    if (laggingAt === null) {
+    // Found behind by a frame heard after the sync settled, an answer still to come: its answers come late, or wait
+    // behind other frames. A frame heard before that is no such sign: a network that stalled just after the ask was
+    // found slow by it, and the dead socket kept for SLOW_QUIET with acts written into it (#4980, a daemon test's
+    // failures in CI). Not found behind, the socket is looked at again once it has been silent for SYNC_WITHIN.
+    if (laggingAt === null && (slowLink || sock.heardAt > syncing.settledAt)) {
       laggingAt = performance.now();
       slowLink = true;
       cutAt ??= laggingAt;
@@ -742,7 +753,17 @@ function awaitAnswer(sock) {
     }
     syncing.timer = setTimeout(due, Math.min(bound - quiet, SYNC_WITHIN));
   };
-  syncing.timer = setTimeout(due, SYNC_WITHIN);
+  if (mine.settledAt !== Infinity) { mine.timer = setTimeout(due, SYNC_WITHIN); return; }
+  // Settled: IN_FLIGHT after the sync began, and once what had arrived by then was read (the immediate runs after that
+  // turn's reads, so frames a busy daemon had not yet read are not taken for later ones). The sync's own answers
+  // count: on a link that keeps up each is there at once; on #4979's link (512 B/s) each socket heard its last frame
+  // about 2 s after sign-in, then waited over SYNC_WITHIN for one frame, and settling at each ask reconnected in a loop.
+  const wait = Math.max(0, mine.t0 + IN_FLIGHT - performance.now());
+  mine.timer = setTimeout(() => {
+    if (syncing !== mine) return;
+    setImmediate(() => { if (syncing === mine) mine.settledAt = performance.now(); });
+    mine.timer = setTimeout(due, SYNC_WITHIN - wait);
+  }, wait);
 }
 
 function syncAnswer(sock, n, refused, bytes) {
@@ -1104,7 +1125,8 @@ function onEntry(e) {
   for (const ev of events) {
     if (ev.name !== MOVE_ENDED || ev.fields?.[7] == null) continue;
     const mine = [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean);
-    if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]) }); if (awayEnded.length > 20) awayEnded.shift(); }
+    // A2-4: one done as near as the crowd allows names the other body nearest its point (field 11)
+    if (mine.includes(ev.fields[1])) { awayEnded.push({ sequence: Number(e.sequence), mm: Number(ev.fields[7]), ...(ev.fields[11] != null ? { by: ev.fields[11] } : {}) }); if (awayEnded.length > 20) awayEnded.shift(); }
   }
   // #5063: an act of mine made from afar (its end's field 8), for that act's receipt (`from_afar`)
   for (const ev of events) {
@@ -1638,6 +1660,15 @@ function actsOf(words) {
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
     } else if (ID.test(w)) out.push({ verb: `${NS}:walk`, this: w });
+    // FOR-FABLE 14: `walk:<x>,<z>` (metres, x east and z south) walks to that point: the world stands the Soul on the
+    // ground there, or the floor there nearest its own level (down a ladder, `walk.no-ground-there` off any)
+    else if (/^walk:/.test(w) && pointOf(w.slice(5))) {
+      rows ??= rowsOf(copy);
+      // The open ground, else (a copy that holds no row of it) the node the Soul's body stands in.
+      const ground = groundIn(rows) ?? own().row?.parent ?? null;
+      if (!ground) throw Object.assign(new Error('no open ground in the copy yet: look first'), { code: 'walk-no-ground' });
+      out.push({ verb: `${NS}:walk`, this: ground, point: pointOf(w.slice(5)) });
+    }
     // #3178: `sit:<kind>` (sit:bench, sit:chair) is any free one of that kind where the Soul is, nearest it
     else if (/^sit:/.test(w) && by(w)) out.push(by(w));
     else if (k > 0 && ID.test(tail) && CARRIER.test(w.slice(0, k))) out.push({ verb: w.slice(0, k), this: tail, carrier: true });
@@ -2090,6 +2121,10 @@ async function answer(req, conn = null) {
         if (req.for !== undefined) serving.set(sequence, req.for);
         return closing({ ok: true, sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
       }
+      // FOR-FABLE 14: a walk to a point goes as parameter 1, [x, 0, z] µm on the open ground; the intent's parameters
+      // are its first act's, so only the first may be one (its fallbacks walk to things).
+      if (keep.slice(1).some((c) => c.point)) return closing({ ok: false, code: 'act-walk-point-first', sent: false, detail: 'walk:<x>,<z> goes first: a fallback walks to a thing (an id), not a point' }, null, { now: true });
+      if (keep[0].point) req.params = { ...(req.params ?? {}), 1: [keep[0].point[0], 0, keep[0].point[1]] };
       // 0.135 G1: a walk's `gait=walk|jog|run` goes as parameter 2, `gait:<name>`; the world refuses any other by name.
       const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
@@ -2159,6 +2194,9 @@ async function answer(req, conn = null) {
       if (!seen.ok) return closing(seen, null, { now: true });
       // `object <frame> climb to <place id | its name>` (`../view/ways.mjs`): a walk to that standing place.
       const climb = climbNamed(seen.offers, req.action, req.args);
+      // N14: a frame with no deck on it has nothing to stand on at its ladders' tops.
+      const none = (climb !== undefined || String(req.action) === 'climb') && !climb ? nothingToStandOn(seen.ways, req.this) : null;
+      if (none) return closing(none, null, { now: true });
       if (climb !== undefined) req.args = [];
       const offer = climb !== undefined ? climb : offerNamed(seen.offers, req.action);
       if (!offer) {
@@ -2376,6 +2414,7 @@ async function answer(req, conn = null) {
       }
       const away = walked ? endOf() : null;
       if (away) got.receipt.away_m = Math.round(away.mm / 100) / 10;
+      if (away?.by != null) { const by = rowsOf(copy).get(away.by); got.receipt.held_off_by = by?.name ? `${by.name} (${away.by})` : String(away.by); }
       const far = done ? afar() : null;
       if (far) got.receipt.from_afar = readableDetail(far, rowsOf(copy).values());
       const sat = byKind ? satIn() : null;
@@ -2468,7 +2507,7 @@ function thingOf(id) {
   // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
   const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
   // A part's ways (`../view/ways.mjs`): its places that exist now, the ways up to them, and a climb to each standing place.
-  const ways = waysOf(rows, row, entry);
+  const ways = waysOf(rows, row, entry, undefined, kinds);
   return { ok: true, row, entry, ways, offers: [...offersOf(row.id, entry, { moving: Boolean(row.moving) }), ...climbOffers(ways)], fields: heldState(kinds).nodes[row.id]?.fields };
 }
 

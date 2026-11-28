@@ -689,6 +689,7 @@ fn a_form_cannot_put_a_creators_solid_thing_into_a_slot_with_a_point() {
             body: room,
             soul: room,
             hands: &[],
+            controller: &crate::controller::Controller::new(),
             node,
             reserved: &[],
             now: 0,

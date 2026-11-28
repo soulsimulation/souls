@@ -101,6 +101,9 @@ pub const WALK: i64 = sim::gaits::WALK.speed;
 /// `walk.stopped-short`.
 pub const STOPPED_SHORT_MM: u64 = 400;
 pub const WALK_AGAIN: u8 = 6;
+/// How near its point another body stands to be named as the one that held a walk off it (A2-4), µm: two rings of the
+/// spot tables (`sim::spots::PITCH`).
+pub const HELD_OFF_NEAR: i64 = 2 * sim::spots::PITCH;
 /// How long after a walk stopped short it is sent again, µs: bodies in its way have time to move off (six times, three
 /// seconds).
 pub const WALK_AGAIN_AFTER: Micros = 500_000;
@@ -249,6 +252,9 @@ pub struct Bodies {
     /// its ground), how far, mm, and the passage it cleared (the thing it belongs to and its kind; none off the
     /// ground), until its answer is written.
     pub goal_moved: BTreeMap<Id, (u64, Option<(Id, sim::links::Kind)>)>,
+    /// Each walk done as near as the crowd allows (A2-4): the other body nearest its point there, until its answer is
+    /// written (its end's field 11).
+    pub held_off_by: BTreeMap<Id, Id>,
     /// How many times each such walk was sent again while bodies moved round its goal ([`WALK_AGAIN`]).
     walked_again: BTreeMap<Id, u8>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
@@ -549,6 +555,7 @@ impl Bodies {
             short: BTreeSet::new(),
             stopped_short: BTreeMap::new(),
             goal_moved: BTreeMap::new(),
+            held_off_by: BTreeMap::new(),
             walked_again: BTreeMap::new(),
             took: BTreeMap::new(),
             walked_to: BTreeMap::new(),
@@ -1523,11 +1530,61 @@ impl Bodies {
         }
     }
 
+    /// A walk to point `p` of the open ground (FOR-FABLE 14, `walk x,z`): to the ground a body may stand on at that
+    /// point on the plan, the open ground's or a floor's, whichever is nearest the walker's own level (a Soul on a
+    /// frame's standing place sent to a point 2 m from its foot climbs down; one on a deck sent to a point on it stays
+    /// up). A point in a doorway's or a stair's clearance is walked to as before (#5254: moved out to a walker's
+    /// clearance, ended `walk.goal-moved`), and so is one with no ground under it within a walker's goal tolerance
+    /// of ground a body stands on ([`STOPPED_SHORT_MM`]); farther, it is refused `walk.no-ground-there`, naming the
+    /// nearest point the walker may stand on and reach on the spot tables' rings out to 7 m (map lookups only).
+    fn ground_point(&mut self, body: Id, p: Vec3) -> R<Target> {
+        let ground = self.town.ground;
+        let Some(b) = self.runner.controller.body(body).cloned() else {
+            return Ok(Target::new(ground, p));
+        };
+        // A point in a passage's clearance on the open ground (#5254) as before: the spot tables move it out. One on
+        // a floor above the ground goes to that floor (the top of a frame's ladder is in the ladder's clearance).
+        let passage = self.town.passage_at(ground, p).is_some();
+        let view = self.town.view_for(body)?;
+        match view.level_under(&b, p) {
+            Some((node, at)) if node != ground || !passage => return Ok(Target::new(node, at)),
+            _ if passage => return Ok(Target::new(ground, p)),
+            _ => {}
+        }
+        let near = i64::try_from(STOPPED_SHORT_MM).unwrap_or(0) * 1000;
+        if view
+            .standable_near(&b, p, sim::spots::REACH_PITCH, near)
+            .is_some()
+        {
+            return Ok(Target::new(ground, p));
+        }
+        let (pitch, far) = (sim::spots::PITCH, sim::spots::PITCH * sim::spots::RINGS);
+        let nearest = match view.standable_near(&b, p, pitch, far) {
+            Some(s) => format!(
+                "the nearest point to stand on: x={} z={} mm",
+                s.x / 1000,
+                s.z / 1000
+            ),
+            None => format!("no point to stand on within {} m of it", far / 1_000_000),
+        };
+        Err(Refusal {
+            name: "walk.no-ground-there",
+            detail: format!(
+                "no ground to stand on at x={} z={} mm; {nearest}",
+                p.x / 1000,
+                p.z / 1000
+            ),
+        })
+    }
+
     /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
     /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
     /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
     fn goal(&mut self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
+            if node == self.town.ground {
+                return self.ground_point(body, p);
+            }
             return Ok(Target::new(node, p));
         }
         // The stand point of the free slot the world picks for `body` (C19), else of the thing's seat.
@@ -1692,7 +1749,26 @@ impl Bodies {
 
     /// The walks whose target or end distance is still kept: none once every walk has ended and been written.
     pub fn walks_kept(&self) -> usize {
-        self.walked_to.len() + self.away_of.len() + self.walked_again.len()
+        self.walked_to.len() + self.away_of.len() + self.walked_again.len() + self.held_off_by.len()
+    }
+
+    /// The other body standing nearest point `p` of node `node` (µm), within [`HELD_OFF_NEAR`] of it on the plan: the
+    /// smaller id of two as near.
+    fn nearest_other(&self, body: Id, node: Id, p: Vec3) -> Option<Id> {
+        self.runner
+            .controller
+            .bodies()
+            .filter(|m| m.id != body && m.pose.frame.node == node)
+            .map(|m| {
+                let (dx, dz) = (m.pose.position.x - p.x, m.pose.position.z - p.z);
+                (
+                    (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt(),
+                    m.id,
+                )
+            })
+            .filter(|(d, _)| *d <= i128::from(HELD_OFF_NEAR))
+            .min()
+            .map(|(_, b)| b)
     }
 
     /// How far `body` stands from point `p` (µm, the frame of node `node`) on the level, mm; `None` when it stands in
@@ -1864,6 +1940,11 @@ impl Bodies {
             match ask {
                 Ask::Walk { node, point, gait } => {
                     let goal = self.goal(a.body, node, point);
+                    // A point on the open ground walked to on a floor above it (FOR-FABLE 14) is that floor's point:
+                    // how far from it the walk ends, and its resends, are read there.
+                    if let (Ok(g), Some(_)) = (&goal, point) {
+                        self.walked_to.insert(id, (g.node, Some(g.point())));
+                    }
                     self.replace(a.body);
                     let walk = Box::new(Route::sent(speed(gait), self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
@@ -2180,11 +2261,8 @@ impl Bodies {
                 // #5254: a walk to a point that ended short of it is sent again while bodies may be moving off its way,
                 // [`WALK_AGAIN`] times (some three seconds); then it answers how far short it stopped, and why.
                 // #5254: one that came to the place it was granted off the point it was sent to is done there and says
-                // so (`goal_moved`): that point in a doorway's or a stair's clearance, moved only as far as clears the
-                // passage itself, however far that is; or off its ground, nearer than a walker's goal tolerance. Never
-                // one a crowd held off (A2-4, A2-5: done as near as the crowd allows), nor one granted a place outside
-                // the passage's clearance (the full rings' or an overflow point): the spot tables admit a place in the
-                // clearance only as one that clears the passage itself, nearest first.
+                // so (`goal_moved`): that point in a doorway's or a stair's clearance, moved out to [`sim::spots::CLEAR`]
+                // off the passage (A3), however far that is; or off its ground, nearer than a walker's goal tolerance.
                 if how.is_ok()
                     && !self.short.contains(&id)
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
@@ -2195,10 +2273,9 @@ impl Bodies {
                     && there <= 50
                 {
                     match self.town.passage_at(t, p) {
-                        Some(why) if self.town.passage_at(t, g).is_some() => {
+                        Some(why) => {
                             self.goal_moved.insert(id, (asked, Some(why)));
                         }
-                        Some(_) => {}
                         None if asked <= STOPPED_SHORT_MM => {
                             self.goal_moved.insert(id, (asked, None));
                         }
@@ -2210,7 +2287,6 @@ impl Bodies {
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(mm) = self.gap_to(body, t, p).filter(|mm| *mm > STOPPED_SHORT_MM)
                 {
-                    let crowd = self.short.contains(&id);
                     let n = self.walked_again.get(&id).copied().unwrap_or(0);
                     // Sent again half a second after it stopped, so bodies in its way have time to move off.
                     let since = self
@@ -2233,6 +2309,23 @@ impl Bodies {
                             continue;
                         }
                     }
+                    // Held off its point by others (A2-4): ended short as near as the crowd allows, or at the place it
+                    // was granted while another body stands near the point (within [`HELD_OFF_NEAR`]) and the point
+                    // itself is ground it may stand on and reach, clear of every doorway and stair
+                    // (`View::stand_reached`). Done as near as the crowd allows, never `walk.stopped-short`.
+                    let crowd =
+                        self.short.contains(&id)
+                            || (self.runner.granted.get(&body).is_some_and(|g| {
+                                self.gap_to(body, t, *g).is_some_and(|mm| mm <= 50)
+                            }) && self.nearest_other(body, t, p).is_some()
+                                && self.pose(body).is_some_and(|from| {
+                                    self.town
+                                        .view_for(body)
+                                        .is_ok_and(|v| v.stand_reached(t, p, from).is_some())
+                                }));
+                    if crowd {
+                        self.short.insert(id);
+                    }
                     self.stopped_short.insert(id, (mm, crowd));
                 }
                 self.walked_again.remove(&id);
@@ -2247,6 +2340,12 @@ impl Bodies {
                         .or_else(|| self.gap_of(t, body));
                     if let Some(mm) = gap {
                         self.away_of.insert(id, mm);
+                        // A2-4: the other body nearest its point, for its end beside how far short it stood.
+                        if self.short.contains(&id)
+                            && let Some(by) = point.and_then(|p| self.nearest_other(body, t, p))
+                        {
+                            self.held_off_by.insert(id, by);
+                        }
                     }
                     self.face(body, t);
                 }

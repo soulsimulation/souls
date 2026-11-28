@@ -380,7 +380,7 @@ impl Engine {
     }
 
     /// Slot `k` of `bay` on `ground` for a part whose raise is `geo` (#5067): its pose on the ground (the slot's point,
-    /// the bay's turn), when the part's foot is within [`INTO_NEAR`] of it on the plan and the part stands turned as
+    /// the bay's turn and the slot's own, FOR-FABLE 10), when the part's foot is within [`INTO_NEAR`] of it on the plan and the part stands turned as
     /// the slot within [`INTO_COS`]; refused `raise.not-at-slot` naming how far, or `slot.occupied`.
     fn raise_slot(
         &self,
@@ -401,9 +401,24 @@ impl Engine {
             .find(|(n, _)| *n == k)
             .map(|(_, p)| p)
             .ok_or_else(|| refusal("slot.unknown", format!("{} has no slot {k}", show(bay))))?;
+        // FOR-FABLE 10: the bay's turn, then its slot's own when it declares one.
+        let kind = tree
+            .node(bh)
+            .map(|n| n.kind().as_str().to_owned())
+            .unwrap_or_default();
+        let turn_mdeg = self.asm.as_ref().map_or(0, |a| {
+            a.slot_turns
+                .get(&(plain(&kind).to_owned(), k))
+                .copied()
+                .unwrap_or(0)
+        });
+        let slot_turn =
+            Quat::from_yaw_mdeg(turn_mdeg).map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         let turn = xform_to(tree, bh, gh)
             .map_err(|e| refusal("part-pose", e))?
-            .rot;
+            .rot
+            .then(slot_turn)
+            .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         if let Some(other) = tree
             .children(bh)
             .unwrap_or(&[])
@@ -436,12 +451,18 @@ impl Engine {
                 "raise.not-at-slot",
                 format!(
                     "{}'s foot is {} mm from slot {k} of {} (at most {} mm), turned {} thousandths from its turn \
-                     (at least {INTO_COS}); next: lay it with its foot at the slot, its face as the bay's frames face",
+                     (at least {INTO_COS}); next: lay it with its foot at the slot, {}",
                     show(part),
                     off / 1000,
                     show(bay),
                     INTO_NEAR / 1000,
-                    cos
+                    cos,
+                    match turn_mdeg {
+                        0 => "its face as the bay's frames face".to_owned(),
+                        t => format!(
+                            "its face as the slot faces: turned {t} millidegrees from the bay's frames"
+                        ),
+                    }
                 ),
             ));
         }

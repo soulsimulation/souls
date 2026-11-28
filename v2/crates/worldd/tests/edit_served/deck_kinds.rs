@@ -141,6 +141,24 @@ fn deck_world(d: &Path) -> (String, BTreeMap<String, u64>) {
     (f.to_json(), numbers)
 }
 
+/// The served world's node ids by name: the import with the entries, as the world's (the kinds' floors and ladders
+/// are nodes too, so the ids differ from the facts' alone).
+fn served_nodes(d: &Path, facts: &str) -> BTreeMap<String, Id> {
+    let texts: Vec<(String, String)> = std::fs::read_dir(d.join("entries"))
+        .unwrap()
+        .map(|f| f.unwrap().path())
+        .map(|p| {
+            let name = p.file_stem().unwrap().to_string_lossy().into_owned();
+            (name, std::fs::read_to_string(&p).unwrap())
+        })
+        .collect();
+    import_eden::load_with(facts, &texts)
+        .unwrap()
+        .nodes
+        .into_iter()
+        .collect()
+}
+
 /// A served deck world (`deck_world`) and a hand for each of its Souls.
 struct Yard {
     w: Seeded,
@@ -154,8 +172,14 @@ struct Yard {
 
 impl Yard {
     fn serve(tag: &str, souls: u64) -> Yard {
+        Yard::serve_edited(tag, souls, |_, f| f)
+    }
+
+    /// [`Yard::serve`] with the deck world's facts and entries changed first by `edit` (the scratch folder, the facts).
+    fn serve_edited(tag: &str, souls: u64, edit: impl FnOnce(&Path, String) -> String) -> Yard {
         let d = scratch(tag);
         let (facts, slots) = deck_world(&d);
+        let facts = edit(&d, facts);
         let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
         let w = seed_entries(
             &d,
@@ -167,20 +191,7 @@ impl Yard {
         let socket = d.join("s");
         let s = serve_with(&w, &socket, None);
         s.line("listening ", 120);
-        // The import with the entries, as the world's: the kinds' floors and ladders are nodes too.
-        let texts: Vec<(String, String)> = std::fs::read_dir(d.join("entries"))
-            .unwrap()
-            .map(|f| f.unwrap().path())
-            .map(|p| {
-                let name = p.file_stem().unwrap().to_string_lossy().into_owned();
-                (name, std::fs::read_to_string(&p).unwrap())
-            })
-            .collect();
-        let nodes = import_eden::load_with(&facts, &texts)
-            .unwrap()
-            .nodes
-            .into_iter()
-            .collect();
+        let nodes = served_nodes(&d, &facts);
         let hands = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
         Yard {
             w,
@@ -660,4 +671,473 @@ fn deck_five_joists_seated_across_the_high_beams_from_where_their_put_is_admitte
         y.leave(0, c);
         y.leave(5, c);
     }
+}
+
+/// The slot `node` is in, and the turn of its own pose there.
+fn yaw_in_slot(w: &Seeded, node: Id) -> (Option<u64>, Quat) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let n = t.node(t.handle(node).unwrap()).unwrap();
+    (n.slot(), n.place().unwrap().orientation)
+}
+
+/// Whether two turns are the same (a unit quaternion and its negation are one turn).
+fn same_turn(a: Quat, b: Quat) -> bool {
+    let (p, q) = (a.parts(), b.parts());
+    let d = |s: i64| (0..4).map(|k| (p[k] - s * q[k]).abs()).max().unwrap();
+    d(1).min(d(-1)) <= Quat::IDENTITY.parts()[0] / 10_000
+}
+
+/// FOR-FABLE 10, slots that declare a turn, in a served world by Souls' intents: the deck bay's two upright slots
+/// declare `turn_mdeg: 90000` (its entry, changed for this test). Frame 1 stands loose on `upright_a`'s place turned
+/// 90°, frame 2 on `upright_b`'s turned 270° (the half turn from it; a 12 ft frame is the same either way,
+/// `symmetry` `front_back`). Two take each frame from beside its edges and put it in its slot: frame 1 is seated turned
+/// 90° in it, frame 2 at the half turn, 270°, the nearer to how it is held, as a slot with no turn seats at 0 and 180.
+#[test]
+fn deck_slots_that_declare_a_turn_seat_their_frames_turned_90_and_the_half_turn_270() {
+    let turns = [("deck-frame-1", 90_000), ("deck-frame-2", 270_000)];
+    let mut y = Yard::serve_edited("deckturn", 5, |d, facts| {
+        let path = d.join("entries/deck_bay.json");
+        let mut bay = json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let json::Value::Obj(top) = &mut bay else {
+            panic!("an entry")
+        };
+        let (_, json::Value::Obj(slots)) = top.iter_mut().find(|(k, _)| k == "slots").unwrap()
+        else {
+            panic!("its slots")
+        };
+        for (name, s) in slots.iter_mut() {
+            if let (true, json::Value::Obj(s)) = (name.starts_with("upright_"), s) {
+                s.push(("turn_mdeg".into(), json::Value::Int(90_000)));
+            }
+        }
+        std::fs::write(&path, bay.to_json()).unwrap();
+        let mut f = json::parse(&facts).unwrap();
+        let json::Value::Obj(top) = &mut f else {
+            panic!("facts")
+        };
+        let (_, json::Value::Arr(things)) = top.iter_mut().find(|(k, _)| k == "things").unwrap()
+        else {
+            panic!("things")
+        };
+        for t in things.iter_mut() {
+            let json::Value::Obj(t) = t else { continue };
+            let id = t
+                .iter()
+                .find(|(k, _)| k == "id")
+                .and_then(|(_, v)| v.str())
+                .map(str::to_owned);
+            if let Some((_, yaw)) = turns.iter().find(|(n, _)| Some(*n) == id.as_deref())
+                && let Some((_, json::Value::Arr(pose))) = t.iter_mut().find(|(k, _)| k == "pose")
+            {
+                pose[3] = json::Value::Int(i128::from(*yaw));
+            }
+        }
+        f.to_json()
+    });
+    for ((frame, yaw), (dz, (a, b), slot)) in turns
+        .into_iter()
+        .zip([(-1_448, (1, 2), "upright_a"), (1_448, (3, 4), "upright_b")])
+    {
+        // Beside its edges: 1.06 m either side of its middle along its own x, turned as it stands.
+        let q = Quat::from_yaw_mdeg(yaw).unwrap();
+        let e = q.rotate(v3(1_060_000, 0, 0)).unwrap();
+        let (ex, ez) = (e.x / 1000, e.z / 1000);
+        y.walk(
+            &[(a, (ex, dz + ez)), (b, (-ex, dz - ez))],
+            "beside a turned frame's edges",
+        );
+        let hold = y.crew(a, &[b]);
+        let f = y.id(frame);
+        assert!(
+            same_turn(yaw_in_slot(&y.w, f).1, q),
+            "{frame} stands turned {yaw} mdeg"
+        );
+        y.ok(
+            a,
+            "part:take",
+            hold,
+            Yard::part(f),
+            "a turned 12 ft frame taken",
+        );
+        let p = y.slot_in(slot, &[]);
+        y.ok(a, "part:put", hold, p, slot);
+        let (in_slot, turn) = yaw_in_slot(&y.w, f);
+        println!("{frame} in slot {in_slot:?} turned {:?}", turn.parts());
+        assert_eq!(in_slot, Some(y.slots[slot]), "{frame} in {slot}");
+        assert!(
+            same_turn(turn, q),
+            "{frame} seated turned {yaw} mdeg in {slot}: {:?}",
+            turn.parts()
+        );
+    }
+}
+
+/// FOR-FABLE 10, a creator's place into a slot that declares a turn: the frame stand's slot `frame_1` declares
+/// `turn_mdeg: 90000` (its entry, changed for this test). A creator places two stands on the open ground and a rack
+/// upright into each one's `frame_1`: the first given no turn is seated turned 90°, the second given 270° (the half turn
+/// from the slot's; an upright is the same either way) is seated at 270°, as a crew's put would seat them.
+#[test]
+fn deck_a_creators_place_into_a_slot_that_declares_a_turn_seats_the_part_turned_so() {
+    let d = scratch("deckplace");
+    let (facts, _) = deck_world(&d);
+    let path = d.join("entries/frame_stand.json");
+    let mut stand = json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let json::Value::Obj(top) = &mut stand else {
+        panic!("an entry")
+    };
+    let (_, json::Value::Obj(slots)) = top.iter_mut().find(|(k, _)| k == "slots").unwrap() else {
+        panic!("its slots")
+    };
+    let (_, json::Value::Obj(first)) = slots.iter_mut().find(|(k, _)| k == "frame_1").unwrap()
+    else {
+        panic!("frame_1")
+    };
+    first.push(("turn_mdeg".into(), json::Value::Int(90_000)));
+    std::fs::write(&path, stand.to_json()).unwrap();
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let w = seed_entries(
+        &d,
+        &facts,
+        1,
+        ((x - 4_000) / 1000, (z - 5_000) / 1000),
+        Some(&d.join("entries")),
+    );
+    let (creator_id, creator_actor) = creator(0xd7);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let g = w.ground;
+    let stand_kind = rules
+        .kinds
+        .keys()
+        .find(|k| k.starts_with("mars:frame_stand@"))
+        .expect("the stand's kind")
+        .clone();
+    for (k, yaw) in [(0, 0), (1, 270_000)] {
+        let got = creator_edit(Op::Place {
+            name: 1,
+            kind: Name::new(&stand_kind).unwrap(),
+            parent: Ref::Node(g),
+            at: Spot {
+                slot: None,
+                position: v3((x - 3_000 + k * 6_000) * 1000, 0, (z + 7_000) * 1000),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: g,
+                    height: 0,
+                },
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        });
+        assert_eq!(got.kind, 1, "a frame stand commits: {got:?}");
+        let stand = got.names[&1];
+        let mut op = upright(&w, &rules, Some((stand, 1)), 0, 0);
+        let given = Quat::from_yaw_mdeg(yaw).unwrap();
+        if let Op::Place { at, .. } = &mut op {
+            at.orientation = given;
+        }
+        let got = creator_edit(op);
+        assert_eq!(
+            got.kind, 1,
+            "an upright in the stand's frame_1 commits: {got:?}"
+        );
+        let (slot, turn) = yaw_in_slot(&w, got.names[&1]);
+        let want = Quat::from_yaw_mdeg(if yaw == 0 { 90_000 } else { 270_000 }).unwrap();
+        println!(
+            "given {yaw} mdeg: seated in slot {slot:?} turned {:?}",
+            turn.parts()
+        );
+        assert_eq!(slot, Some(1), "in frame_1");
+        assert!(
+            same_turn(turn, want),
+            "given {yaw} mdeg, seated at {:?}",
+            turn.parts()
+        );
+    }
+}
+
+impl Yard {
+    /// Frames 1 and 2 taken where they stand and put in `upright_a` and `upright_b` by Souls 2 and 3, and 4 and 5,
+    /// each pair staying to hold its frame ([`Yard::frame`]'s first step). → the two hold crews
+    fn frames_held(&mut self) -> [Id; 2] {
+        let mut holds = Vec::new();
+        for (frame, dz, (a, b), slot) in [
+            ("deck-frame-1", -1_448, (1, 2), "upright_a"),
+            ("deck-frame-2", 1_448, (3, 4), "upright_b"),
+        ] {
+            self.walk(
+                &[(a, (1_060, dz)), (b, (-1_060, dz))],
+                "beside a frame's edges",
+            );
+            let hold = self.crew(a, &[b]);
+            let f = self.id(frame);
+            self.ok(a, "part:take", hold, Self::part(f), "a 12 ft frame taken");
+            let p = self.slot_in(slot, &[]);
+            self.ok(a, "part:put", hold, p, slot);
+            holds.push(hold);
+        }
+        [holds[0], holds[1]]
+    }
+
+    /// Souls 1 and 6 at the left 0.5 m beam's ends take it where it lies. → their crew, holding it lifted
+    fn low_beam_taken(&mut self) -> Id {
+        self.walk(
+            &[(0, (-1_072, -1_547)), (5, (-1_072, 1_547))],
+            "Souls 1 and 6 to the left 0.5 m beam's ends",
+        );
+        let c = self.crew(0, &[5]);
+        let b = self.id("deck-beam-low-l");
+        self.ok(
+            0,
+            "part:take",
+            c,
+            Self::part(b),
+            "the left 0.5 m beam taken",
+        );
+        c
+    }
+}
+
+/// The phases crew `crew`'s tracks were said in (`souls:carry-track` field 3), in order.
+fn track_phases(w: &Seeded, crew: Id) -> Vec<String> {
+    logged(w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| {
+            ev.name.as_str() == "souls:carry-track" && ev.fields.get(&1) == Some(&crew.to_value())
+        })
+        .filter_map(|ev| match ev.fields.get(&3) {
+            Some(Value::Text(t)) => Some(t.as_str().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Waits (at most 20 s) until crew `crew`'s tracks have been said in `phase` (the world's end of a step), and fails
+/// otherwise: a test's next command waits on the world, never on a clock.
+fn track_said(w: &Seeded, crew: Id, phase: &str) {
+    let end = Instant::now() + Duration::from_secs(20);
+    while !track_phases(w, crew).iter().any(|p| p == phase) {
+        assert!(
+            Instant::now() < end,
+            "no {phase} of {}: {:?}",
+            crew.counter(),
+            track_phases(w, crew)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// The turn of `node` in the open ground's frame.
+fn turn_on_ground(w: &Seeded, node: Id) -> Quat {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    sim::ground::scene::xform_to(t, t.handle(node).unwrap(), t.handle(w.ground).unwrap())
+        .unwrap()
+        .rot
+}
+
+/// N4 item 4, a frame lowered out of its slot, in a served world by Souls' intents: frames 1 and 2 stand in their slots,
+/// each held by its crew of two; the left 0.5 m beam is seated, joining both. Frame 1's crew asks `part:lower`: refused
+/// `support.none` (the beam is braced by it), and it stays in its slot. The beam's crew unseats it, carries it 2 m west
+/// and sets it down. Asked again, frame 1 is unseated and laid down on its turning track (`souls:lower`, then its
+/// crew's grips `souls:released`): it lies on the open ground, its up axis now level.
+#[test]
+fn deck_a_frame_lowered_out_of_its_slot_is_refused_while_a_beam_braces_it_then_laid_down() {
+    let mut y = Yard::serve("decklower", 6);
+    let [hold, _] = y.frames_held();
+    let (bay, frame) = (y.id("deck-bay"), y.id("deck-frame-1"));
+    let beams = y.low_beam_taken();
+    let p = y.slot_in("beam_low_l", &[]);
+    y.ok(0, "part:put", beams, p, "beam_low_l");
+    let beam = y.id("deck-beam-low-l");
+    assert_eq!(joints_at(&y.w, beam), 2, "the beam joins both frames");
+    // Toward the bay's outside (-z), so it lies clear of the bay.
+    let toward = y.at(0, -1_448 - 4_000);
+    let lower = || BTreeMap::from([(3, Value::Array(vec![int(toward.x), int(0), int(toward.z)]))]);
+    let got = y.act(
+        1,
+        "part:lower",
+        hold,
+        lower(),
+        "frame 1 lowered while the beam braces it",
+    );
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "support.none"),
+        "{got:?}"
+    );
+    assert_eq!(
+        where_is(&y.w, frame).0,
+        Some(bay),
+        "frame 1 stays in its slot"
+    );
+
+    y.ok(
+        0,
+        "part:unseat",
+        beams,
+        Yard::part(beam),
+        "the beam unseated",
+    );
+    y.walk(
+        &[(0, (-3_072, -1_547)), (5, (-3_072, 1_547))],
+        "the beam carried 2 m west",
+    );
+    y.ok(
+        0,
+        "carry:set-down",
+        beams,
+        BTreeMap::new(),
+        "the beam set down",
+    );
+    assert_eq!(
+        where_is(&y.w, beam).0,
+        Some(y.w.ground),
+        "the beam on the open ground"
+    );
+
+    y.ok(
+        1,
+        "part:lower",
+        hold,
+        lower(),
+        "frame 1 lowered out of its slot",
+    );
+    let (phase, _) = grips_said(&y.w, hold, |p, _| p == "souls:released");
+    println!("frame 1's crew's grips: {phase}");
+    let tracks = track_phases(&y.w, hold);
+    println!("frame 1's crew's tracks: {tracks:?}");
+    assert!(
+        tracks.iter().any(|n| n == "souls:lowered"),
+        "laid down on its track, ended `souls:lowered`: {tracks:?}"
+    );
+    assert_eq!(
+        where_is(&y.w, frame).0,
+        Some(y.w.ground),
+        "out of its slot, on the open ground"
+    );
+    let up = turn_on_ground(&y.w, frame)
+        .rotate(v3(0, 1_000_000, 0))
+        .unwrap();
+    println!("frame 1's up axis now {up:?}");
+    assert!(up.y.abs() < 100_000, "it lies: its up axis level, {up:?}");
+}
+
+/// N4 item 4, `carry-turn-blocked`, in a served world by Souls' intents: a creator stands a wall (1 m long, 2.5 m
+/// tall) 0.9 m north of the plywood sheet lying 5 m east of the bay. Souls 2 and 3 take the sheet from its ends and,
+/// once the world has it lifted, ask a quarter turn: its swept load (or a carrier's way round it) meets the wall, so
+/// it is refused `carry-turn-blocked` before anything moves, saying what it meets; the crew's node and both carriers
+/// stand where they were.
+#[test]
+fn deck_a_carried_sheet_turned_into_a_wall_is_refused_before_anything_moves() {
+    let d = scratch("deckturnblock");
+    let (facts, _) = deck_world(&d);
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let w = seed_entries(
+        &d,
+        &facts,
+        3,
+        ((x - 4_000) / 1000, (z - 5_000) / 1000),
+        Some(&d.join("entries")),
+    );
+    let (creator_id, creator_actor) = creator(0xd8);
+    static_creator(&w, creator_id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 120);
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let bytes = edit_intent(
+        &w,
+        creator_actor,
+        1,
+        0,
+        wall(&w, (x + 5_000) * 1000, (z - 900) * 1000),
+    );
+    world
+        .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    world.write_all(&bytes).unwrap();
+    let got = socket_answer(&mut world);
+    assert_eq!(got.kind, 1, "the wall commits: {got:?}");
+    let sheet = served_nodes(&d, &facts)["plywood-sheet"];
+    let g = w.ground;
+    let mut hands: Vec<Hand> = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+    for (k, dx) in [(1, -1_264), (2, 1_264)] {
+        hands[k].walk_to(g, v3((x + 5_000 + dx) * 1000, 0, z * 1000));
+    }
+    for k in [1, 2] {
+        let got = socket_end(&mut hands[k].s);
+        assert_eq!(got.kind, 1, "Soul {} at the sheet's end: {got:?}", k + 1);
+    }
+    let body = body_of(&w, w.souls[2]);
+    let got = hands[1].act(
+        "activity:offer",
+        g,
+        BTreeMap::from([
+            (1, pinned_activity(&w, "mars:carry_activity")),
+            (2, Value::Text(Name::new("mars:front").unwrap())),
+            (3, Value::Array(vec![body.to_value()])),
+        ]),
+    );
+    assert_eq!(got.kind, 1, "offered: {got:?}");
+    let crew = created_by(&w, &got.entries, "mars:carry_activity@");
+    let got = hands[2].act("activity:accept", crew, BTreeMap::new());
+    assert_eq!(got.kind, 1, "accepted: {got:?}");
+    let got = hands[1].act("part:take", crew, BTreeMap::from([(1, sheet.to_value())]));
+    assert_eq!(got.kind, 1, "the sheet taken: {got:?}");
+    // The take lifts it on a track: the turn is asked once the world has it lifted (else `carry-lifting`).
+    track_said(&w, crew, "souls:lifted");
+    let bodies = [body_of(&w, w.souls[1]), body];
+    let feet = || bodies.map(|b| body_at(&w, b));
+    let (before, at) = (feet(), where_is(&w, crew).2);
+    let got = hands[1].act(
+        "carry:turn",
+        crew,
+        BTreeMap::from([(3, Value::Array(vec![int(0), int(0), int(-1_000_000)]))]),
+    );
+    println!("the sheet turned a quarter, toward north: {got:?}");
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "carry-turn-blocked"),
+        "{got:?}"
+    );
+    assert!(got.detail.contains("meets"), "says what it meets: {got:?}");
+    assert_eq!(
+        where_is(&w, crew).2,
+        at,
+        "the crew's node (the sheet rides it) where it was"
+    );
+    assert_eq!(
+        where_is(&w, sheet).0,
+        Some(crew),
+        "the sheet still in its crew's hands"
+    );
+    assert_eq!(feet(), before, "both carriers where they were");
 }

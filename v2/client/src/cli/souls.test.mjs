@@ -109,6 +109,11 @@ test('the arguments make the daemon request: act takes a ranked list, find its w
   assert.deepEqual(requestOf(['find', 'the', 'red', 'cup', '--limit', '3']).req, { op: 'find', words: 'the red cup', limit: 3 });
   assert.deepEqual(requestOf(['wait', '5']).req, { op: 'wait', seconds: 5 });
   assert.equal(requestOf(['dance']).refused, 'unknown-command');
+  // FOR-FABLE 14: `walk <x>,<z>` is `act walk:<x>,<z>`, its fallbacks and --wait as an act's.
+  const walked = requestOf(['walk', '3.5,-12', '--wait']);
+  assert.deepEqual([walked.req, walked.wait], [{ op: 'act', acts: ['walk:3.5,-12'] }, true]);
+  assert.deepEqual(requestOf(['walk', '3,4', 's_aaaa-1']).req, { op: 'act', acts: ['walk:3,4', 's_aaaa-1'] });
+  assert.equal(requestOf(['walk', 'north']).refused, 'walk-usage');
   assert.deepEqual(requestOf(['wear', 'verdelis']).req, { op: 'wear', body: 'verdelis' });
 });
 
