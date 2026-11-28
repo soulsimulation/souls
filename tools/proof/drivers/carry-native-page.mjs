@@ -41,7 +41,7 @@ const SCENES = {
   third: { who: ['ada', 'bo', 'cy', 'di', 'ed', 'fi'], kind: 'mars:rack_upright', entry: 'content/kinds/construction/rack_upright.json',
     view: 'post=0&hour=12:00&eye=-1,4.6,29&at=4,.9,19.5',
     third: { bay: 'rack-bay', frames: [['rack-frame-1', 'ada', 'bo', '6,18.552', '6,14', 'upright_a'], ['rack-frame-2', 'di', 'cy', '6,21.448', '6,26', 'upright_b']],
-      beam: ['rack-beam-1', 'ed', 'fi', '4.978,20', 'beam_low_l'], beam2: ['rack-beam-2', ['4,16', '8,16', '7.022,20'], 'beam_low_r'] } },
+      beam: ['rack-beam-1', 'ed', 'fi', '4.978,20', 'beam_low_l'], more: [['rack-beam-2', ['4,16', '8,16', '7.022,20'], 'beam_low_r']] } },
   // A plywood sheet carried by two (B4 item 5, attempt 17; CARRY_SCENE=sheet; the deck yard of #5258): taken from the
   // sheet pile, carried east then south, set down by the deck bay.
   sheet: { who: ['ada', 'bo'], kind: 'mars:plywood_sheet', entry: 'content/kinds/construction/plywood_sheet.json',
@@ -59,7 +59,8 @@ const SCENES = {
     view: 'post=0&hour=12:00&eye=-17.5,5.2,31&at=-25,1.2,22',
     third: { bay: 'deck-bay', frames: [['deck-frame-1', 'ada', 'bo', ['to -26,17', 'turn -90', 'to -24,20.095'], null, 'upright_a'],
       ['deck-frame-2', 'di', 'cy', ['to -26,30', 'turn 90', 'to -24,26.649'], null, 'upright_b']],
-      beam: ['deck-beam-1', 'ed', 'fi', '-25.022,23.372', 'beam_low_l'], beam2: ['deck-beam-2', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_low_r'] } },
+      beam: ['deck-beam-1', 'ed', 'fi', '-25.022,23.372', 'beam_low_l'], more: [['deck-beam-2', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_low_r'],
+        ['deck-beam-3', ['-25.022,23.372'], 'beam_high_l'], ['deck-beam-4', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_high_r']] } },
 };
 const SCENE = SCENES[process.env.CARRY_SCENE ?? 'beam'];
 if (!SCENE) throw Error('carry-proof.scene');
@@ -430,14 +431,19 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
     await retried(state, back, 'part', 'take', bc, beam.id); await wait(1000); await shot('beam-taken');
     await retried(state, back, 'carry', 'to', bc, mouth); await wait(1500); await shot('beam-at-the-mouth');
     const put = await putAsked(back, 'part', 'put', bc, bay, slot); await wait(2500); await shot('beam-put-answered');
-    let put2 = null, leaves = [];
-    if (T.beam2 && put.ok === true) {
-      const [name2, ways, slot2] = T.beam2, beam2 = await find(state, name2);
+    let put2 = null, leaves = []; const puts = [];
+    // the further beams, each from the pile by its ways (east of the bay round its north side) into its slot
+    for (const [i, [name2, ways, slot2]] of (put.ok === true ? T.more ?? [] : []).entries()) {
+      const beam2 = await find(state, name2);
       await gripEnds(state, beam2.id, back, front);
-      await retried(state, back, 'part', 'take', bc, beam2.id); await wait(1000); await shot('beam-2-taken');
+      await retried(state, back, 'part', 'take', bc, beam2.id); await wait(1000); await shot(`beam-${i + 2}-taken`);
       for (const w of ways) await retried(state, back, 'carry', 'to', bc, w);
-      put2 = await putAsked(back, 'part', 'put', bc, bay, slot2); await wait(2500); await shot('beam-2-put-answered');
-      if (put2.ok === true) {
+      put2 = await putAsked(back, 'part', 'put', bc, bay, slot2); await wait(2500); await shot(`beam-${i + 2}-put-answered`);
+      puts.push({ slot: slot2, ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null });
+      if (put2.ok !== true) break;
+    }
+    {
+      if (put2?.ok === true) {
         for (const [k, [, lift, foot]] of T.frames.entries()) for (const who of [lift, foot]) leaves.push({ who, ...(await asked(state, who, 'carry', 'leave', crews[k])) });
         await wait(3000); await shot('holders-let-go'); await wait(3000); await shot('bay-stands');
       }
@@ -445,7 +451,7 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
     check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
     const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; });
     save(state, 'survey-measurement.json', { note: 'The contact oracle on the first frame\'s crew, and the beam put\'s answer: measurements, not checks of this scene.', observer, watch: state.watch ?? null, beamPut: { ok: put.ok === true, code: put.code ?? null, detail: put.detail ?? null },
-      shortWalks: state.shortWalks ?? [], beam2Put: put2 && { ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null }, leaves: leaves.map(l => ({ who: l.who, ok: l.ok === true, code: l.code ?? null, detail: l.detail ?? null })), raises: state.raises ?? [] });
+      shortWalks: state.shortWalks ?? [], puts, beam2Put: put2 && { ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null }, leaves: leaves.map(l => ({ who: l.who, ok: l.ok === true, code: l.code ?? null, detail: l.detail ?? null })), raises: state.raises ?? [] });
   } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
 }
 /** A load carried by two as a survey: taken, walked its legs, set down. Its checks: every command accepted, no page error;
