@@ -1232,16 +1232,18 @@ impl Kinds {
             &[(a, (KBESIDE, z)), (b, (-KBESIDE, z))],
             "two holders beside a frame",
         );
+        let (frame, activity) = (
+            self.frames()[f],
+            pinned_activity(&self.w, "mars:carry_activity"),
+        );
+        let other = body_of(&self.w, self.w.souls[b]).to_value();
         let got = self.hands[a].act(
             "activity:offer",
-            self.frames()[f],
+            frame,
             BTreeMap::from([
-                (1, pinned_activity(&self.w, "mars:carry_activity")),
+                (1, activity),
                 (2, Value::Text(Name::new("mars:front").unwrap())),
-                (
-                    3,
-                    Value::Array(vec![body_of(&self.w, self.w.souls[b]).to_value()]),
-                ),
+                (3, Value::Array(vec![other])),
             ]),
         );
         let entries = got.entries.clone();
@@ -1255,11 +1257,12 @@ impl Kinds {
     /// `part:lower` of frame `f` by its crew `c`, laid away from the bay (parameter 3, the direction on the plan).
     fn lower(&mut self, k: usize, c: Id, f: usize) -> Got {
         let out = if f == 0 { -1_000_000 } else { 1_000_000 };
+        let frame = self.frames()[f];
         self.hands[k].act(
             "part:lower",
             c,
             BTreeMap::from([
-                (1, self.frames()[f].to_value()),
+                (1, frame.to_value()),
                 (3, Value::Array(vec![int(0), int(0), int(out)])),
             ]),
         )
