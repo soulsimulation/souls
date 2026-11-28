@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { nativeCameraMode } from './camera-native-page.mjs';
 import { discoverConference, performConference } from '../../playtest/conference/rehearse.mjs';
 import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
@@ -11,6 +12,37 @@ import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pair
 const states = new Map();
 const names = ['Presenter', 'Cedar', 'Maple', 'Willow', 'Birch'];
 const save = (paths, file, value) => writeFileSync(join(paths.dir, file), JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
+
+// Use the selected product's exported mapping, never a driver copy of its hashing algorithm.
+export async function conferenceNativeLectureBinding({ checkout, nativeLecture }) {
+  assert(typeof checkout === 'string' && typeof nativeLecture === 'string' && nativeLecture, 'conference native lectern binding missing');
+  const file = join(checkout, 'apps/web/src/v2-engine/creator-kinds.ts');
+  const { entityId } = await import(pathToFileURL(file).href);
+  return { nativeLecture, entity: entityId(nativeLecture), mapping: 'creator-kinds.entityId',
+    mappingSha256: createHash('sha256').update(readFileSync(file)).digest('hex') };
+}
+
+// Serialized unchanged into the browser. Diagnostic candidates never select the target.
+export function conferenceLecternIdentity(world, binding, drawnLoad) {
+  const witness = { ...binding, candidateLimit: 16, candidates: [], candidateCount: 0, matched: null };
+  try {
+    if (!binding?.nativeLecture || !binding.entity || !world?.layer?.model) throw Error('conference native lectern binding unavailable');
+    const model = world.layer.model, entities = [...model.entities.values()];
+    const candidates = entities.filter(e => e.name === 'presentation-lectern' || e.id === binding.entity);
+    witness.candidateCount = candidates.length;
+    witness.candidates = candidates.slice(0, witness.candidateLimit).map(e => ({ id: e.id, name: e.name, def: e.def,
+      resolvedDef: model.resolvedDef(e.def)?.name ?? null, drawn: world.layer.drawn.has(e.id) }));
+    const matches = entities.filter(e => e.id === binding.entity);
+    if (matches.length !== 1) throw Error('conference mapped lectern identity missing or ambiguous');
+    const entity = matches[0];
+    if (entity.name !== 'presentation-lectern' || model.resolvedDef(entity.def)?.name !== 'core-hall_lecture') throw Error('conference mapped lectern name or kind differs');
+    const load = drawnLoad(world.layer, world.scene, entity.id);
+    if (load.entity !== entity.id || !Number.isInteger(load.parts) || load.parts < 1) throw Error('conference mapped lectern geometry unavailable');
+    witness.matched = { id: entity.id, name: entity.name, def: entity.def, resolvedDef: 'core-hall_lecture',
+      source: load.source, parts: load.parts, root: load.matrix.toArray() };
+    return { ok: true, witness };
+  } catch (error) { return { ok: false, witness, error: String(error) }; }
+}
 
 // Self-contained, served only by this proof driver. Reads submitted geometry; never poses or moves it.
 export function conferenceClearanceTools({ vector, drawnLoad, bodyGeometry, maxVertices = 100000, maxTriangles = 2048, maxTests = 250000, uncertaintyM = .001 }) {
@@ -332,6 +364,7 @@ export async function prepare({ base, paths, recipe, signal }) {
     find('presentation-lectern', 'eden:hall_lecture'), find('question-stand', 'eden:conference_question'), find('audience', 'eden:bench'),
   ]);
   state.fixtures = conferenceFixtures({ lecterns, questions, benches });
+  state.lecternBinding = await conferenceNativeLectureBinding({ checkout: recipe.checkout, nativeLecture: state.fixtures.lecture });
   state.discovery = await discoverConference({ seat: state.seats[0], ...state.fixtures, record: state.record });
   state.creator = await pairConferenceCreator({ recipe, paths, bundle, signal });
   state.creatorProof = await proveConferenceCreator({ creator: state.creator, record: state.record, signal });
@@ -403,7 +436,7 @@ export async function beforeNavigation({ paths, page, base }) {
   await page.route(oracleURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: oracle }));
   state.oracleURL = oracleURL;
   const geometryURL = new URL('/__proof/conference-clearance.mjs', base).href;
-  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `export ${conferenceClearanceTools.toString()}` }));
+  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `export ${conferenceClearanceTools.toString()}\nexport ${conferenceLecternIdentity.toString()}` }));
   state.geometryURL = geometryURL;
   const entryBytes = readFileSync(new URL('../../../content/kinds/hall/lecture.json', import.meta.url));
   state.lecternEntry = { kind: JSON.parse(entryBytes).kind, sha256: createHash('sha256').update(entryBytes).digest('hex') };
@@ -434,15 +467,23 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   await page.screenshot({ path: join(paths.dir, 'conference-setup.png') });
   signal.throwIfAborted();
   assert(state.kitURL, 'conference production people kit not observed');
-  await page.evaluate(async ({ oracleURL, geometryURL, kitURL, souls, entry, nativeLecture }) => {
+  const identity = await page.evaluate(async ({ oracleURL, geometryURL, binding }) => {
+    const { drawnLoad } = await import(oracleURL);
+    const { conferenceLecternIdentity } = await import(geometryURL);
+    return conferenceLecternIdentity(window.__soulsEntity, binding, drawnLoad);
+  }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, binding: state.lecternBinding });
+  save(paths, 'command-conference-lectern-identity.json', identity);
+  assert(identity.ok, identity.error);
+  await page.evaluate(async ({ oracleURL, geometryURL, kitURL, souls, entry, binding }) => {
     const { observeRender, bodyGeometry, drawnLoad } = await import(oracleURL);
     const { conferenceClearanceTools } = await import(geometryURL);
     const { TakePeople } = await import(kitURL), prototype = TakePeople.prototype;
     const world = window.__soulsEntity, original = prototype.show;
     if (!world || !original || window.__conferenceDrawObserver) throw Error('conference final-draw observer unavailable');
-    const lecterns = [...world.layer.model.entities.values()].filter(e => e.name === 'presentation-lectern');
-    if (lecterns.length !== 1 || world.layer.model.resolvedDef(lecterns[0].def)?.name !== 'core-hall_lecture') throw Error('conference drawn lectern identity ambiguous');
-    const lecternEntity = lecterns[0].id;
+    const { conferenceLecternIdentity } = await import(geometryURL);
+    const identity = conferenceLecternIdentity(world, binding, drawnLoad);
+    if (!identity.ok) throw Error(identity.error);
+    const lecternEntity = identity.witness.matched.id;
     const geometry = conferenceClearanceTools({ vector: () => world.camera.position.clone(), drawnLoad, bodyGeometry });
     let people, previous = -Infinity;
     function show(...args) { const result = original.apply(this, args); people = this; return result; }
@@ -491,10 +532,10 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     }, error => { if (failures.length < 30) failures.push(String(error)); });
     window.__conferenceDrawObserver = { samples, failures, sampleLimit, stopRender, prototype, show, original,
       measurementLimits: geometry.limits,
-      lecternEntry: { ...entry, nativeLecture, entity: lecternEntity, association: 'unique ordinary fixture name/kind and boot scene definition; canonical bytes are provenance, drawn triangles own the measurement' },
+      lecternEntry: { ...entry, ...binding, entity: lecternEntity, identity: identity.witness, association: 'actual product creator-kinds.entityId(nativeLecture), exact mapped scene id/name/definition and visibly attached drawn geometry; canonical entry bytes are provenance, drawn triangles own the measurement' },
       qualification: 'actual visible indexed bodyDraw vertices measured; bounded extrema/lectern vertex-inside witnesses every250ms, not every-frame or complete triangle-intersection proof; inferred skin/foot groups are not native identities; no native contact certification; original full-body video remains required. Historical story clips used hidden-source primitive extrema and did not measure actual lectern clearance.' };
   }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul),
-    entry: state.lecternEntry, nativeLecture: state.fixtures.lecture });
+    entry: state.lecternEntry, binding: state.lecternBinding });
   state.observerInstalled = true;
   state.frameReads = []; state.frameReadErrors = []; state.stages = [];
   let reading = true;

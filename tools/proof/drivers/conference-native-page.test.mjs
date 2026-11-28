@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
-import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools } from './conference-native-page.mjs';
+import { conferenceFixtures, conferenceJourney, conferenceFinalization, conferenceBrowserStop, conferenceMeetingStage, conferenceMeetingJourney, proveConferenceCreator, conferenceClearanceTools, conferenceNativeLectureBinding, conferenceLecternIdentity } from './conference-native-page.mjs';
 import { explainConference, rehearsalTemplate } from '../../playtest/conference/rehearse.mjs';
 import { drawnLoad, bodyGeometry } from '../../playtest/carry-contact/oracle.mjs';
 import { describeThing } from '../../../v2/client/src/creator/thing.mjs';
@@ -14,6 +14,35 @@ function rigidFixture(geometry = new THREE.BoxGeometry(1,1,1)) {
   return {scene,root,mesh,layer:{drawn:new Map([['lectern',{obj:root}]]),instancer:{pools:new Map()}}};
 }
 const vertex = p => ({ p, mesh:'actual-skin',index:7 });
+
+test('canonical native lecture binding selects physical geometry despite a same-name landmark', async () => {
+  const binding = await conferenceNativeLectureBinding({ checkout: resolve(new URL('../../../', import.meta.url).pathname), nativeLecture: 'fictional-native-lecture.17' });
+  const { entityId } = await import('../../../apps/web/src/v2-engine/creator-kinds.ts');
+  assert.equal(binding.entity, entityId(binding.nativeLecture));
+  assert.match(binding.mappingSha256, /^[a-f0-9]{64}$/);
+  const f = rigidFixture(), physical = { id: binding.entity, name: 'presentation-lectern', def: 'physical' };
+  f.layer.drawn = new Map([[binding.entity, { obj: f.root }]]);
+  f.layer.model = { entities: new Map([['landmark', { id: 'landmark', name: 'presentation-lectern', def: 'place' }], [binding.entity, physical]]),
+    resolvedDef: def => ({ name: def === 'physical' ? 'core-hall_lecture' : 'core-place' }) };
+  const result = conferenceLecternIdentity(f, binding, drawnLoad);
+  assert.equal(result.ok, true); assert.equal(result.witness.candidateCount, 2);
+  assert.equal(result.witness.matched.id, binding.entity); assert.equal(result.witness.matched.parts, 1);
+  assert.equal(result.witness.nativeLecture, binding.nativeLecture);
+  const another = await conferenceNativeLectureBinding({ checkout: resolve(new URL('../../../', import.meta.url).pathname), nativeLecture: 'fictional-other-lecture.18' });
+  const missing = conferenceLecternIdentity(f, another, drawnLoad);
+  assert.equal(missing.ok, false); assert.match(missing.error, /missing or ambiguous/);
+  assert.equal(missing.witness.candidateCount, 2, 'failed association retains diagnostic candidates without choosing one');
+  f.layer.model.entities.set('duplicate-id', { ...physical });
+  assert.equal(conferenceLecternIdentity(f, binding, drawnLoad).ok, false, 'duplicate exact ids fail');
+  f.layer.model.entities.delete('duplicate-id'); physical.def = 'place';
+  assert.match(conferenceLecternIdentity(f, binding, drawnLoad).error, /name or kind differs/);
+  physical.def = 'physical'; physical.name = 'other-name';
+  assert.match(conferenceLecternIdentity(f, binding, drawnLoad).error, /name or kind differs/);
+  physical.name = 'presentation-lectern'; f.layer.drawn.delete(binding.entity);
+  const noGeometry = conferenceLecternIdentity(f, binding, drawnLoad);
+  assert.equal(noGeometry.ok, false); assert.equal(noGeometry.witness.candidates.length, 2);
+  assert.equal(noGeometry.witness.matched, null);
+});
 
 test('clearance uses actual instance slot plus mesh-parent transform without applying geometry-local placement twice',()=>{
   const f=rigidFixture(),tools=clearanceTools();f.scene.remove(f.root);
