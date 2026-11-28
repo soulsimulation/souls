@@ -172,16 +172,18 @@ test('a beam slot is reached from its own side: the load stops lined up outside 
     crewMiddle: () => [4e6, 6.3e6], crewEnds: () => ({ ids: [id(7), id(6)], at: [[4e6, 8.5e6], [4e6, 4.1e6]] }) };
   const out = 609_500 + 25_500 + MOUTH_CLEAR;   // the bay's half width, the beam's half width lying, the clearance
   const go = (slot, me = c) => carryIntents({ do: 'to', crew, where: id(5), slot }, me)[0].params[1];
-  near(go('beam_low_l'), [12e6 - out, 0, 6e6 - 2.2e6], 'the back, on the slot\'s z, west of the bay');
+  // #5067: the back, 2.2 m behind, stops 50 mm inside its reach of its grip: its own place and 0.3 m.
+  const most = Math.max(...loadOf(kinds['mars:rack_beam']).places.map(Math.abs)) + 300_000;
+  near(go('beam_low_l'), [12e6 - out, 0, 6e6 - most], 'the back, on the slot\'s z, west of the bay');
   assert.ok(out - 572_000 + 300_000 < 1_000_000, 'a walk 0.3 m short of it still puts within reach (worldd PUT_REACH)');
   const side = { ...c, me: id(12), placeOf: (n) => (n === id(12) ? { pos: [3.6e6, 0, 6.3e6] } : c.placeOf(n)) };
   near(go('beam_high_l', side), [12e6 - out - 400_000, 0, 6e6], 'the side keeps its place beside the middle');
   // From the bay's other side the slot across it is carried straight in, as before; a frame's slot (the bay's open end)
   // is carried into directly.
   const east = { ...c, crewMiddle: () => [20e6, 6.3e6], crewEnds: () => ({ ids: [id(7), id(6)], at: [[20e6, 8.5e6], [20e6, 4.1e6]] }), placeOf: (n) => (n === id(6) ? { pos: [20e6, 0, 4.1e6] } : place(n)) };
-  near(go('beam_low_l', east), [12e6 - 572_000, 0, 6e6 - 2.2e6], 'from the east, into the slot');
-  near(go('beam_low_r', east), [12e6 + out, 0, 6e6 - 2.2e6], 'the east slot from the east: outside it');
-  near(go('upright_a'), [12e6, 0, 6e6 - 1_448_000 - 2.2e6], 'a frame\'s slot: into it');
+  near(go('beam_low_l', east), [12e6 - 572_000, 0, 6e6 - most], 'from the east, into the slot');
+  near(go('beam_low_r', east), [12e6 + out, 0, 6e6 - most], 'the east slot from the east: outside it');
+  near(go('upright_a'), [12e6, 0, 6e6 - 1_448_000 - most], 'a frame\'s slot: into it');
 });
 
 test('carry to walks this Soul so the load reaches the point or the slot, keeping its place at it', () => {
