@@ -443,46 +443,16 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
         .unwrap();
         let fresh = town.view().stand_near(deck, v3(-400_000, 19_000, 0), 0, None);
         println!("a fresh town on the deck: {fresh:?}");
-        let t = copy.tree();
-        let dump = |id: Id, what: &str| {
-            for h in t.children(t.handle(id).unwrap()).unwrap_or(&[]) {
-                let n = t.node(*h).unwrap();
-                println!("{what} child {} {}: {:?}", replica::world_model::show(n.id()), n.kind().as_str(), n.fields());
-                for e in t.links_at(n.id()) {
-                    println!("{what}   link {:?}", t.link(e.link));
-                }
-            }
-            let n = t.node(t.handle(id).unwrap()).unwrap();
-            println!("{what} itself {}: fields {:?} place {:?}", n.kind().as_str(), n.fields().keys().collect::<Vec<_>>(), n.place());
-        };
-        dump(flight, "creator flight");
-        // The same flight seeded by the import, for comparison.
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/construction");
-        let texts: Vec<(String, String)> = std::fs::read_dir(&root)
-            .unwrap()
-            .map(|f| f.unwrap().path())
-            .map(|p| (p.file_stem().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
-            .collect();
-        let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
-        if let json::Value::Obj(top) = &mut f {
-            for (k, v) in top.iter_mut() {
-                match (k.as_str(), v) {
-                    ("kinds", json::Value::Arr(a)) => a.push(json::parse(r#"{"ref": "tw-flight@1", "hash": "00", "name": "mars:stair_flight", "form": "point"}"#).unwrap()),
-                    ("things", json::Value::Arr(a)) => a.push(json::parse(r#"{"id": "flight", "def": "tw-flight@1", "ref": "tw-flight@1", "parent": null, "pose": [0, 0, 0, 0], "scale_ppm": 1000000, "name": "flight"}"#).unwrap()),
-                    _ => {}
-                }
-            }
+        let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+        let foot = v3((x + 4_500) * 1000, 0, (z - 622) * 1000);
+        let flights = floors_of(&site.w, flight);
+        let view = town.view();
+        println!("fresh: reached deck {:?}", view.stand_reached(deck, v3(-400_000, 19_000, 0), (g, foot)));
+        for (f, lv, _) in &flights {
+            let p = if *lv == 0 { v3(-1_000_000, 0, 0) } else { v3(1_500_000, 2_010_000, 0) };
+            println!("fresh: flight floor {lv} stand {:?} reached {:?}", view.stand_near(*f, p, 0, None), view.stand_reached(*f, p, (g, foot)));
         }
-        let im = import_eden::load_with(&f.to_json(), &texts).unwrap();
-        let st = &im.tree;
-        let fl = im.nodes["flight"];
-        for h in st.children(st.handle(fl).unwrap()).unwrap_or(&[]) {
-            let n = st.node(*h).unwrap();
-            println!("seeded flight child {} {}: {:?}", replica::world_model::show(n.id()), n.kind().as_str(), n.fields());
-            for e in st.links_at(n.id()) {
-                println!("seeded flight   link {:?}", st.link(e.link));
-            }
-        }
+        println!("fresh: floors reached from the flight {:?}", view.floors_reached(flight));
     }
     let mut hands: Vec<Hand> = site
         .w
