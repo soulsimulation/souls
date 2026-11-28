@@ -72,9 +72,6 @@ export const JOBS = [
   // god-skill unit test (GOD_SKILL_TESTS, the replay corpus among them; none needs a browser or a live server): about
   // 35 s, and some need the pulled media, so they ride on a leg that god paths already select (#918).
   ...Array.from({ length: SERVER_SHARDS }, (_, shard) => ({ name: `server-${shard}`, kind: 'server', shard, assets: true, heavy: true, ...(shard === 0 ? { godSkill: true } : {}), steps: ['V5-server-full', 'V6-'] })),
-  // No gate step on purpose: picked by its own paths, so the gate's suite tree and cached baseline stay as they are (#1061).
-  // In TEST_LEGS['soul-actions'].legs duration-balanced legs (test-legs.mjs).
-  ...Array.from({ length: TEST_LEGS['soul-actions'].legs }, (_, shard) => ({ name: `soul-actions-${shard}`, kind: 'soul-actions', shard, assets: false, heavy: true, steps: [], paths: /^(tools\/soul-actions|apps\/server|packages\/world-compiler|packages\/engine-[^/]+)\// })),
   // Also no gate step (#1111). soul-trace drives the thin CLI in tools/world-launcher/soul; soul-runtime's native client test uses the server's comms fixture.
   { name: 'soul-tools', kind: 'soul-tools', light: true, assets: false, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|content|packages\/form-rules|apps\/server)\// },
   // The kinds' case files (packages/form-rules/cases) and the entry gates that run them (tools/entry): only when a kind,

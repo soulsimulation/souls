@@ -7,9 +7,19 @@
 //!   the bay are joined by bearing parts on both columns at the heights its kind needs: one for a frame up to 9.5 ft,
 //!   two above. A bearing part (a kind that declares a joining link to a standing kind, a beam) is supported when its
 //!   joints reach as many supported standing parts as its declared link allows (two ends). A resting part (a kind that
-//!   declares a joining link to a bearing kind: a shade cloth on its rails) is supported when its joints reach as many
-//!   supported bearing parts as its link allows, so it needs all it rests on in place, and none of those leaves from
-//!   under it.
+//!   declares a joining link to a kind that itself bears or rests: a shade cloth on its rails, a joist on two beams, a
+//!   sheet on its joists, a tread on its flight) is supported when its joints reach as many supported parts of the
+//!   kinds it names as its link allows, so it needs all it rests on in place, and none of those leaves from under it.
+//! - **To any depth** (racks T3). A kind's tier is one more than the deepest kind its joining links name; a standing
+//!   kind's is 0, so a beam is 1, a joist 2, a sheet on joists 3, and content may go on. Nothing in the rule counts
+//!   tiers: a part is held up when it is held by its crew or enough of the parts it is joined down to are held up,
+//!   found by starting from the standing parts and adding parts until none is added. Kinds that name each other in a
+//!   ring have nothing to start from, so their parts are held up only by a crew. A joint counts only between a part
+//!   and one of a kind its own kind names ([`Structure::rests_on`]): a sheet joined to a beam rests on nothing.
+//! - **What stays rack-shaped.** Only how a standing part is braced: by bearing parts (tier 1) joined to it and one
+//!   other standing part, on a left and a right column read from the sign of the slot's x, at one height or two by
+//!   9.5 ft. Deeper parts never brace. A four-post stage or a scaffold would say its bracing in content; the two-storey
+//!   rack unit needs none of that, so it is not built here.
 //! - **What the kinds say** (K3, B17): which kinds stand and which bear is read from the link types they declare
 //!   (section 4) and their connectors (`joint` points); a hold crew from their `hold_crew` field; a frame's height
 //!   from its geometry (section 7); a bearing part's column and height from the bay slot it sits in (its place in the
@@ -23,13 +33,23 @@
 //!   A part that touches no bay costs the walk up and runs no check ([`Structure::checks`] counts the checks).
 //! - **Refusals:** `support.holders` (a part held by some, fewer than its crew, and not joined to stand) and
 //!   `support.none` (the part, and what it would hang by). The verdict is computed each time, never stored.
+//! - **Nothing leaves with someone on it** (racks T6, T9): a part taken out of its bay, or removed from it, while
+//!   anything is on it is refused `part.stood-on`, naming what is on it and the part. On it: a child of the part that
+//!   is not a crew holding it (a body in a standing place the part gives, a thing in its slot), and whoever or
+//!   whatever is on a floor the part holds (a body standing on a seated sheet; a floor's rooms, windows and places
+//!   are the floor's own). What leaves in the same change does not count. With `support.none` under it, nobody is
+//!   left standing on nothing: the part under a body's feet stays, and so does every part that one rests on.
 //!
 //! - **A part moved by a transfer** (B19, `crate::activity::seating`): a leave and arrive inside the zone is read as
 //!   the change of parent it makes, so a part handed into a bay's slot, out of it to a carry, and a crew's node moved
 //!   to a part (a hold) or off it are checked like any other change.
 //!
-//! Not here: load numbers, decks and stairs, a part's own pose (a part in a bay's slot stands).
+//! Not here: load numbers, spans and overhangs (a sheet rests on the joists its joints name, however far apart), a
+//! part's own pose (a part in a bay's slot stands). A kind with more than one joining link is counted against the
+//! largest `most` among them, over all the kinds they name.
 
+#[cfg(test)]
+mod deck_tests;
 #[cfg(test)]
 mod shade_tests;
 #[cfg(test)]
@@ -60,16 +80,27 @@ pub const F_KEPT: u64 = 5;
 
 type R<T> = Result<T, Refusal>;
 
-/// What a kind is to the rule.
+/// What a kind is to the rule: its number among the joining kinds (their plain names in order), its hold crew, and
+/// how it is held up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Role {
-    /// Others join to it; it stands held or braced. `levels`: the heights it needs on each column.
-    Standing { crew: u64, levels: usize },
-    /// It joins to standing parts and hangs by them: `ends` supported ones needed.
-    Bearing { crew: u64, ends: usize },
-    /// It joins to bearing parts and rests on them: `ends` supported ones needed (a cloth on two rails).
-    Resting { crew: u64, ends: usize },
+struct Role {
+    kind: u16,
+    crew: u64,
+    how: How,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum How {
+    /// Others join to it; it stands held or braced. `levels`: the heights it needs on each column.
+    Standing { levels: usize },
+    /// It joins down to parts of the kinds its links name and is held up by them: `ends` supported ones needed.
+    /// `tier`: how deep it sits above a standing part (a beam 1: it hangs by its ends; a cloth on rails or a joist on
+    /// beams 2, a sheet on joists 3: they rest). [`NO_TIER`] for a kind in a ring of kinds that name each other.
+    Borne { ends: usize, tier: u16 },
+}
+
+/// The tier of a kind no chain of links leads down from to a standing kind.
+const NO_TIER: u16 = u16::MAX;
 
 /// A slot of a bay: its column (-1 left, 1 right, 0 neither) and height, mm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +117,8 @@ pub struct Structure {
     roles: BTreeMap<String, Role>,
     bays: BTreeMap<String, BTreeMap<u64, Spot>>,
     joints: BTreeSet<String>,
+    /// (a kind, a kind its joining links name): parts of the first are held up by parts of the second.
+    on: BTreeSet<(u16, u16)>,
     /// Each joining kind's connectors: (its connector's kind, the kind it mates), by plain kind name.
     connectors: BTreeMap<String, BTreeSet<(String, String)>>,
     /// The kinds a standing part admits among its children, by plain name: its crews (B19's holders, 0.135 A2).
@@ -98,7 +131,7 @@ pub struct Structure {
 struct Bay {
     gone: bool,
     parts: BTreeMap<Id, (Role, Option<u64>)>,
-    /// link → (bearing part, standing part), or (resting part, bearing part)
+    /// link → (a part, the part it is joined down to): a beam and a frame, a cloth and a rail, a sheet and a joist
     joints: BTreeMap<Id, (Id, Id)>,
     /// activity → (the part it holds, started, membership links)
     acts: BTreeMap<Id, (Id, bool, BTreeSet<Id>)>,
@@ -170,7 +203,7 @@ impl Structure {
         let of = |standing: bool| {
             self.roles
                 .iter()
-                .filter(|(_, r)| matches!(r, Role::Standing { .. }) == standing)
+                .filter(|(_, r)| matches!(r.how, How::Standing { .. }) == standing)
                 .map(|(n, _)| n.as_str())
                 .collect()
         };
@@ -208,68 +241,95 @@ impl Structure {
                 .collect();
             s.connectors.insert(plain(k.name.as_str()).to_owned(), set);
         }
-        // Bearing kinds declare a link to a kind that joins; that kind stands. A kind that declares one to a kind that
-        // itself bears rests on it, a tier up, and the kind it rests on still bears.
-        let linked = |k: &replica::kinds::KindDef, l: &replica::kinds::LinkType| -> Vec<_> {
-            if !k.joins() {
-                return Vec::new();
-            }
-            defs.iter()
-                .filter(|o| o.joins() && plain(o.name.as_str()) == l.from.as_str())
-                .copied()
-                .collect()
-        };
-        let bearers: BTreeSet<String> = defs
+        // Every joining kind has a number: its plain name's place in their order.
+        let names: BTreeSet<&str> = defs
             .iter()
-            .filter(|k| k.links.values().any(|l| !linked(k, l).is_empty()))
-            .map(|k| plain(k.name.as_str()).to_owned())
+            .filter(|k| k.joins())
+            .map(|k| plain(k.name.as_str()))
             .collect();
-        for k in &defs {
+        let number = |name: &str| names.iter().position(|n| *n == name).map(|i| i as u16);
+        // A kind that declares a link to a kind that joins is held up by parts of that kind. `below`: each such kind's
+        // number, the kinds its links name, the most any of them allows and its hold crew.
+        let mut below: BTreeMap<u16, (BTreeSet<u16>, usize, u64)> = BTreeMap::new();
+        for k in defs.iter().filter(|k| k.joins()) {
+            let Some(me) = number(plain(k.name.as_str())) else {
+                continue;
+            };
             for l in k.links.values() {
-                let standing = linked(k, l);
-                if standing.is_empty() {
+                let Some(other) = number(l.from.as_str()) else {
                     continue;
-                }
+                };
                 // A link's type in the tree is a name: the declaring kind's namespace and the link's own name.
                 let ns = plain(k.name.as_str()).split(':').next().unwrap_or("");
                 s.joints.insert(format!("{ns}:{}", l.name.as_str()));
-                let ends = l.most.unwrap_or(2) as usize;
-                let hold = crew(k.name.as_str()).unwrap_or(1);
-                if standing
-                    .iter()
-                    .all(|o| bearers.contains(plain(o.name.as_str())))
-                {
-                    s.roles.insert(
-                        plain(k.name.as_str()).to_owned(),
-                        Role::Resting { crew: hold, ends },
-                    );
-                    continue;
-                }
-                s.roles.insert(
-                    plain(k.name.as_str()).to_owned(),
-                    Role::Bearing { crew: hold, ends },
-                );
-                for o in standing
-                    .into_iter()
-                    .filter(|o| !bearers.contains(plain(o.name.as_str())))
-                {
-                    let h = heights.get(plain(o.name.as_str())).copied().unwrap_or(0);
-                    s.roles.insert(
-                        plain(o.name.as_str()).to_owned(),
-                        Role::Standing {
-                            crew: crew(o.name.as_str()).unwrap_or(1),
-                            levels: if h > ONE_LEVEL_MOST_MM { 2 } else { 1 },
-                        },
-                    );
-                }
+                s.on.insert((me, other));
+                let e = below
+                    .entry(me)
+                    .or_insert_with(|| (BTreeSet::new(), 0, crew(k.name.as_str()).unwrap_or(1)));
+                e.0.insert(other);
+                e.1 = e.1.max(l.most.unwrap_or(2) as usize);
             }
+        }
+        // A kind a link names that declares no joining link itself stands: tier 0. Each other kind's tier is one more
+        // than the deepest it names, found in rounds; a ring of kinds never gets one.
+        let mut tiers: BTreeMap<u16, u16> = BTreeMap::new();
+        for k in defs.iter().filter(|k| k.joins()) {
+            let name = plain(k.name.as_str());
+            let Some(me) = number(name).filter(|me| !below.contains_key(me)) else {
+                continue;
+            };
+            if !s.on.iter().any(|(_, o)| *o == me) {
+                continue;
+            }
+            tiers.insert(me, 0);
+            let h = heights.get(name).copied().unwrap_or(0);
+            s.roles.insert(
+                name.to_owned(),
+                Role {
+                    kind: me,
+                    crew: crew(k.name.as_str()).unwrap_or(1),
+                    how: How::Standing {
+                        levels: if h > ONE_LEVEL_MOST_MM { 2 } else { 1 },
+                    },
+                },
+            );
+        }
+        loop {
+            let found: Vec<(u16, u16)> = below
+                .iter()
+                .filter(|(me, _)| !tiers.contains_key(*me))
+                .filter_map(|(me, (under, ..))| {
+                    let mut top = 0;
+                    for o in under {
+                        top = top.max(*tiers.get(o)?);
+                    }
+                    Some((*me, (top + 1).min(NO_TIER - 1)))
+                })
+                .collect();
+            if found.is_empty() {
+                break;
+            }
+            tiers.extend(found);
+        }
+        for (me, (_, ends, hold)) in &below {
+            let Some(name) = names.iter().nth(*me as usize) else {
+                continue;
+            };
+            s.roles.insert(
+                (*name).to_owned(),
+                Role {
+                    kind: *me,
+                    crew: *hold,
+                    how: How::Borne {
+                        ends: *ends,
+                        tier: tiers.get(me).copied().unwrap_or(NO_TIER),
+                    },
+                },
+            );
         }
         // A standing part's crew: a kind its entry names among its children (a frame admits the crew that holds it).
         for k in &defs {
-            if matches!(
-                s.roles.get(plain(k.name.as_str())),
-                Some(Role::Standing { .. })
-            ) {
+            if s.stands(k.name.as_str()) {
                 s.crews.extend(
                     k.admits
                         .children
@@ -284,12 +344,9 @@ impl Structure {
         let of = |bearing: bool| -> BTreeSet<&str> {
             s.roles
                 .iter()
-                .filter(|(_, r)| {
-                    if bearing {
-                        matches!(r, Role::Bearing { .. })
-                    } else {
-                        matches!(r, Role::Standing { .. })
-                    }
+                .filter(|(_, r)| match r.how {
+                    How::Standing { .. } => !bearing,
+                    How::Borne { tier, .. } => bearing && tier == 1,
                 })
                 .map(|(n, _)| plain(n))
                 .collect()
@@ -398,6 +455,7 @@ impl Structure {
                 _ => {}
             }
         }
+        self.stood_on(tree, &changes)?;
         let mut bays = BTreeSet::new();
         let mut touched = BTreeSet::new();
         for c in &changes {
@@ -434,6 +492,77 @@ impl Structure {
             }
         }
         Ok(())
+    }
+
+    /// `part.stood-on` when `changes` take a part out of its bay, or remove it from it, with something on it (see the
+    /// module's notes).
+    fn stood_on(&self, tree: &Tree, changes: &[Change]) -> R<()> {
+        let leaving: BTreeSet<Id> = changes
+            .iter()
+            .filter_map(|c| match c {
+                Change::Reparent { node, .. } | Change::Remove { node } => Some(*node),
+                _ => None,
+            })
+            .collect();
+        let node = |id: Id| tree.handle(id).and_then(|h| tree.node(h));
+        for c in changes {
+            let (part, from) = match c {
+                Change::Reparent { node, from, pose } if from.node != pose.frame.node => {
+                    (*node, from.node)
+                }
+                Change::Remove { node: gone } => match node(*gone).and_then(|n| n.parent()) {
+                    Some(p) => (*gone, p),
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let in_bay = node(from).is_some_and(|n| self.is_bay(n.kind().as_str()));
+            let is_part = node(part).is_some_and(|n| self.is_part(n.kind().as_str()));
+            if !in_bay || !is_part {
+                continue;
+            }
+            if let Some(on) = Self::on_it(tree, part, &leaving) {
+                return Err(Refusal {
+                    name: "part.stood-on",
+                    detail: format!(
+                        "{} is on {}; it stays where it is until nothing is on it",
+                        show(on),
+                        show(part)
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// The first thing on part `part` that is not in `leaving`: a child that is no crew holding it, or a child of a
+    /// floor it holds that is not the floor's own room, window or place.
+    fn on_it(tree: &Tree, part: Id, leaving: &BTreeSet<Id>) -> Option<Id> {
+        use crate::ground::scene::{DOORWAY, FLOOR, PLACE, ROOM, WINDOW};
+        let kids = |id: Id| -> Vec<(Id, String)> {
+            tree.handle(id)
+                .and_then(|h| tree.children(h))
+                .unwrap_or(&[])
+                .iter()
+                .filter_map(|c| tree.node(*c))
+                .map(|n| (n.id(), plain(n.kind().as_str()).to_owned()))
+                .filter(|(id, _)| !leaving.contains(id))
+                .collect()
+        };
+        for (child, kind) in kids(part) {
+            if kind == FLOOR {
+                let own = [ROOM, WINDOW, PLACE, DOORWAY];
+                if let Some((on, _)) = kids(child)
+                    .into_iter()
+                    .find(|(_, k)| !own.contains(&k.as_str()))
+                {
+                    return Some(on);
+                }
+            } else if Self::act(tree, child).is_none() {
+                return Some(child);
+            }
+        }
+        None
     }
 
     /// A bay as the tree holds it now (empty when it is not there yet).
@@ -480,7 +609,9 @@ impl Structure {
 
     /// Whether `kind` (a plain or full name) stands: others join to it, and it is held until it is braced.
     pub fn stands(&self, kind: &str) -> bool {
-        matches!(self.roles.get(plain(kind)), Some(Role::Standing { .. }))
+        self.roles
+            .get(plain(kind))
+            .is_some_and(|r| matches!(r.how, How::Standing { .. }))
     }
 
     /// Whether `kind` (a plain or full name) is a part the rule reads: one that stands, bears or rests.
@@ -488,15 +619,37 @@ impl Structure {
         self.roles.contains_key(plain(kind))
     }
 
-    /// Whether `kind` (a plain or full name) rests on bearing parts: what a part of it joins in a bay are the bay's
-    /// bearing parts, not its standing ones.
+    /// Whether `kind` (a plain or full name) rests on parts that are themselves borne (tier 2 or deeper: a cloth on
+    /// rails, a joist on beams, a sheet on joists): what a part of it joins in a bay are not the bay's standing parts.
+    /// Which parts they are: [`Structure::rests_on`].
     pub fn rests(&self, kind: &str) -> bool {
-        matches!(self.roles.get(plain(kind)), Some(Role::Resting { .. }))
+        self.tier(kind).is_some_and(|t| t >= 2)
     }
 
-    /// Whether `kind` (a plain or full name) bears: it joins standing parts and others may rest on it.
+    /// Whether `kind` (a plain or full name) bears: it joins standing parts (tier 1) and others may rest on it.
     pub fn bears(&self, kind: &str) -> bool {
-        matches!(self.roles.get(plain(kind)), Some(Role::Bearing { .. }))
+        self.tier(kind) == Some(1)
+    }
+
+    /// How deep `kind` (a plain or full name) sits above a standing part: 0 a standing kind, 1 one that joins
+    /// standing kinds, and one more for each kind between. None for a kind the rule does not read, or one in a ring
+    /// of kinds that name each other.
+    pub fn tier(&self, kind: &str) -> Option<u16> {
+        match self.roles.get(plain(kind))?.how {
+            How::Standing { .. } => Some(0),
+            How::Borne { tier: NO_TIER, .. } => None,
+            How::Borne { tier, .. } => Some(tier),
+        }
+    }
+
+    /// Whether a part of `kind` is held up by parts of `under` (plain or full names): `kind` declares a joining link
+    /// that names `under`. A beam rests on a frame, a joist on a beam, a sheet on a joist; a sheet on a beam does
+    /// not, so a joint between those two holds nothing up.
+    pub fn rests_on(&self, kind: &str, under: &str) -> bool {
+        match (self.roles.get(plain(kind)), self.roles.get(plain(under))) {
+            (Some(a), Some(b)) => self.on.contains(&(a.kind, b.kind)),
+            _ => false,
+        }
     }
 
     /// Whether `kind` (a plain or full name) is a crew: a kind a standing part admits as its holders.
@@ -545,7 +698,7 @@ impl Structure {
             if !self.joints.contains(tree.ty(e).as_str()) {
                 continue;
             }
-            if let Some(j) = b.joint(p, e.other) {
+            if let Some(j) = b.joint(&self.on, p, e.other) {
                 b.joints.insert(e.link, j);
             }
         }
@@ -627,7 +780,7 @@ impl Structure {
             }
             Change::Link { link, ty, ends, .. } => {
                 if self.joints.contains(ty.as_str()) {
-                    if let Some(j) = b.joint(ends[0], ends[1]) {
+                    if let Some(j) = b.joint(&self.on, ends[0], ends[1]) {
                         b.joints.insert(*link, j);
                     }
                 } else if ty.as_str() == MEMBER {
@@ -650,16 +803,17 @@ impl Structure {
 }
 
 impl Bay {
-    /// `(bearing, standing)` when one of `x`, `y` is a bearing part of the bay and the other a standing one;
-    /// `(resting, bearing)` when one rests and the other bears.
-    fn joint(&self, x: Id, y: Id) -> Option<(Id, Id)> {
-        let role = |id| self.parts.get(&id).map(|p| p.0);
-        match (role(x)?, role(y)?) {
-            (Role::Bearing { .. }, Role::Standing { .. })
-            | (Role::Resting { .. }, Role::Bearing { .. }) => Some((x, y)),
-            (Role::Standing { .. }, Role::Bearing { .. })
-            | (Role::Bearing { .. }, Role::Resting { .. }) => Some((y, x)),
-            _ => None,
+    /// `(a part, the part it is joined down to)` when `x` and `y` are parts of the bay and the kind of one names the
+    /// kind of the other (`on`: [`Structure::rests_on`]): a beam and a frame, a cloth and a rail, a sheet and a joist.
+    fn joint(&self, on: &BTreeSet<(u16, u16)>, x: Id, y: Id) -> Option<(Id, Id)> {
+        let kind = |id| self.parts.get(&id).map(|p| p.0.kind);
+        let (a, b) = (kind(x)?, kind(y)?);
+        if on.contains(&(a, b)) {
+            Some((x, y))
+        } else if on.contains(&(b, a)) {
+            Some((y, x))
+        } else {
+            None
         }
     }
 
@@ -678,7 +832,7 @@ impl Bay {
             .sum()
     }
 
-    /// The standing parts a bearing part is joined to (the bearing parts a resting one is).
+    /// The parts a part is joined down to: a bearing part's standing parts, a resting part's parts under it.
     fn ends(&self, bearing: Id) -> BTreeSet<Id> {
         self.joints
             .values()
@@ -719,13 +873,21 @@ impl Bay {
         let standing: Vec<Id> = self
             .parts
             .iter()
-            .filter(|(_, p)| matches!(p.0, Role::Standing { .. }))
+            .filter(|(_, p)| matches!(p.0.how, How::Standing { .. }))
             .map(|(id, _)| *id)
             .collect();
         let mut up = BTreeSet::new();
         let mut failed: Vec<(u8, Refusal)> = Vec::new();
         for u in &standing {
-            let Some((Role::Standing { crew, levels }, _)) = self.parts.get(u).copied() else {
+            let Some((
+                Role {
+                    crew,
+                    how: How::Standing { levels },
+                    ..
+                },
+                _,
+            )) = self.parts.get(u).copied()
+            else {
                 continue;
             };
             let held = self.holders(*u);
@@ -767,68 +929,78 @@ impl Bay {
             };
             failed.push((if named.contains(u) { 1 } else { 3 }, r));
         }
-        let mut borne = BTreeSet::new();
-        for (b, (role, _)) in &self.parts {
-            let Role::Bearing { crew, ends } = *role else {
-                continue;
-            };
-            if self.holders(*b) as u64 >= crew {
-                borne.insert(*b);
-                continue;
+        // Every other part, the shallowest first: held by its crew, or joined down to enough parts that are held up.
+        // Parts are added until none is: one pass for kinds in tiers, and a ring of kinds starts from nothing.
+        let mut borne: Vec<(u16, Id, u64, usize)> = self
+            .parts
+            .iter()
+            .filter_map(|(id, (role, _))| match role.how {
+                How::Borne { ends, tier } => Some((tier, *id, role.crew, ends)),
+                How::Standing { .. } => None,
+            })
+            .collect();
+        borne.sort();
+        let mut held_up = up;
+        loop {
+            let before = held_up.len();
+            for (_, p, crew, ends) in &borne {
+                if held_up.contains(p) {
+                    continue;
+                }
+                let on = self
+                    .ends(*p)
+                    .iter()
+                    .filter(|s| held_up.contains(*s))
+                    .count();
+                if self.holders(*p) as u64 >= *crew || on >= *ends {
+                    held_up.insert(*p);
+                }
             }
-            let joined = self.ends(*b);
-            if joined.iter().filter(|s| up.contains(*s)).count() >= ends {
-                borne.insert(*b);
-                continue;
+            if held_up.len() == before {
+                break;
             }
-            let by = if joined.is_empty() {
-                "nothing".to_owned()
-            } else {
-                let list: Vec<String> = joined.iter().map(|s| show(*s)).collect();
-                format!(
-                    "its joint{} to {}",
-                    if joined.len() > 1 { "s" } else { "" },
-                    list.join(" and ")
-                )
-            };
-            let r = Refusal {
-                name: "support.none",
-                detail: format!(
-                    "{} would hang by {by}; it needs {ends} joined to parts that stand",
-                    show(*b)
-                ),
-            };
-            failed.push((if named.contains(b) { 0 } else { 2 }, r));
         }
-        // A resting part (a cloth) rests on as many bearing parts as its link allows, each held up itself.
-        for (r, (role, _)) in &self.parts {
-            let Role::Resting { crew, ends } = *role else {
-                continue;
-            };
-            if self.holders(*r) as u64 >= crew {
+        for (tier, p, _, ends) in borne {
+            if held_up.contains(&p) {
                 continue;
             }
-            let joined = self.ends(*r);
-            let on = joined.iter().filter(|b| borne.contains(*b)).count();
-            if on >= ends {
-                continue;
-            }
-            let list: Vec<String> = joined.iter().map(|b| show(*b)).collect();
-            let by = if list.is_empty() {
-                "nothing".to_owned()
+            let joined = self.ends(p);
+            let list: Vec<String> = joined.iter().map(|s| show(*s)).collect();
+            let detail = if tier == 1 {
+                let by = if joined.is_empty() {
+                    "nothing".to_owned()
+                } else {
+                    format!(
+                        "its joint{} to {}",
+                        if joined.len() > 1 { "s" } else { "" },
+                        list.join(" and ")
+                    )
+                };
+                format!(
+                    "{} would hang by {by}; it needs {ends} joined to parts that stand",
+                    show(p)
+                )
             } else {
-                list.join(" and ")
+                // A resting part (a cloth, a joist, a sheet) rests on as many parts as its link allows, each held up.
+                let on = joined.iter().filter(|b| held_up.contains(*b)).count();
+                let by = if list.is_empty() {
+                    "nothing".to_owned()
+                } else {
+                    list.join(" and ")
+                };
+                format!(
+                    "{} would rest on {by}, {on} held up; it needs {ends} joined to parts that are held up",
+                    show(p)
+                )
             };
             let refusal = Refusal {
                 name: "support.none",
-                detail: format!(
-                    "{} would rest on {by}, {on} held up; it needs {ends} joined to parts that are held up",
-                    show(*r)
-                ),
+                detail,
             };
-            failed.push((if named.contains(r) { 0 } else { 2 }, refusal));
+            failed.push((if named.contains(&p) { 0 } else { 2 }, refusal));
         }
-        // The part the change named comes first, a bearing part before a standing one; then the rest, in id order.
+        // The part the change named comes first, a borne part (the shallowest first) before a standing one; then the
+        // rest, in id order.
         failed.sort_by_key(|(rank, _)| *rank);
         failed.into_iter().next().map_or(Ok(()), |(_, r)| Err(r))
     }

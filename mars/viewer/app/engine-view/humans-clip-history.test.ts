@@ -45,14 +45,14 @@ function skin(views:HumanViews,id:string):Skin {
 
 const distance=(a:ReturnType<HumanViews['meshPoints']>,b:ReturnType<HumanViews['meshPoints']>)=>Math.max(...a.map((v,i)=>Math.hypot(...v.p.map((x,j)=>x-b[i].p[j]))));
 
-test('recorded gesture entry, short gaps, interruption and recovery keep lower-body skin continuous',async t=>{
+test('recorded storytelling and gesture entry, short gaps, interruption and recovery keep skin continuous',async t=>{
   const [{TakePeople},{Runtime},{Spatial},{emptyWorld,human},{TakeRecorder},{openGround}]=await Promise.all([
     import('./take-replay.ts'),import('../../engine/runtime/runtime.ts'),import('../../engine/spatial/service.ts'),
     import('../../engine/world/factory.ts'),import('../../engine/take/recorder.ts'),import('../../engine/test/frame-fixtures.ts')]);
   const scene=openGround(),world=emptyWorld('gesture-continuity',scene),id='gesture-boundary-control',body=human(id,1,-1,{yaw:.3});
   world.entities[id]=body;body.human!.baseActivity='idle';
   const runtime=new Runtime(world,new Map(),{spatial:new Spatial(scene)},[]),recorder=new TakeRecorder(runtime,{rulesVersion:'gesture-continuity'});
-  const ticks=[40,51,53,58,61,72],acts=['nod','idle','wave','clap','nod','idle'];
+  const ticks=[40,51,53,58,61,72,80,83],acts=['tell-story','idle','wave','clap','nod','tell-story','point','idle'];
   for(let k=0;k<100;k++) {
     let index=-1;while(index+1<ticks.length&&k>=ticks[index+1])index++;
     body.human!.activity=index<0?'idle':acts[index];runtime.step();

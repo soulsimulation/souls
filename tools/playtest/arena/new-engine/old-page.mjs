@@ -208,8 +208,16 @@ export async function localCreate({ directory, routesFile, slugs, template, from
 
 /** Brings the old page up on a new-engine world of `template` (with `add`'s things placed), or of `facts` (the template's
  *  facts, edited: the engine's world; the template stays the page's shell). → {page, slug, world, stop()} */
+/** One catalogue goes to native admission and the existing page binding; no option keeps both unchanged. */
+export function oldPageBodyArgs(bodies) {
+  if (!bodies) return { world: {}, launcher: [] };
+  const directory=resolve(bodies);
+  return { world: { bodies: join(directory,'bodies.json') }, launcher: ['--bodies',directory] };
+}
+
 export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], facts = null, dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, create = false, bodies = null, log = () => {}, checkout = REPO_ROOT, bin = null, port: requestedPort = null, signal, onSpawn, onCommand, timeoutMs = 180000, caddy = process.env.CADDY ?? 'caddy', pinnedArtifacts = false } = {}) {
   dir = resolve(dir);
+  const bodyArgs=oldPageBodyArgs(bodies);
   if (create && checkout !== REPO_ROOT) throw Error('old-page: checkout binding requires ordinary world recipe');
   const until = Date.now() + timeoutMs;
   const remaining = () => { signal?.throwIfAborted(); const ms = until - Date.now(); if (ms <= 0) throw Error('old-page: startup timeout'); return ms; };
@@ -232,7 +240,7 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
     // the front door's port first: the directory's pairing link (`<public url>/pair?code=…`, what an agent prints) is
     // the front door's, as on soul.game, where this page and its sign-in are, not run.sh's own page
     const port = await freePorts(requestedPort ?? undefined, requestedPort === null ? 50 : 1), launcher = port + 1, frontPort = port;
-    world = await startWorld({ template: genesis.template, facts, dir: join(dir, 'world'), history, port: await freePorts(port + 4, requestedPort === null ? 50 : 1),
+    world = await startWorld({ template: genesis.template, facts, ...bodyArgs.world, dir: join(dir, 'world'), history, port: await freePorts(port + 4, requestedPort === null ? 50 : 1),
       checkout, signal, onSpawn, onCommand, readyMs: remaining(), env: { V2_BIN: bin ?? releaseBin(), V2_REPLICA_PKG: pkg, ...(pinnedArtifacts ? { V2_WEB: join(checkout, 'v2/web/dist'), CADDY: caddy } : {}), V2_PUBLIC_URL: `http://127.0.0.1:${frontPort}` } });
     log(`new engine: ${world.page} (${(world.bootMs / 1000).toFixed(1)} s)`);
     // --create's directory row is run.sh's own world's; the old page's is its slug's, once the launcher has made it (below)
@@ -266,7 +274,7 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
     const client = join(dir, 'client');
     await command('build-client', process.execPath, [join(checkout, 'v2/client/served/build.mjs'), '--out', client, '--version', '0.0.0', '--pkg', pkg], { cwd: checkout, stdio: 'ignore' });
     const sw = JSON.parse(await command('switch-native-page', process.execPath, [join(checkout, 'tools/world-launcher/v2-switch.mjs'), '--binding', binding, '--slug', slug, '--stream', routes.worlds[slug].stream,
-      '--routes', routesFile, '--client', client, '--static', join(dir, 'static'), '--no-unit', '--port', String(launcher), ...(bodies ? ['--bodies', resolve(bodies)] : [])], { cwd: checkout, encoding: 'utf8' }));
+      '--routes', routesFile, '--client', client, '--static', join(dir, 'static'), '--no-unit', '--port', String(launcher), ...bodyArgs.launcher], { cwd: checkout, encoding: 'utf8' }));
     if (!sw.page?.v2Stream) throw new Error(`the switch did not take: ${JSON.stringify(sw).slice(0, 300)}`);
     const page = `${base}/w/${slug}/`;
     // the page's inline config names the stream once the launcher has the binding (within a second)

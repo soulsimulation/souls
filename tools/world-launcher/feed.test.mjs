@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { openLauncher } from './launcher.mjs';
 import { platformFeed } from './feed.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 const P0 = await testPort(3);
 
 const dir = mkdtempSync(join(tmpdir(), 'launcher-feed-'));

@@ -78,6 +78,11 @@ const WALLS: &str = "test:walls";
 const BAR: &str = "test:bar";
 const LIFT: &str = "test:lift";
 const WHEEL: &str = "test:wheel";
+// W14 (#4090): a planter, a kettle, and Mars things that borrow entries by their map row (field 27).
+const PLANTER: &str = "test:planter";
+const MARS_CAN: &str = "mars:can";
+const MARS_SINK: &str = "mars:sink";
+const KETTLE: &str = "test:kettle";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
@@ -97,6 +102,10 @@ fn kinds() -> Vec<(&'static str, String)> {
         BAR,
         LIFT,
         WHEEL,
+        PLANTER,
+        MARS_CAN,
+        MARS_SINK,
+        KETTLE,
     ]
     .iter()
     .enumerate()
@@ -189,6 +198,43 @@ fn beyond_can() -> Id {
 fn near_can() -> Id {
     id(9)
 }
+fn planter() -> Id {
+    id(30)
+}
+fn mars_can() -> Id {
+    id(31)
+}
+fn mars_sink() -> Id {
+    id(32)
+}
+fn kettle() -> Id {
+    id(33)
+}
+/// A created thing whose map row borrows `entry` (field 27, as a world's map names it), with `more` fields.
+fn borrowing((parent, change): (Id, Change), entry: &str, more: &[(u64, Value)]) -> (Id, Change) {
+    let Change::Create {
+        node,
+        kind,
+        pose,
+        audience,
+        mut fields,
+    } = change
+    else {
+        unreachable!("a create")
+    };
+    fields.insert(import_eden::F_ENTRY, Value::Text(name(entry)));
+    fields.extend(more.iter().cloned());
+    (
+        parent,
+        Change::Create {
+            node,
+            kind,
+            pose,
+            audience,
+            fields,
+        },
+    )
+}
 fn south(by: i64) -> Vec3 {
     Vec3::new(at1().x, 0, at1().z - by)
 }
@@ -252,6 +298,10 @@ fn tree_rules() -> TreeRules {
             (fullname(CARRY), k("activity", &[], &[1], None)),
             (fullname(COURT), k("thing", &[], &[], None)),
             (fullname(CAN), k("thing", &[], &[], Some(1))),
+            (fullname(PLANTER), k("thing", &[], &[], None)),
+            (fullname(MARS_CAN), k("thing", &[], &[], Some(1))),
+            (fullname(MARS_SINK), k("thing", &[], &[], None)),
+            (fullname(KETTLE), k("thing", &[], &[], None)),
             (
                 fullname(CIRCLE),
                 Kind {
@@ -422,7 +472,37 @@ fn entries() -> Json {
         "jump": { "who": "anyone", "steps": [{ "step": "move", "move": "jump" }] } } }"#,
     )
     .unwrap();
+    // W14 (#4090): a planter watered with a can in hand, a kettle filled from the nearest tap on its ground, and the
+    // tap whose entry a Mars sink borrows.
+    let planter = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:planter", "owner": "thing",
+      "state": { "water": { "n": 28, "type": "int", "default": 0, "min": 0, "max": 9, "audience": { "rule": "everyone" } } },
+      "forms": { "water": { "who": "anyone", "starts": "act", "needs": [{ "need": "hand", "holds": "test:can" }],
+        "steps": [], "effects": [{ "change": "set", "field": "water", "to": 1, "event": "watered" }] } } }"#,
+    )
+    .unwrap();
+    let kettle = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:kettle", "owner": "thing",
+      "state": { "water": { "n": 28, "type": "int", "default": 0, "min": 0, "max": 1700, "audience": { "rule": "everyone" } } },
+      "forms": { "fill": { "who": "anyone", "starts": "act",
+        "takes": { "from": { "type": "thing",
+          "select": { "of": "things", "kind": "test:tap", "in": "parent", "anchor": "me", "order": "nearest", "rank": 1 } } },
+        "needs": [{ "need": "state", "field": "water", "at_most": 0 }], "steps": [],
+        "effects": [{ "change": "transfer", "field": "water", "from": { "arg": "from" }, "into": "this",
+          "amount": "room", "event": "filled" }] } } }"#,
+    )
+    .unwrap();
+    let tap = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:tap", "owner": "thing",
+      "state": { "water": { "n": 28, "type": "int", "default": 1000000, "min": 0, "audience": { "rule": "everyone" } } },
+      "forms": { "draw": { "who": "anyone", "starts": "act", "steps": [],
+        "effects": [{ "change": "set", "field": "water", "by": -100, "event": "drew" }] } } }"#,
+    )
+    .unwrap();
     Json::Obj(vec![
+        (PLANTER.into(), planter),
+        (KETTLE.into(), kettle),
+        ("test:tap".into(), tap),
         (WALKER.into(), walker),
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
@@ -490,6 +570,40 @@ fn built() -> Vec<(Id, Change)> {
         create(bar(), BAR, g, bar_at()),
         create(lift(), LIFT, g, lift_at()),
         create(wheel(), WHEEL, g, wheel_at()),
+        // W14 (#4090), east of the first walker: the Mars can within its reach, the planter, the Mars sink and the
+        // kettle a metre from the sink.
+        borrowing(
+            create(
+                mars_can(),
+                MARS_CAN,
+                g,
+                Vec3::new(at1().x + 1_000_000, 0, at1().z - 600_000),
+            ),
+            CAN,
+            &[],
+        ),
+        create(
+            planter(),
+            PLANTER,
+            g,
+            Vec3::new(at1().x + 2_000_000, 0, at1().z + 1_000_000),
+        ),
+        borrowing(
+            create(
+                mars_sink(),
+                MARS_SINK,
+                g,
+                Vec3::new(at1().x + 2_500_000, 0, at1().z - 1_500_000),
+            ),
+            "test:tap",
+            &[(28, Value::Uint(5000))],
+        ),
+        create(
+            kettle(),
+            KETTLE,
+            g,
+            Vec3::new(at1().x + 2_500_000, 0, at1().z - 500_000),
+        ),
     ]
 }
 
@@ -1345,6 +1459,8 @@ fn i4575_two_souls_asking_for_a_place_at_once_are_given_different_places() {
 
 #[path = "acts/attend.rs"]
 mod attend;
+#[path = "acts/borrowed.rs"]
+mod borrowed;
 #[path = "acts/effect_refused.rs"]
 mod effect_refused;
 #[path = "acts/named_args.rs"]

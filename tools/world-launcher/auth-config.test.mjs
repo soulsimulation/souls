@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
-import { ISSUER, PUBLISHABLE_KEY } from '../../apps/server/test/clerk-fixture.ts';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { ISSUER, PUBLISHABLE_KEY } from '../lib/clerk-fixture.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url).pathname;
 mkdirSync(scratch, { recursive: true });

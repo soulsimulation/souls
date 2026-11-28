@@ -222,3 +222,58 @@ fn the_last_two_are_kept() {
     drop(c);
     fs::remove_dir_all(&d).unwrap();
 }
+
+/// The root record is read whole too (#5211's rule for a node's record): a key this build does not read, or a seed
+/// its keeper refuses, passes the checkpoint over by name for the one before. Neither is read in part.
+#[test]
+fn a_root_key_or_a_seed_this_build_does_not_read_passes_the_checkpoint_over() {
+    use replica::encode::{Value, decode, encode};
+    let d = dir("root-key");
+    let newer = two(&d);
+    let b = fs::read(&newer).unwrap();
+    let Value::Map(mut root) = decode(&b[..b.len() - 4]).unwrap().value else {
+        panic!("a root record is a map")
+    };
+    root.insert(8, Value::Uint(1));
+    let mut b = encode(&Value::Map(root)).unwrap();
+    let sum = crc32c(0, &b).to_le_bytes();
+    b.extend_from_slice(&sum);
+    fs::write(&newer, &b).unwrap();
+    let r = restore(&d).unwrap().unwrap();
+    assert_eq!(r.rejected.len(), 1);
+    let (_, why) = &r.rejected[0];
+    assert_eq!(why.name, "checkpoint-root-bad");
+    assert!(why.detail.contains("key 8"), "{}", why.detail);
+    assert_eq!(r.root.record, 1);
+    fs::remove_dir_all(&d).unwrap();
+
+    let d = dir("seed");
+    let h = header();
+    let mut t = tree(&h, "0-base");
+    let mut c = Checkpoints::open(&d, 1, Blobs::default()).unwrap();
+    take(&mut c, &mut t, &h, 1, b"old").unwrap();
+    take(&mut c, &mut t, &h, 2, b"new").unwrap();
+    c.wait().unwrap();
+    drop(c);
+    let unread = || Refusal {
+        name: "seed-unread",
+        detail: "a later build's seed".into(),
+    };
+    let r = super::restore_checked(&d, &|seed| match seed == b"new" {
+        true => Err(unread()),
+        false => Ok(()),
+    })
+    .unwrap()
+    .unwrap();
+    assert_eq!((r.root.record, r.root.seed.as_slice()), (1, &b"old"[..]));
+    assert_eq!(r.rejected.len(), 1);
+    assert_eq!(r.rejected[0].1.name, "seed-unread");
+    assert_eq!(
+        restore(&d).unwrap().unwrap().root.record,
+        2,
+        "with no keeper asked, the newest"
+    );
+    let none = super::restore_checked(&d, &|_| Err(unread()));
+    assert_eq!(none.err().unwrap().name, "checkpoint-none-good");
+    fs::remove_dir_all(&d).unwrap();
+}

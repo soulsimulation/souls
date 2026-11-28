@@ -59,7 +59,7 @@ function get(url, agent) {
         record((w.rtt[type] ??= {}), performance.now() - t0);
         res.decoded = () => ({ br: brotliDecompressSync, gzip: gunzipSync, deflate: inflateSync, zstd: zstdDecompressSync })[ce]?.(body) ?? body;
         // a CDN's refusal says why (`cf-mitigated: challenge`, or a block with no such header)
-        if (res.statusCode >= 400 && !refusal) { const t = body.toString('latin1'); refusal = `${res.statusCode} ${/<title>([^<]*)/i.exec(t)?.[1] ?? ''} ${/(Error code|error|cf-error-code)[^0-9]{0,40}(\d{3,4})/i.exec(t)?.[2] ?? ''} ${t.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 400)}`; }
+        if (res.statusCode >= 400 && !refusal) { let t; try { t = res.decoded().toString('latin1'); } catch { t = body.toString('latin1'); } refusal = `${res.statusCode} ${/<title>([^<]*)/i.exec(t)?.[1] ?? ''} ${/(Error code|error|cf-error-code)[^0-9]{0,40}(\d{3,4})/i.exec(t)?.[2] ?? ''} ${t.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').slice(0, 400)}`; }
         if (res.statusCode !== 200) { fail(`${type} ${res.statusCode}${res.headers['cf-mitigated'] ? ` ${res.headers['cf-mitigated']}` : ''}`); return no(Object.assign(new Error('status'), { status: res.statusCode, counted: true })); }
         ok(type === 'pointer' ? res.decoded() : body);
       });

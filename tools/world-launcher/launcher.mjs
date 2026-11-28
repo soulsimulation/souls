@@ -23,6 +23,8 @@
 //                                SOULS_V2_CREATE=0): the directory's create makes it
 //                                on the new engine, owned by the signed-in person; served and listed once its route is (0.135 W1)
 //   GET  /__sim/worlds/<slug>    one world + what the launcher has seen (looks, agent, previews)
+//   GET  /__sim/app-files.json   the web build's own files (assets/: name, bytes, sha256) and their set id, public: what
+//                                tools/cdn/mirror-first-load.mjs copies to the asset CDN (#4986, app-files.mjs)
 //   GET  /__sim/launcher         children, ports, pids, restarts (diagnostics; direct local requests only)
 //   GET  /__sim/whoami           {address}: the address this request is keyed on (first X-Forwarded-For entry, else the peer)
 //   GET  /__sim/healthz          {ok, build, worlds, running, caps, memAvailableMb} (also /healthz); clientErrorsNew = error kinds
@@ -133,6 +135,7 @@ import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, l
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
 import { cutoverFence, routeOnlyId, searchPlaces, searchText, withV2Stream } from './cutover.mjs';
+import { appFiles } from './app-files.mjs';
 import { movedAssets } from './moved-assets.mjs';
 import { placeShotKeeper, placeShots } from './place-shots.mjs';
 import { coverKeeper, worldCovers } from './world-covers.mjs';
@@ -360,7 +363,10 @@ export async function openLauncher(cfg = {}) {
   if (oldRoot && !authEnvFile) throw new Error('launcher: --old-worlds-root needs --auth-env (the original worlds sign in with Clerk)');
   const redirects = oldRoot ? redirectSwitch(join(dataDir, 'redirects.json'), log) : null;
   const registry = new Registry(dataDir);
-  const cutover = cutoverFence({ binding: cfg.cutoverBinding, log, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}) });
+  // #4986: the web build's files as a set the asset CDN can hold whole; the routed page loads its code from the CDN once
+  // the launcher has seen that set's marker there (cutover.mjs `appCdn`). `cfg.edgeFetch` stands in for fetch in tests.
+  const webFiles = appFiles(webDir);
+  const cutover = cutoverFence({ binding: cfg.cutoverBinding, log, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}), ...(cfg.edgeFetch ? { fetcher: cfg.edgeFetch } : {}), appSet: () => webFiles()?.set ?? null });
   /** D2b (0.134): a registry world its binding routes to the new engine (switched): the launcher never starts, wakes or
    *  keeps its old process; its page, views and reads are answered here (oldCold). A world turned back is old again. */
   const moved = (w) => !!w && !w.routeOnly && !!cutover?.v2Stream(w);
@@ -1856,6 +1862,8 @@ export async function openLauncher(cfg = {}) {
       }
       // #2515 (E3): the public world list is the same for everyone; without a token the CDN may keep it briefly
       if (path === '/__sim/worlds.json' && req.method === 'GET') { json(res, 200, await worldsJson(), req.headers.authorization ? {} : EDGE_BRIEF); return; }
+      // #4986: the web build's own files, for the mirror to the asset CDN: names and hashes of public, immutable files
+      if (path === '/__sim/app-files.json' && req.method === 'GET') { const list = webFiles(); json(res, list ? 200 : 404, list ?? { ok: false, code: 'app-files.none', message: `This web build has no set of files that can be copied whole: ${webFiles.problem()}.` }); return; }
       if (path === '/__sim/my-souls.json' && req.method === 'GET') {
         const souls = await mySouls(req.headers.authorization);
         if (!souls) { json(res, 401, { ok: false, code: 'signin-required', message: 'sign in to see your Souls' }, { vary: 'authorization' }); return; }
@@ -2397,7 +2405,7 @@ export function clerkAuth(envFile, dataDir, publicOrigin, cfg = {}) {
   let issuer; try { issuer = new URL(i); } catch {}
   if (!/^pk_(live|test)_[A-Za-z0-9+/=_-]+$/.test(k) || issuer?.protocol !== 'https:' || issuer.origin !== i || issuer.username || issuer.password || !/^[a-z0-9.-]+$/.test(issuer.hostname)) throw new Error('launcher: the --auth-env file must set CLERK_PUBLISHABLE_KEY and CLERK_ISSUER_URL (https origin)');
   return {
-    child: { ...(authorizedParties === undefined ? {} : { authorizedParties }), envFile: file, registryPath: join(resolve(dataDir), 'accounts.sqlite'), ...(satellite ? { satellite } : {}) },
+    child: { ...(authorizedParties === undefined ? {} : { authorizedParties }), envFile: file, registryPath: join(resolve(dataDir), 'accounts.sqlite'), verifierSwitch: join(resolve(dataDir), 'creator-verifier'),...(satellite ? { satellite } : {}) },
     public: { provider: 'clerk', clerkPublishableKey: k, clerkIssuer: i, authenticationOrigin: publicOrigin, ...(satellite ? { clerkSatellite: satellite } : {}) },
   };
 }

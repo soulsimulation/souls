@@ -29,6 +29,15 @@ test('a written text field reads its reference; a cleared one reads null; other 
   assert.equal(written.fields.count, 2);
 });
 
+test('W14 (#4090): a node whose map row borrows an entry is stated by that entry\'s kind, with its fields, as the world states it', () => {
+  const record = encode(new Map([[1, [scope, 8]], [2, 'mars:board@1220bb'], [6, new Map([[4, 3], [27, 'test:board']])]]));
+  const copy = { roots: () => JSON.stringify({ x: 'h' }), record: (h) => (h === 'h' ? record : null) };
+  const node = stateOf(copy, kinds, 'me').nodes[`${'ab'.repeat(16)}-8`];
+  assert.equal(node.kind, 'test:board', 'a need that names the entry\'s kind is met by the thing that borrows it');
+  assert.equal(node.fields.count, 3);
+  assert.equal(stateOf(copyOf(new Map()), kinds, 'me').nodes[`${'ab'.repeat(16)}-7`].kind, 'test:board', 'a thing of the kind itself, as before');
+});
+
 test('#3697: two revisions of a creator kind keep their own records, by full name', () => {
   const rec = (n) => Buffer.from(JSON.stringify({ format: 'souls-entry/1', kind: 'gene:pod', owner: 'thing', state: { ripe: { n, type: 'int', default: 0 } } }));
   const node = (k, kind, fields, children) => encode(new Map([[1, [scope, k]], [2, kind], [6, new Map(fields)], ...(children ? [[10, children]] : [])]));

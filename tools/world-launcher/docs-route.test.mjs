@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { docFile, openLauncher, wantsMarkdown } from './launcher.mjs';
 import { TAKEN_PREFIXES } from './production.mjs';
 import { RESERVED } from './registry.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 test('docFile maps docs and changelog paths to build files, and nothing else', () => {
   const cases = [['/docs', '', 'docs/index.html'], ['/docs/', '', 'docs/index.html'], ['/docs.md', '', 'docs.md'], ['/docs', 'text/markdown', 'docs.md'],

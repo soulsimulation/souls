@@ -1,11 +1,24 @@
 import { publicAuthEnvironment } from './clerk-public-env.mjs';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+/** #2839 A: which program checks a creator's session. `verify-session.mjs` (the launcher's own check, clerk-session.mjs)
+ *  unless the switch file (`<data>/creator-verifier`, auth.verifierSwitch) says `old`: then `verify-creator.mjs`, the
+ *  old world server's Auth. Read on every check, so the operator switches back without a deploy or a restart:
+ *    echo old > <data>/creator-verifier      the old check        rm <data>/creator-verifier      the launcher's own
+ *  Kept for one release; it goes with apps/server. */
+export function creatorVerifier(auth) {
+  let mode = '';
+  try { mode = auth?.verifierSwitch ? readFileSync(auth.verifierSwitch, 'utf8').trim() : ''; } catch {}
+  return mode === 'old' ? 'tools/world-launcher/verify-creator.mjs' : 'tools/world-launcher/verify-session.mjs';
+}
+
 export function verifiedCreator(authorization, auth, publicOrigin, root) {
   const token = /^Bearer\s+(\S+)$/i.exec(authorization ?? '')?.[1];
   if (!token || token.length > 32768) return Promise.resolve(null);
   return new Promise((done) => {
-    const child = spawn(process.execPath, [`--env-file=${resolve(auth.envFile)}`, 'tools/world-launcher/verify-creator.mjs'], {
+    const child = spawn(process.execPath, [`--env-file=${resolve(auth.envFile)}`, creatorVerifier(auth)], {
       cwd: root, stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: process.env.PATH, ...publicAuthEnvironment(auth),
         DEV_AUTH: '0', AUTH_PROVIDER: 'clerk', ACCOUNT_AUTH_REQUIRED: '1', ENABLE_WORLD_ENGINE: '1',
         ACCOUNT_REGISTRY_PATH: auth.registryPath, PUBLIC_URL: publicOrigin, BRAIN_MODE: 'fake',

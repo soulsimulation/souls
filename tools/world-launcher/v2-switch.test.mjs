@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { openLauncher } from './launcher.mjs';
 import { notUnitData, staticWritable, unitWritable, v2Switch } from './v2-switch.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
 mkdirSync(scratch, { recursive: true });

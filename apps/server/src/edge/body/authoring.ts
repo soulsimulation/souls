@@ -15,9 +15,9 @@ export function mountBodyAuthoring(app:Hono,prefix:string,types:string[]){
   'validate.mjs':at('tools/body-authoring/validate.mjs'),
   'upload.mjs':at('tools/body-authoring/upload.mjs'),
   'example.json':at('tools/body-authoring/example.json'),
-  'admission.ts':new URL('./admission.ts',import.meta.url),
-  'rig.ts':new URL('./rig.ts',import.meta.url),
-  'upload-validation.ts':new URL('../../moderation/validate.ts',import.meta.url),
+  'admission.ts':at('tools/body-authoring/admit/admission.ts'),
+  'rig.ts':at('tools/body-authoring/admit/rig.ts'),
+  'upload-validation.ts':at('tools/body-authoring/admit/validate.ts'),
   'action-profile.ts':at('mars/viewer/engine/bodies/action-profile.ts'),
   'motion.ts':at('mars/viewer/engine/bodies/motion.ts'),
  };
@@ -29,7 +29,7 @@ export function mountBodyAuthoring(app:Hono,prefix:string,types:string[]){
  for(const [file,path]of Object.entries(files))app.get('/body-authoring/'+file,c=>{
   let text=readFileSync(path,'utf8');
   if(file==='SKILL.md')text=text.replaceAll('{{BASE}}',base(c));
-  if(file==='admission.ts')text=text.replace('../../../../../mars/viewer/engine/bodies/motion.ts','./motion.ts').replace('../../../../../mars/viewer/engine/bodies/action-profile.ts','./action-profile.ts');
+  if(file==='admission.ts')text=text.replace('../../../mars/viewer/engine/bodies/motion.ts','./motion.ts').replace('../../../mars/viewer/engine/bodies/action-profile.ts','./action-profile.ts');
   const type=file.endsWith('.json')?'application/json':file.endsWith('.md')?'text/markdown':'text/javascript';
   return c.body(text,200,{'Content-Type':type+'; charset=utf-8','Cache-Control':'public, max-age=60','X-Content-Type-Options':'nosniff'});
  });

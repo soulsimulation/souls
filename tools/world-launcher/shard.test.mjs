@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { request as request_ } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { ChildPool } from './children.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const root = new URL('../../', import.meta.url).pathname;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));

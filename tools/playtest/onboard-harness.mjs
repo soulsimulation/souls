@@ -23,7 +23,7 @@ const harnesses = args.only ? [args.only] : ['claude', 'codex'];
 mkdirSync(out, { recursive: true });
 
 // ---------- a local world that needs an account approval (synthetic Clerk issuer, fake minds)
-const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../../apps/server/test/clerk-fixture.ts');
+const { clerkKeys, ISSUER, PUBLISHABLE_KEY } = await import('../lib/clerk-fixture.ts');
 const keys = await clerkKeys(origin), secrets = mkdtempSync(join(tmpdir(), 'onboard-harness-'));
 writeFileSync(join(secrets, 'jwks.json'), JSON.stringify({ keys: [keys.jwk] }));
 const dataDir = join(out, 'data'); mkdirSync(dataDir, { recursive: true });
@@ -32,7 +32,7 @@ const env = { ...process.env, WORLD_KEY: 'toy', PORT: String(port), HOST: '127.0
   WORLD_OWNER_ID: 'user_owner', DATA_DIR: dataDir, PUBLIC_URL: base, AUTH_PROVIDER: 'clerk', ACCOUNT_AUTH_REQUIRED: '1',
   ACCOUNT_REGISTRY_PATH: join(dataDir, 'accounts.sqlite'), CLERK_PUBLISHABLE_KEY: PUBLISHABLE_KEY, CLERK_ISSUER_URL: ISSUER, CLERK_AUTHORIZED_PARTIES: origin,
   EDGE_SKILL_FILE: join(soul, 'skill.md'), EDGE_INSTRUCTIONS_FILE: join(soul, 'instructions.md'), EDGE_CONTROLLER_CLI_FILE: join(soul, 'eden.mjs'),
-  SIM_TEST_JWKS_FILE: join(secrets, 'jwks.json'), NODE_OPTIONS: `--import=${join(root, 'apps/server/test/clerk-jwks-preload.mjs')}` };
+  SIM_TEST_JWKS_FILE: join(secrets, 'jwks.json'), NODE_OPTIONS: `--import=${join(root, 'tools/lib/clerk-jwks-preload.mjs')}` };
 delete env.DEV_AUTH;
 const world = spawn(process.execPath, ['apps/server/src/main.ts'], { cwd: root, env, stdio: ['ignore', openSync(join(out, 'world.log'), 'a'), openSync(join(out, 'world.log'), 'a')] });
 const stop = () => { try { world.kill('SIGTERM'); } catch { /* gone */ } };

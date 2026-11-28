@@ -786,7 +786,7 @@ fn trace(out: &str, fixed: &Fixed, path: &[Xz], carry: &Carry, walkers: &[(Xz, X
 mod from_entry {
     use replica::rules::json::parse;
 
-    use super::super::{Fixed, GRIP_REACH, Load, REACH};
+    use super::super::{Fixed, GRIP_REACH, Load, REACH, SIDE_REACH};
 
     const M: i64 = 1_000_000;
 
@@ -804,7 +804,7 @@ mod from_entry {
             Load {
                 half_length: 1_371_500,
                 half_width: 51_000,
-                grips: [-1_097_000, 1_097_000],
+                grips: [-1_197_000, 1_197_000],
                 crew: 2,
                 ..beam
             }
@@ -1047,7 +1047,7 @@ mod from_entry {
             plank.inner,
             [Some(-1_400_000), Some(0), Some(1_400_000), None]
         );
-        let off = 150_000 + REACH;
+        let off = 150_000 + SIDE_REACH;
         assert_eq!(
             plank.side_places(),
             vec![[-1_400_000, off], [0, -off], [1_400_000, off]]
@@ -1186,18 +1186,26 @@ mod each_step {
         assert!(way(&fixed, &beam, at(10 * M), at(10 * M), &[]).is_err());
     }
 
-    /// Held at its carriers' height, a load passes over a low box (a beam seated low in a bay) and is stopped by one
-    /// as high as it is carried (a beam seated high).
+    /// Held at its carriers' height (1.05 m), a load passes over a low box (a beam seated low in a bay, and one seated
+    /// in its high slot, whose top is 0.965 m up) and is stopped by one as high as it is carried.
     #[test]
     fn c7_a_load_passes_over_a_low_box_not_through_a_high_one() {
         let load = frame();
         let [b, f] = load.places();
         let at = |x: i64| ([x + f, 0], [x + b, 0]);
         let band = load.as_held().unwrap().1;
-        assert!(band[0] < 900_000 && band[1] > 900_000, "{band:?}");
+        assert!(
+            band[0] < super::super::HEIGHT && band[1] > super::super::HEIGHT,
+            "{band:?}"
+        );
         let low = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[254_000, 356_000]]);
         assert!(way(&low, &load, at(0), at(8 * M), &[]).is_ok());
-        let high = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[863_000, 965_000]]);
+        let seated = Fixed::with_heights(vec![post(6 * M, 0, 100_000)], vec![[863_000, 965_000]]);
+        assert!(way(&seated, &load, at(0), at(8 * M), &[]).is_ok());
+        let high = Fixed::with_heights(
+            vec![post(6 * M, 0, 100_000)],
+            vec![[super::super::HEIGHT - 50_000, super::super::HEIGHT + 50_000]],
+        );
         let r = way(&high, &load, at(0), at(8 * M), &[]).unwrap_err();
         assert_eq!(r.name, "carry-load-blocked");
     }
@@ -1227,7 +1235,10 @@ mod each_step {
         assert!(near(e, Vec3::new(609_500, 1_219_000, 38_000)), "{e:?}");
         let (plan, band) = standing.as_held().unwrap();
         assert_eq!((plan.half_length, plan.half_width), (e.x, e.z));
-        assert_eq!(band, [900_000 - e.y, 900_000 + e.y]);
+        assert_eq!(
+            band,
+            [super::super::HEIGHT - e.y, super::super::HEIGHT + e.y]
+        );
     }
 
     /// What its load already met where the carry began (a part taken from beside the parts of its bay) is passed, so
@@ -1435,6 +1446,61 @@ mod each_step {
             carry.rests_on(tree, im.nodes["world"], floor, q).unwrap(),
             7
         );
+    }
+
+    /// A take broken off on its track (#5067, review): a part that rested on the ground goes back along the track to
+    /// where it lay; one taken out of a slot or a stand, unjoined as it was taken, never goes back to hang there. It
+    /// goes straight down from where the node is, to rest on its carriers' floor.
+    #[test]
+    fn a_take_broken_off_sets_a_part_back_only_where_it_rested_on_the_ground() {
+        use replica::pose::{Quat, Vec3};
+        use replica::world_model::Audience;
+
+        use super::super::{Carry, HEIGHT, Phase};
+        let w = testworld::generate(1, 40).unwrap();
+        let im = import_eden::load(&w.text).unwrap();
+        let (tree, ground) = (&im.tree, im.nodes["ground"]);
+        let load = replica::ids::Id::new(im.nodes["world"].scope(), 999_999).unwrap();
+        let carry = || {
+            let mut c = Carry::new(
+                im.nodes["world"],
+                load,
+                ground,
+                Audience::Everyone,
+                super::header(im.nodes["world"]),
+                im.rules.clone(),
+            );
+            c.load = frame();
+            c
+        };
+        let q = Quat::IDENTITY;
+        // 60 m off the world's things. Taken from a slot 1.4 m up and 1 m east of its carriers' middle.
+        let slot = (Vec3::new(-59 * M, 1_400_000, 60 * M), q);
+        let hands = (Vec3::new(-60 * M, HEIGHT, 60 * M), q);
+        let lay = (ground, slot.0, q);
+        let mut rested = carry();
+        rested.take_up(0, slot, hands, 2 * M, lay).unwrap();
+        rested
+            .release(tree, 100_000, ground, None, "souls:test")
+            .unwrap();
+        let h = rested.hoist.expect("its way back");
+        assert_eq!((h.to, h.rest), (slot, lay), "back where it lay");
+        let mut seated = carry();
+        seated.back = false;
+        seated.take_up(0, slot, hands, 2 * M, lay).unwrap();
+        seated
+            .release(tree, 100_000, ground, None, "souls:test")
+            .unwrap();
+        let h = seated.hoist.expect("a set-down's track");
+        assert_eq!(h.phase, Phase::Release("souls:test"));
+        assert_eq!(h.from, slot, "from where the node is");
+        assert_eq!((h.to.0.x, h.to.0.z), (slot.0.x, slot.0.z), "straight down");
+        assert_eq!(
+            (h.rest.0, h.rest.1.y),
+            (ground, frame().rest),
+            "to rest on the ground"
+        );
+        assert_eq!(h.to.0.y, frame().rest);
     }
 }
 
