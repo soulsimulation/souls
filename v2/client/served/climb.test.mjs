@@ -146,6 +146,9 @@ test('served: after the bay is built, a Soul climbs to the standing place its ow
   const seen = ok(await cli(e, 'object', ids['frame-1']), 'object frame-1');
   writeFileSync(join(base, 'object-frame-1.json'), JSON.stringify(seen, null, 2));
   console.log(`object frame-1: ${JSON.stringify({ places: seen.places, ways_up: seen.ways_up, offers: seen.offers.map((o) => o.name) })}`);
+  const inside = await cli(e, 'query', JSON.stringify([{ place: ids.bay, depth: 3 }]));
+  writeFileSync(join(base, 'bay-inside.json'), JSON.stringify(inside, null, 2));
+  console.log(`the bay in e's copy: ${JSON.stringify(inside.answers?.[0])}`);
   const climb = seen.offers.find((o) => o.name.startsWith('climb to ') && /back face/.test(o.name));
   assert.ok(climb, `a climb to the outer standing place among ${JSON.stringify(seen.offers.map((o) => o.name))}`);
   assert.ok(seen.ways_up?.some((w) => w.to === climb.place && /^ladder up /.test(w.name)), 'the ladder up to it');
