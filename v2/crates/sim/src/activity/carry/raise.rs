@@ -113,7 +113,11 @@ impl Spec {
         let m = i128::from(M);
         let hand = i128::from(LIFT_HAND);
         // Where the post's top is at the hands' height.
-        let top = if h > hand { (h * h - hand * hand).isqrt() } else { 0 };
+        let top = if h > hand {
+            (h * h - hand * hand).isqrt()
+        } else {
+            0
+        };
         let (lean, rise, len) = if r >= top {
             (r, (h * h - r * r).isqrt(), h)
         } else {
@@ -181,7 +185,9 @@ pub struct Raise {
 
 fn plan(q: Quat, v: Vec3) -> R<[i64; 2]> {
     let w = q.rotate(v).map_err(pose_refusal)?;
-    let len = (i128::from(w.x).pow(2) + i128::from(w.z).pow(2)).isqrt().max(1);
+    let len = (i128::from(w.x).pow(2) + i128::from(w.z).pow(2))
+        .isqrt()
+        .max(1);
     let unit = |c: i64| (i128::from(c) * i128::from(M) / len) as i64;
     Ok([unit(w.x), unit(w.z)])
 }
@@ -209,7 +215,13 @@ impl Raise {
     /// laid toward `toward` (a direction on the plan; its own front, +z, when none or when that is along its base
     /// line), turned about its base line until its length is flat. Refused `raise.not-standing` when its length is
     /// not upright.
-    pub fn down(spec: Spec, at: Vec3, stand: Quat, toward: Option<[i64; 2]>, lifter: Vec3) -> R<Raise> {
+    pub fn down(
+        spec: Spec,
+        at: Vec3,
+        stand: Quat,
+        toward: Option<[i64; 2]>,
+        lifter: Vec3,
+    ) -> R<Raise> {
         let y = stand.rotate(Vec3::new(0, M, 0)).map_err(pose_refusal)?;
         if y.y < M - M / 100 {
             return refuse(
@@ -224,7 +236,8 @@ impl Raise {
         });
         // A quarter turn about its own x: its length to its own +z, or to its −z.
         let half = 759_250_125;
-        let quarter = Quat::new(half, if back { -half } else { half }, 0, 0).map_err(pose_refusal)?;
+        let quarter =
+            Quat::new(half, if back { -half } else { half }, 0, 0).map_err(pose_refusal)?;
         let lie = stand.then(quarter).map_err(pose_refusal)?;
         let along = if back { [-front[0], -front[1]] } else { front };
         Ok(Raise::sided(spec, at, lie, stand, along, x, lifter))
@@ -241,9 +254,11 @@ impl Raise {
         let x = plan(q, Vec3::new(M, 0, 0))?;
         let stand = super::yaw_toward(x)?;
         let front = plan(stand, Vec3::new(0, 0, M))?;
-        let back = i128::from(y.x) * i128::from(front[0]) + i128::from(y.z) * i128::from(front[1]) < 0;
+        let back =
+            i128::from(y.x) * i128::from(front[0]) + i128::from(y.z) * i128::from(front[1]) < 0;
         let half = 759_250_125;
-        let quarter = Quat::new(half, if back { -half } else { half }, 0, 0).map_err(pose_refusal)?;
+        let quarter =
+            Quat::new(half, if back { -half } else { half }, 0, 0).map_err(pose_refusal)?;
         let lie = stand.then(quarter).map_err(pose_refusal)?;
         let along = if back { [-front[0], -front[1]] } else { front };
         // The tilt only rises as `r` falls: the least `r` that rises no more than the part does.
@@ -260,10 +275,21 @@ impl Raise {
         let up = i128::from(spec.half_thick) * i128::from(spec.tilt(r)[0]) / i128::from(M);
         let foot = Vec3::new(p.x, p.y - up as i64, p.z);
         let lifter = Vec3::new(p.x + x[0], p.y, p.z + x[1]);
-        Ok(Some((Raise::sided(spec, foot, lie, stand, along, x, lifter), r)))
+        Ok(Some((
+            Raise::sided(spec, foot, lie, stand, along, x, lifter),
+            r,
+        )))
     }
 
-    fn sided(spec: Spec, foot: Vec3, lie: Quat, stand: Quat, along: [i64; 2], x: [i64; 2], lifter: Vec3) -> Raise {
+    fn sided(
+        spec: Spec,
+        foot: Vec3,
+        lie: Quat,
+        stand: Quat,
+        along: [i64; 2],
+        x: [i64; 2],
+        lifter: Vec3,
+    ) -> Raise {
         let d = i128::from(lifter.x - foot.x) * i128::from(x[0])
             + i128::from(lifter.z - foot.z) * i128::from(x[1]);
         let side = if d < 0 { [-x[0], -x[1]] } else { x };
@@ -280,15 +306,22 @@ impl Raise {
     /// Whether the lifter stands on the part's own +x side.
     fn plus(&self) -> R<bool> {
         let x = plan(self.stand, Vec3::new(M, 0, 0))?;
-        Ok(i128::from(x[0]) * i128::from(self.side[0]) + i128::from(x[1]) * i128::from(self.side[1]) > 0)
+        Ok(i128::from(x[0]) * i128::from(self.side[0])
+            + i128::from(x[1]) * i128::from(self.side[1])
+            > 0)
     }
 
     fn at(&self, across: i64, along: i64) -> Vec3 {
         let v = |k: usize| {
-            (i128::from(self.side[k]) * i128::from(across) + i128::from(self.along[k]) * i128::from(along))
+            (i128::from(self.side[k]) * i128::from(across)
+                + i128::from(self.along[k]) * i128::from(along))
                 / i128::from(M)
         };
-        Vec3::new(self.foot.x + v(0) as i64, self.foot.y, self.foot.z + v(1) as i64)
+        Vec3::new(
+            self.foot.x + v(0) as i64,
+            self.foot.y,
+            self.foot.z + v(1) as i64,
+        )
     }
 
     /// Where the lifter stands with the part raised to `r`: beside its post, `r` from the base line.
@@ -320,15 +353,25 @@ impl Raise {
         let d = (S45 * i128::from(M + lean) + C45 * i128::from(rise)) / 1_000_000_000;
         let q = blend(self.lie, self.stand, n, d.max(1))?;
         let up = i128::from(self.spec.half_thick) * i128::from(lean) / i128::from(M);
-        Ok((Vec3::new(self.foot.x, self.foot.y + up as i64, self.foot.z), q))
+        Ok((
+            Vec3::new(self.foot.x, self.foot.y + up as i64, self.foot.z),
+            q,
+        ))
     }
 
     /// Where the lifter and the footer hold the part raised to `r`, each in the part's own frame (µm): the lifter's
     /// post at [`Spec::hold_up`], the footer's at [`FOOT_HOLD`].
     pub fn holds(&self, r: i64) -> R<[Vec3; 2]> {
-        let w = if self.plus()? { self.spec.half_width } else { -self.spec.half_width };
+        let w = if self.plus()? {
+            self.spec.half_width
+        } else {
+            -self.spec.half_width
+        };
         let up = self.spec.hold_up(self.spec.tilt(r));
-        Ok([Vec3::new(w, up, 0), Vec3::new(-w, FOOT_HOLD.min(self.spec.height), 0)])
+        Ok([
+            Vec3::new(w, up, 0),
+            Vec3::new(-w, FOOT_HOLD.min(self.spec.height), 0),
+        ])
     }
 
     /// How long the lifter's walk from one end to the other takes at [`PACE`], µs.
@@ -364,7 +407,10 @@ mod tests {
         );
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../content/kinds/construction/rack_beam.json");
-        assert_eq!(Spec::of(&parse(&std::fs::read_to_string(root).unwrap()).unwrap()), None);
+        assert_eq!(
+            Spec::of(&parse(&std::fs::read_to_string(root).unwrap()).unwrap()),
+            None
+        );
     }
 
     /// The lifter's place says the tilt: lying at the top end, standing at the base, its hands never above 1.9 m and
@@ -384,10 +430,16 @@ mod tests {
             let up = s.hold_up([lean, rise]);
             assert!(up <= s.height && up > 0);
             let hand = i128::from(up) * i128::from(rise) / i128::from(M);
-            assert!(hand <= i128::from(LIFT_HAND) + 2, "hands {hand} µm up at {r}");
+            assert!(
+                hand <= i128::from(LIFT_HAND) + 2,
+                "hands {hand} µm up at {r}"
+            );
             // The hold is beside the lifter: as far along the ground as it stands.
             let out = i128::from(up) * i128::from(lean) / i128::from(M);
-            assert!((out - i128::from(r)).abs() <= 10, "the hold {out} along, the lifter {r}");
+            assert!(
+                (out - i128::from(r)).abs() <= 10,
+                "the hold {out} along, the lifter {r}"
+            );
         }
         assert_eq!(s.hold_up(s.tilt(0)), LIFT_HAND);
     }
@@ -421,15 +473,24 @@ mod tests {
             assert!(p.y >= 0 && p.y <= s.half_thick);
             let y = q.rotate(Vec3::new(0, M, 0)).unwrap();
             assert!(y.x.abs() <= 2_000, "it turns about its base line: {y:?}");
-            assert!(y.y >= rise - 2_000, "its length rises: {} after {rise}", y.y);
+            assert!(
+                y.y >= rise - 2_000,
+                "its length rises: {} after {rise}",
+                y.y
+            );
             rise = y.y;
             // As the tilt says, within a hundredth.
             let [lean, up_] = s.tilt(r);
-            assert!((y.z - lean).abs() <= 10_000 && (y.y - up_).abs() <= 10_000, "{y:?} at {r}");
+            assert!(
+                (y.z - lean).abs() <= 10_000 && (y.y - up_).abs() <= 10_000,
+                "{y:?} at {r}"
+            );
             let holds = up.holds(r).unwrap();
             for (feet, hold) in [(up.lifter_at(r), holds[0]), (up.footer_at(), holds[1])] {
                 let g = q.rotate(hold).unwrap();
-                let off = (i128::from(p.x + g.x - feet.x).pow(2) + i128::from(p.z + g.z - feet.z).pow(2)).isqrt();
+                let off = (i128::from(p.x + g.x - feet.x).pow(2)
+                    + i128::from(p.z + g.z - feet.z).pow(2))
+                .isqrt();
                 assert!(off <= 700_000, "{off} µm from its hold at {r}");
                 assert!(p.y + g.y <= LIFT_HAND + 45_000);
             }
@@ -439,7 +500,10 @@ mod tests {
         let (p, q) = down.node(s.height).unwrap();
         assert_eq!(p, at);
         let y = q.rotate(Vec3::new(0, M, 0)).unwrap();
-        assert!(y.y.abs() <= 10 && (y.z - M).abs() <= 10, "lying toward +z again: {y:?}");
+        assert!(
+            y.y.abs() <= 10 && (y.z - M).abs() <= 10,
+            "lying toward +z again: {y:?}"
+        );
         // Toward its back, the other way.
         let back = Raise::down(s, up.foot, up.stand, Some([0, -M]), up.lifter_at(0)).unwrap();
         assert_eq!(back.along, [0, -M]);
@@ -455,7 +519,10 @@ mod tests {
             while r != to {
                 let next = s.toward(r, to);
                 assert!(next != r && (next - r).abs() <= FOLLOW, "{r} to {next}");
-                assert!((next - to).abs() < (r - to).abs(), "toward its end: {r} to {next}");
+                assert!(
+                    (next - to).abs() < (r - to).abs(),
+                    "toward its end: {r} to {next}"
+                );
                 let (a, b) = (s.tilt(r), s.tilt(next));
                 let far = (i128::from(a[0] - b[0]).pow(2) + i128::from(a[1] - b[1]).pow(2)).isqrt();
                 assert!(far <= i128::from(TURN) + 2, "{far} at {r}");
@@ -463,7 +530,10 @@ mod tests {
                 ticks += 1;
                 assert!(ticks < 400, "never ends");
             }
-            assert!((90..=200).contains(&ticks), "{ticks} ticks from {from} to {to}");
+            assert!(
+                (90..=200).contains(&ticks),
+                "{ticks} ticks from {from} to {to}"
+            );
         }
         // Within both: all the way at once.
         assert_eq!(s.toward(1_000_000, 1_010_000), 1_010_000);
@@ -480,24 +550,39 @@ mod tests {
         let at = Vec3::new(5 * M, s.half_thick, -3 * M);
         let lifter = Vec3::new(5 * M + s.beside(), 0, -3 * M + s.height);
         let up = Raise::up(s, at, lie, lifter).unwrap();
-        for r in [s.height, 2_000_000, 1_500_000, 900_000, 600_000, 250_000, 100_000] {
+        for r in [
+            s.height, 2_000_000, 1_500_000, 900_000, 600_000, 250_000, 100_000,
+        ] {
             let (p, q) = up.node(r).unwrap();
             let (found, at_r) = Raise::resume(s, p, q).unwrap().expect("a raise");
             assert!((at_r - r).abs() <= 60_000, "raised to {at_r}, was {r}");
             assert_eq!((found.along, found.stand), (up.along, up.stand), "at {r}");
             assert!(
-                (found.foot.x, found.foot.z) == (up.foot.x, up.foot.z) && found.foot.y.abs() <= 1_000,
+                (found.foot.x, found.foot.z) == (up.foot.x, up.foot.z)
+                    && found.foot.y.abs() <= 1_000,
                 "its foot: {:?}",
                 found.foot
             );
             let (a, b) = (found.node(at_r).unwrap(), (p, q));
             let tip = |q: Quat| q.rotate(Vec3::new(0, s.height, 0)).unwrap();
             let (ta, tb) = (tip(a.1), tip(b.1));
-            let off = (i128::from(ta.x - tb.x).pow(2) + i128::from(ta.y - tb.y).pow(2) + i128::from(ta.z - tb.z).pow(2)).isqrt();
-            assert!(off <= 40_000, "no jump as it goes on: its top {off} µm off at {r}");
+            let off = (i128::from(ta.x - tb.x).pow(2)
+                + i128::from(ta.y - tb.y).pow(2)
+                + i128::from(ta.z - tb.z).pow(2))
+            .isqrt();
+            assert!(
+                off <= 40_000,
+                "no jump as it goes on: its top {off} µm off at {r}"
+            );
         }
-        let (found, at_r) = Raise::resume(s, up.foot, up.stand).unwrap().expect("a raise at its end");
-        assert_eq!((at_r, found.node(0).unwrap()), (0, (up.foot, up.stand)), "standing, where it stands");
+        let (found, at_r) = Raise::resume(s, up.foot, up.stand)
+            .unwrap()
+            .expect("a raise at its end");
+        assert_eq!(
+            (at_r, found.node(0).unwrap()),
+            (0, (up.foot, up.stand)),
+            "standing, where it stands"
+        );
     }
 
     /// A part whose length is not flat is not raised, and one not upright is not lowered, each by name.
