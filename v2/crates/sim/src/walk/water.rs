@@ -2,7 +2,8 @@
 //! `souls:wade`, `souls:swim`), and its gait changes at the shore.
 //!
 //! - **Abilities.** Each body's abilities are [`Water::abilities`] (`crate::routes`' masks); a body not listed has
-//!   hands only, so it neither wades nor swims and its routes, lines and steps are the ones it had before.
+//!   hands and the climb ([`WALKER`]: a body climbs a ladder as the old engine's humanoid climbs a frame, racks T6),
+//!   so it neither wades nor swims and its routes, lines and steps are the ones it had before.
 //! - **A ground for each body.** The open ground's wading ground and water are surfaces of their own for the mover
 //!   (cut from the map's wet pieces once a body may use them, [`Water::cut`]), one each, so a body on one ground slides
 //!   along its edge and never walks onto another. The controller keeps the ground each body stands on and steps it on
@@ -22,7 +23,10 @@ use crate::gaits::Ground;
 use crate::ground::{Terrain, exits};
 use crate::links::Kind;
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Map, Mask, Spot, needs};
+use crate::routes::{CLIMB, HANDS, Map, Mask, Spot, needs};
+
+/// What a body not listed in [`Water::abilities`] has: hands, and the climb up a ladder (racks T6).
+pub const WALKER: Mask = HANDS | CLIMB;
 use replica::effects::Refusal;
 use replica::ids::Id;
 use replica::pose::Vec3;
@@ -32,7 +36,7 @@ use std::sync::Arc;
 /// The open ground's wet surfaces and each body's abilities and ground.
 #[derive(Clone, Default)]
 pub struct Water {
-    /// Each body's abilities; a body not listed has hands only.
+    /// Each body's abilities; a body not listed has [`WALKER`]'s.
     pub abilities: BTreeMap<Id, Mask>,
     /// The bodies off dry ground and theirs, as the controller left them at the tick's start.
     pub grounds: BTreeMap<Id, Ground>,
@@ -58,9 +62,9 @@ fn spot_at(map: &Map, q: u32, p: Vec3) -> Spot {
 }
 
 impl Water {
-    /// `body`'s abilities: hands only when not listed.
+    /// `body`'s abilities: [`WALKER`]'s when not listed.
     pub fn has(&self, body: Id) -> Mask {
-        self.abilities.get(&body).copied().unwrap_or(HANDS)
+        self.abilities.get(&body).copied().unwrap_or(WALKER)
     }
 
     /// The ground `body` stands on.

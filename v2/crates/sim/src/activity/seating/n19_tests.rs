@@ -368,7 +368,7 @@ fn n19_a3_seating_a_part_where_a_body_stands_is_refused_before_the_lift() {
         let frame = w.frames[0];
         let r = named(
             w.seating
-                .check(&w.tree, &w.acts, &mut m, act, frame, &target, REACH),
+                .check(&w.tree, &w.acts, &mut m, act, frame, &target, REACH, &[]),
         );
         assert_eq!(
             (w.tree.to_state(), w.seating.parts.len()),

@@ -1,0 +1,84 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:test_flight",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "joint": {
+   "n": 1,
+   "from": "mars:timber_rail",
+   "most": 1,
+   "most_per": 8,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "hook": {
+   "role": "joint",
+   "connector": "cloth_edge",
+   "mates": "cloth_seat",
+   "at_mm": [
+    -2500,
+    1900,
+    0
+   ],
+   "yaw_mdeg": 0
+  },
+  "grip_back": {
+   "role": "grip",
+   "at_mm": [
+    -2900,
+    900,
+    0
+   ]
+  },
+  "grip_front": {
+   "role": "grip",
+   "at_mm": [
+    2900,
+    900,
+    0
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   6000,
+   2060,
+   1100
+  ]
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A test stair flight, 5 m of run rising 2 m: two carry it and hook its top onto a rail."
+ },
+ "card": {
+  "text": "card"
+ }
+}

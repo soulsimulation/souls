@@ -1,0 +1,106 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:test_joist",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 28,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "carry_crew": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "joint": {
+   "n": 1,
+   "from": "mars:timber_rail",
+   "most": 2,
+   "most_per": 8,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "end_l": {
+   "role": "joint",
+   "connector": "cloth_edge",
+   "mates": "cloth_seat",
+   "at_mm": [
+    -850,
+    0,
+    0
+   ],
+   "yaw_mdeg": 0
+  },
+  "end_r": {
+   "role": "joint",
+   "connector": "cloth_edge",
+   "mates": "cloth_seat",
+   "at_mm": [
+    850,
+    0,
+    0
+   ],
+   "yaw_mdeg": 0
+  },
+  "sheet_seat": {
+   "role": "joint",
+   "connector": "sheet_seat",
+   "mates": "sheet_edge",
+   "at_mm": [
+    0,
+    38,
+    0
+   ],
+   "yaw_mdeg": 0
+  },
+  "grip_back": {
+   "role": "grip",
+   "at_mm": [
+    -900,
+    19,
+    0
+   ]
+  },
+  "grip_front": {
+   "role": "grip",
+   "at_mm": [
+    900,
+    19,
+    0
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   1900,
+   38,
+   89
+  ]
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A test joist, a 1.9 m 2x4 laid flat: two carry it and lay it across two rails."
+ },
+ "card": {
+  "text": "card"
+ }
+}

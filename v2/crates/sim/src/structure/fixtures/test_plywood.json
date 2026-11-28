@@ -1,0 +1,130 @@
+{
+  "format": "souls-entry/1",
+  "kind": "mars:test_plywood",
+  "owner": "thing",
+  "state": {
+    "carry_crew": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "links": {
+    "joint": {
+      "n": 1,
+      "from": "mars:test_two_by_four",
+      "most": 2,
+      "most_per": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "rest": {
+      "role": "joint",
+      "connector": "sheet_edge",
+      "mates": "sheet_seat",
+      "at_mm": [
+        0,
+        0,
+        0
+      ],
+      "yaw_mdeg": 0
+    },
+    "grip_back": {
+      "role": "grip",
+      "at_mm": [
+        -914,
+        9,
+        0
+      ]
+    },
+    "grip_side_l": {
+      "role": "grip",
+      "at_mm": [
+        -300,
+        9,
+        -610
+      ]
+    },
+    "grip_side_r": {
+      "role": "grip",
+      "at_mm": [
+        300,
+        9,
+        609
+      ]
+    },
+    "grip_front": {
+      "role": "grip",
+      "at_mm": [
+        914,
+        9,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1829,
+      19,
+      1219
+    ],
+    "floors": [
+      {
+        "top_mm": 19,
+        "size_mm": [
+          1829,
+          1219
+        ]
+      }
+    ]
+  },
+  "looks": {
+    "shape": {
+      "round": 2,
+      "palette": {
+        "ply": "#d8b98a"
+      },
+      "tags": [
+        "plywood",
+        "sheet",
+        "panel",
+        "deck"
+      ],
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            9,
+            0
+          ],
+          "size": [
+            1829,
+            19,
+            1219
+          ],
+          "tint": "ply"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A 4x6 ft plywood sheet, 3/4 in: two to four carry it flat."
+  },
+  "card": {
+    "text": "card"
+  }
+}
