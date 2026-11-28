@@ -86,6 +86,7 @@ export async function importPresets(out: string, media = REPO) {
   let stage = 'catalogue';
   function install(preset: string, body: Imported, extra: object = {}) {
     const result = write(body, out), entry = result.file.replace(/\.diag$/, '.json');
+    // entryHash also binds additive native resource tuples; diag/model content hashes stay unchanged.
     const file = join(out, entry), data = JSON.parse(readFileSync(file, 'utf8'));
     writeFileSync(file, JSON.stringify({ ...data, ...extra }) + '\n');
     bodies.push({ preset, hash: sha(body.text), size: body.size, height: body.heightMm, hover: body.hoverMm, entry, entryHash: sha(readFileSync(file)), legacy: [legacyBody(preset)] });

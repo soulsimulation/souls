@@ -4,6 +4,7 @@
 
 import { lookBody } from '../humanoid/look.ts';
 import type { BodySlot } from './source/kind-bounds.ts';
+import type { HeldSet } from '../../../../mars/viewer/app/engine-view/held-entry.ts';
 
 /** A body's seat while it is in a slot: the slot's height above its thing's base (mm), and whether it lies there. */
 /** `heading` (radians, atan2(dz, dx)): the way a sitter faces, out of the seat (the slot's yaw turning the thing's +z),
@@ -56,6 +57,13 @@ export function propOf(kind: string): string {
 /** A change of what a body holds: world time (µs) and the prop, null when its hands are empty again. */
 export type Held = { at: number; prop: string | null };
 
+/** Public held-record observations. No observation before t means unknown, not an empty hand. */
+export function heldEntriesAt(history: readonly HeldSet[] | undefined, t: number): HeldSet | undefined {
+  let found: HeldSet | undefined;
+  for (const sample of history ?? []) { if (sample.observedAt > t) break; found = sample; }
+  return found;
+}
+
 /** What `held` (in time order) has in the hand at world time `t` µs. */
 export function heldAt(held: readonly Held[] | undefined, t: number): string | null {
   let prop: string | null = null;
@@ -83,13 +91,43 @@ export function entityWithLook(base: string, look: string): string {
 
 /** One body of the v2 catalogue (`souls/bodies/1`, v2/tools/import-body/presets.ts Entry): its hash and the old page's
  *  record of the same body (`legacy[0]`, a BODY-v1 RenderBody). */
-export type CatalogueBody = { hash: string; legacy?: unknown[] };
+export type BodyResource = readonly [string, number, number?];
+export type CatalogueBody = { hash: string; legacy?: unknown[]; entry?: string; entryHash?: string; resources?: readonly BodyResource[] };
+
+/** Read only hash-verified companion metadata. Missing/ambiguous slots stay unknown. */
+export function bodyResources(value: unknown): readonly BodyResource[] | undefined {
+  if (!Array.isArray(value) || !value.length || value.some(r => !Array.isArray(r) || r.length < 2 || r.length > 3
+    || typeof r[0] !== 'string' || !Number.isSafeInteger(r[1]) || r[2] !== undefined && (!Number.isSafeInteger(r[2]) || r[2] < 1))) return undefined;
+  if (new Set(value.map(r => r[0])).size !== value.length) return undefined;
+  const slots = value.filter(r => r[1] === 2 && r[2] !== undefined).map(r => r[2]);
+  if (new Set(slots).size !== slots.length) return undefined;
+  return value.map(r => Object.freeze([...r]) as BodyResource);
+}
+
+/** Existing catalogue entryHash binds model JSON and its additive resource metadata to this exact body kind. */
+export async function loadBodyResources(rows: readonly CatalogueBody[], base: string, read: typeof fetch = fetch): Promise<CatalogueBody[]> {
+  return Promise.all(rows.map(async row => {
+    if (!row.entry || !/^[a-z][a-z0-9_]*\.json$/.test(row.entry) || !/^[a-f0-9]{64}$/.test(row.entryHash ?? '')) return {...row, resources: undefined};
+    try {
+      const response = await read(base + row.entry); if (!response.ok) return {...row, resources: undefined};
+      const bytes = await response.arrayBuffer();
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('');
+      if (hash !== row.entryHash) return {...row, resources: undefined};
+      const json = JSON.parse(new TextDecoder().decode(bytes));
+      if (json.kindHash !== row.hash) return {...row, resources: undefined};
+      return {...row, resources: bodyResources(json.resources)};
+    } catch { return {...row, resources: undefined}; }
+  }));
+}
 
 /** The old page's body record for a v2 body-kind hash, from the catalogue; null when it has none (drawn by default). */
 export function legacyBodyOf(hash: string | undefined, catalogue: ReadonlyMap<string, CatalogueBody> | null): Record<string, unknown> | null {
   const b = hash ? catalogue?.get(hash)?.legacy?.[0] : null;
-  return b && typeof b === 'object' && !Array.isArray(b) && ((b as { family?: unknown }).family === 'humanoid' || (b as { family?: unknown }).family === 'floater')
-    ? (b as Record<string, unknown>) : null;
+  if (!b || typeof b !== 'object' || Array.isArray(b) || !['humanoid','floater'].includes(String((b as {family?:unknown}).family))) return null;
+  const look = {...b} as Record<string,unknown>;
+  delete look.nativeResources; delete look.nativeKindHash; delete look.nativeBody;
+  const resources = catalogue?.get(hash!)?.resources;
+  return {...look, ...(resources ? {nativeResources:resources,nativeKindHash:hash} : {})};
 }
 
 /** V3: the old body record (BODY-v1, the old renderer's humanoid look) for a body's own look, field 33's params as
@@ -103,7 +141,8 @@ export function lookBodyOf(params: string | undefined): Record<string, unknown> 
 export function catalogueOf(json: unknown): CatalogueBody[] | null {
   const c = json as { format?: unknown; bodies?: unknown } | null;
   if (!c || c.format !== 'souls/bodies/1' || !Array.isArray(c.bodies)) return null;
-  return c.bodies.filter((b): b is CatalogueBody => !!b && typeof b === 'object' && typeof (b as CatalogueBody).hash === 'string' && /^[a-f0-9]{64}$/.test((b as CatalogueBody).hash));
+  return c.bodies.filter((b): b is CatalogueBody => !!b && typeof b === 'object' && typeof (b as CatalogueBody).hash === 'string' && /^[a-f0-9]{64}$/.test((b as CatalogueBody).hash))
+    .map(row => { const trustedLater = {...row}; delete trustedLater.resources; return trustedLater; }); // Only verified companion bytes may add resources.
 }
 
 const BODIES_DIR = /^\/[A-Za-z0-9._-][A-Za-z0-9._/-]*\/$/; // one leading slash: never `//host/`

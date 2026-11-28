@@ -104,16 +104,23 @@ test('actual selected-arm skin stays continuous at native cut, normal return and
 test('point bearing yields to existing hand/held/paired/press owners',async()=>{
   const f=projection(),source=await template('woman'),r=player(f,source);setHumanGround(()=>0);
   try {
+    const nativeHands={body:'native-owner',kindHash:'ab'.repeat(32),resources:[['souls:hand-left',2,7]] as const};
+    const presentHeld={observedAt:T0,entries:[{id:'owned-cup',kind:'eden:cup@aa',parent:'native-owner',slot:7,pos:[0,0,0] as const,rot:[Q,0,0,0] as const}]};
     const base=r.show(1.6),controls:Partial<SampledHuman>[]=[{hands:{left:[.2,1.2,4.1]}},{prop:'cup'},{grip:'held'},
+      {prop:'cup',nativeHands,heldEntries:presentHeld},
       {handHold:{with:'peer',hand:'left',since:0},handGameTick:30,handGameDt:.05},{rps:{start:0,shoot:20,shape:'rock'},handGameTick:30,handGameDt:.05},
       {activity:'handshake',partner:'peer'},{formPress:[{hand:'left',start:T0+1_000_000,contact:T0+1_300_000,end:T0+1_800_000}]}];
     // A bare partner id on idle is not a paired-contact owner. Keep the actual handshake above, and exercise
     // genuine held/native owners during the recorded return after the point ends, not a fabricated early idle.
     for(const owner of [...controls,...controls.filter(owner=>!owner.activity).map(owner=>({...owner,activity:'idle'}))]){const skins=[];
       const sample=owner.activity==='idle'?r.show(1.9):base;
-      for(const enabled of [false,true]){const v=new HumanViews();v.setTemplates([source]);try{v.setFrame([{...sample,...owner,pointAim:enabled?sample.pointAim:undefined,pointAimTime:enabled?sample.pointAimTime:undefined,clipOrigin:undefined},
+      // Legacy prop ownership is unknown, whereas the native present/empty cases remain explicit.
+      for(const enabled of [false,true]){const v=new HumanViews();v.setTemplates([source]);try{v.setFrame([{...sample,...owner,...(owner.prop&&!owner.heldEntries?{heldEntries:undefined}:{}),pointAim:enabled?sample.pointAim:undefined,pointAimTime:enabled?sample.pointAimTime:undefined,clipOrigin:undefined},
         {id:'peer',p:[.62,0,4.35],yaw:Math.PI,walk:0,walkDist:0,activity:owner.partner?'handshake':'idle',...(owner.handHold?{handHold:{with:E,hand:'right',since:0},handGameTick:30,handGameDt:.05}:{})}],sample.pointAimTime!/1e6);v.render(1);skins.push(v.meshPoints(E,1));}finally{v.clear();}}
       assert(maxDelta(skins[0],skins[1])<1e-5,`existing owner keeps its exact full skin ${JSON.stringify(owner)} delta ${maxDelta(skins[0],skins[1])}`);
     }
+    const emptySkins=[];
+    for(const prop of [undefined,'cup']){const v=new HumanViews();v.setTemplates([source]);try{v.setFrame([{...base,prop,nativeHands,heldEntries:{observedAt:T0,entries:[]},clipOrigin:undefined}],base.pointAimTime!/1e6);v.render(1);emptySkins.push(v.meshPoints(E,1));}finally{v.clear();}}
+    assert(maxDelta(emptySkins[0],emptySkins[1])<1e-5,'known-empty native ownership suppresses a stale generic prop instead of blocking the actual point');
   }finally{r.clear();setHumanGround(null);}
 });

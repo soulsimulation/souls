@@ -7,8 +7,9 @@
 // body is sampled at every tick between its own samples (never past its newest, as the v2 page draws it: no
 // extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
 
-import { heldAt, postureOf, type Held, type Seat } from './take-bodies.ts';
-import { LOOPS, SEATED_GESTURES, gestureNow, pressAt, pointAimAt, type Gesture } from './take-gestures.ts';
+import { heldAt, heldEntriesAt, postureOf, type Held, type Seat } from './take-bodies.ts';
+import type { HeldSet, ConsumeMove } from '../../../../mars/viewer/app/engine-view/held-entry.ts';
+import { LOOPS, SEATED_GESTURES, consumeAt, pointAimAt, gestureNow, pressAt, type Gesture } from './take-gestures.ts';
 import { markOf, type Talk } from './take-speech.ts';
 
 /** Seconds a tick, as the old engine's takes. */
@@ -50,6 +51,10 @@ export type Body = {
   until?: number;
   /** What it holds, in time order (take-bodies.ts). */
   held?: Held[];
+  /** Actual public held records, independent of the legacy generic prop timeline. */
+  heldEntries?: readonly HeldSet[];
+  /** Last begun consume observations; independent of activities and contact owners. */
+  consumes?: readonly ConsumeMove[];
   /** Its gesture moves (take-gestures.ts), in start order. */
   gestures?: Gesture[];
   /** What it said, as talk lines in time order (take-speech.ts). */
@@ -268,6 +273,8 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
     let baseActivity: string | null | undefined;
     let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
     let pressKey: string | undefined, pointKey: string | undefined;
+    let heldSet: HeldSet | undefined;
+    let consume: ConsumeMove | undefined;
     let seatH: number | null | undefined, prop: string | null | undefined, partner: string | null | undefined, hold: string | null | undefined;
     for (let k = 0; k <= ticks; k++) {
       const t = (fromTick + k) * TICK_US;
@@ -305,6 +312,10 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat && !seat.ride ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
       if (k < ticks && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
       if (k < ticks && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
+      const nextConsume = consumeAt(b.consumes, t);
+      if (k < ticks && nextConsume !== consume) { changes.push([k, b.entity, 'consumeMove', nextConsume]); consume = nextConsume; }
+      const nextHeldSet = heldEntriesAt(b.heldEntries, t);
+      if (k < ticks && nextHeldSet !== heldSet) { changes.push([k, b.entity, 'heldEntries', nextHeldSet]); heldSet = nextHeldSet; }
       // A gesture plays where the body stands; seated or lying it keeps its posture (the old poses are standing ones).
       const posture = postureOf(seat);
       const nextBase = posture === 'sit' ? 'sit' : null;

@@ -5,7 +5,7 @@
 import { activityAt, chunkEnd, chunkOf, motionAt, positionAt, standingFacingAt, facingHandoffs, TICK_US, type Body, type Frame, type RecordedChunk, type StandingFacing, type Thing, type Turn, type WorldSample } from './takes.ts';
 import { bodySlotsOf, defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
-import { cut as cutGestures, endGesture, endReading, gestureFrom, readingFrom, type Gesture } from './take-gestures.ts';
+import { cut as cutGestures, endGesture, endReading, gestureFrom, readingFrom, isConsume, recordConsume, endConsumes, type Gesture } from './take-gestures.ts';
 import { keepPlaces, placeAt, seatKey, type CourseAt, type CoursePlaces } from './course-samples.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
@@ -13,6 +13,9 @@ import type { MoveRec } from './source/source.ts';
 import { reloadForFormat } from './stream-format.ts';
 import { KIND_SLOTS, type BodySlot } from './source/kind-bounds.ts';
 import { localIsoAt } from './source/sky-record.ts';
+import type { Fields } from './source/kinds-state.ts';
+import { thingState } from './world-state.ts';
+import { heldValue, type HeldEntry, type HeldSet, type ConsumeMove } from '../../../../mars/viewer/app/engine-view/held-entry.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -21,6 +24,7 @@ type NodeRec = { id: string; kind: string; parent: string | null; slot: number |
   slots?: number[][];
   /** Creator-defined canonical entry, already supplied by the stream reader. */
   defines?: string; entry?: Uint8Array;
+  fields?: Fields; tint?: [string, number][]; def?: string; params?: Record<string, unknown>;
   /** Exact recorded body-kind hash (field 32); absent is the stated default. */
   body?: string;
   /** V3: the Soul's own look's params (field 33, G2's `life:look`), JSON. */
@@ -34,7 +38,7 @@ type SampleRec = [string, string, number | null, number, number, number, number]
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
-  moves?: MoveRec[]; runEnds?: { body: string; at: number; run?: string }[];
+  moves?: MoveRec[]; runEnds?: { body: string; at: number; run?: string; how?: string }[];
   /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
   courses?: CoursePlaces;
   /** First-day round 4: when each still node on a course moves on, world µs (course-samples.ts `courseLeaves`). */
@@ -148,7 +152,7 @@ export class V2Bridge {
   private readonly kindSlots = new Map<string, BodySlot[]>(Object.entries(KIND_SLOTS));
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
-  private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; said: Talk[]; gestures: Gesture[]; turns?: Turn[]; standing?: StandingFacing[] }>();
+  private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; heldEntries?: HeldSet[]; consumes?: ConsumeMove[]; said: Talk[]; gestures: Gesture[]; turns?: Turn[]; standing?: StandingFacing[] }>();
   /** Each held thing's holder (a body node id). */
   private readonly heldBy = new Map<string, string>();
   /** Saids kept (saidKey), and those not yet in a chunk; the talk lines' next id. */
@@ -251,7 +255,7 @@ export class V2Bridge {
     // Only a live part's nodes describe its end; a history bundle's nodes precede its motion.
     const sampleTimes = p.to > p.from ? new Map<string, number>() : undefined;
     if (sampleTimes) for (const [id, , , at] of p.samples) sampleTimes.set(id, Math.max(at, sampleTimes.get(id) ?? -Infinity));
-    const moved = this.nodesChanged(p.nodes, p.removed, p.from, p.to > p.from ? 'walk' : 'frame', sampleTimes);
+    const moved = this.nodesChanged(p.nodes, p.removed, p.from, p.to > p.from ? 'walk' : 'frame', sampleTimes, p.to);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
     for (const n of moved) this.sample(n.id, n.parent!, n.slot, Math.max(n.at ?? p.from, p.from, this.tracks.get(n.id)?.samples.at(-1)?.at ?? -Infinity), n.pos);
     this.standingChanged(p.nodes, p.from);
@@ -260,6 +264,7 @@ export class V2Bridge {
     for (const m of p.moves ?? []) {
       const t = this.tracks.get(m.body);
       if (!t) continue;
+      if (isConsume(m.name)) { t.consumes = recordConsume(t.consumes, m); continue; }
       if (m.ended) { endGesture(t.gestures, m.start, m.ended.at, m.run); continue; }
       // a move at a book in its own hand is reading it (the book's read form), drawn as the old read pose to the run's end
       const heldProp = m.target && this.heldBy.get(m.target) === m.body ? propOf(this.nodes.get(m.target)?.kind ?? '') : null;
@@ -270,7 +275,7 @@ export class V2Bridge {
       }
       if (g) t.gestures.push(g);
     }
-    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at, e.run); }
+    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) { cutGestures(t.gestures, e.at, e.run); t.consumes = endConsumes(t.consumes, e); } }
     for (const h of p.happened ?? []) {
       const word = h.name === undefined ? undefined : WOUND.get(h.name);
       if (word && (this.wound.get(h.node)?.at ?? -Infinity) <= h.at) this.wound.set(h.node, { at: h.at, word });
@@ -286,7 +291,7 @@ export class V2Bridge {
 
   /** `defer`: a body's record that changes its frame or slot ('frame'), or any place ('walk'), is returned, to be
    *  sampled after the part's motion samples. */
-  private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer: 'frame' | 'walk' | null = null, sampleTimes?: ReadonlyMap<string, number>): NodeRec[] {
+  private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer: 'frame' | 'walk' | null = null, sampleTimes?: ReadonlyMap<string, number>, observedAt = at): NodeRec[] {
     const moved: NodeRec[] = [];
     for (const id of removed) { this.nodes.delete(id); const t = this.tracks.get(id); if (t) t.gone ??= at; this.letGo(id, at); }
     // V5 (0.133): every record first, so a body listed before the seat or room it is in is placed in it (a history
@@ -332,7 +337,35 @@ export class V2Bridge {
       // A placed body with no motion yet stands where its record has it.
       else if (n.parent) this.sample(n.id, n.parent, n.slot, n.at ?? 0, n.pos);
     }
+    // All records/body tracks must exist before deriving ownership: transfers are one observation, independent of
+    // input order. Live nodes are observed at the part's end; n.at only dates motion, never contents changes.
+    if (removed.length || nodes.some(n => !isBody(n)) || [...this.tracks.values()].some(t => !t.heldEntries)) this.observeHeld(observedAt);
     return moved;
+  }
+
+  private observeHeld(observedAt: number): void {
+    const sets = new Map<string, HeldEntry[]>();
+    for (const n of this.nodes.values()) {
+      if (isBody(n)) continue;
+      // Same body-ancestor rule as world-state.inHand; keep each entry's raw immediate parent and local pose.
+      let parent = n.parent ? this.nodes.get(n.parent) : undefined, depth = 0;
+      while (parent && !isBody(parent) && depth++ < 32) parent = parent.parent ? this.nodes.get(parent.parent) : undefined;
+      if (!parent || !isBody(parent) || !this.tracks.has(parent.id)) continue;
+      const translated = thingState(n);
+      // thingState's display projection uses numbers. Omit unsafe display integers; raw fields remain lossless.
+      const state = translated && Object.fromEntries(Object.entries(translated).filter(([, v]) => typeof v !== 'number' || Number.isSafeInteger(v)));
+      const entry = heldValue({ id: n.id, kind: n.kind, parent: n.parent, slot: n.slot, pos: n.pos, rot: n.rot,
+        ...(n.fields ? { fields: n.fields } : {}), ...(state && Object.keys(state).length ? { state } : {}),
+        ...(n.tint ? { tint: n.tint } : {}), ...(n.origin !== undefined ? { origin: n.origin } : {}),
+        ...(n.def !== undefined ? { def: n.def } : {}), ...(n.params !== undefined ? { params: n.params } : {}) }) as unknown as HeldEntry;
+      const entries = sets.get(parent.id) ?? [];
+      entries.push(entry); sets.set(parent.id, entries);
+    }
+    for (const [id, t] of this.tracks) {
+      const entries = (sets.get(id) ?? []).sort((a, b) => a.id.localeCompare(b.id)), last = t.heldEntries?.at(-1);
+      if (last && JSON.stringify(last.entries) === JSON.stringify(entries)) continue;
+      (t.heldEntries ??= []).push(Object.freeze({ observedAt, entries: Object.freeze(entries) }));
+    }
   }
 
   /** Thing `id` leaves its holder's hand at world time `at`; the holder still holds whatever else it holds. */
@@ -565,7 +598,7 @@ export class V2Bridge {
       const own = n.body ? null : lookBodyOf(n.look);
       const look = legacyBodyOf(n.body, this.catalogue) ?? own, entity = n.body || own ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
       out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, ...(t.turns ? { turns: t.turns } : {}), held: t.held, said: t.said, gestures: t.gestures,
-        ...(t.standing ? { standing: t.standing } : {}), ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
+        ...(t.standing ? { standing: t.standing } : {}), ...(t.heldEntries ? { heldEntries: t.heldEntries } : {}), ...(t.consumes ? { consumes: t.consumes } : {}), ...(look ? { look: { ...look, ...(look.nativeResources ? { nativeBody: id } : {}) } } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
     return out;
   }
@@ -606,6 +639,13 @@ export class V2Bridge {
       let h = 0;
       while (h + 1 < t.held.length && t.held[h + 1].at < cut) h++;
       if (h) t.held.splice(0, h);
+      let hi = 0;
+      while (t.heldEntries && hi + 1 < t.heldEntries.length && t.heldEntries[hi + 1].observedAt < cut) hi++;
+      if (hi) t.heldEntries!.splice(0, hi);
+      // Retain the last begun consume before the window, including its recorded endings.
+      let ci = 0;
+      while (t.consumes && ci + 1 < t.consumes.length && t.consumes[ci + 1].start < cut) ci++;
+      if (ci) t.consumes!.splice(0, ci);
       // the newest turn before the cut still says how it stands
       let r = 0;
       while (t.turns && r + 1 < t.turns.length && t.turns[r + 1].at < cut) r++;

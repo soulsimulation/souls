@@ -241,3 +241,22 @@ test('a thing moved from a roof to the ground in one part is drawn once, on the 
   assert.deepEqual([e.in, e.p!.map((v) => +v.toFixed(3))], [{ parent: 'world' }, [6, 0, 2]], 'on the ground, where v2 placed it');
   assert.deepEqual(turn([], []), { diff: null, made: null }, 'once drawn there, nothing more');
 });
+
+test('held pictures resolve the exact loaded bowl revision, canonical grip and changing soup state', async () => {
+  const {readFileSync} = await import('node:fs');
+  const bowl = JSON.parse(readFileSync(new URL('../../../../content/kinds/food/soup_bowl.json',import.meta.url),'utf8'));
+  const k = new CreatorKinds();
+  k.apply([node('entry:bowl','souls:kind',[0,0,0],{defines:'eden:soup_bowl@aa',entry:bytes(bowl)})],[]);
+  const entry = {id:'bowl',kind:'eden:soup_bowl@aa',parent:'body',slot:7,pos:[0,0,0],rot:[Q,0,0,0]} as const;
+  for (const quantity of [2,1,0,2]) {
+    const held = k.held({...entry,fields:{28:quantity}})!;
+    assert.deepEqual(held.grip,[.12,.06,0]); assert.equal(held.state.soup,quantity);
+    assert.deepEqual(held.points.bite.at,[-.11,.1,0]);
+    assert.equal(held.def.make.kind,'gen'); assert.doesNotMatch(held.def.ref,/-box@/);
+  }
+  assert.equal(k.held({...entry,fields:{28:{big:'9007199254740993'}}}),null,'lossless large integer is unsupported, never default full soup');
+  assert.equal(k.held({...entry,fields:{28:{value:{big:'9007199254740993'},per_s:-1,set_us:{big:'10000000'}}}}),null,'timed state requires its authoritative clock, not a default');
+  assert.equal(k.held({...entry,kind:'eden:soup_bowl@bb'}),null);
+  assert.equal(k.held({...entry,kind:'eden:soup_bowl'}),null);
+  k.apply([],['entry:bowl']); assert.equal(k.held(entry),null);
+});
