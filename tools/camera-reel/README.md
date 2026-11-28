@@ -5,7 +5,7 @@ the same moment, and a scorecard worked out from a per-frame camera log.
 
 - `catalogue.json` holds the scenes, the log's fields and the scorecard's formulas. It is the one source for the
   runner (`run.mjs`, C02) and the scorer (`score.mjs`, C03).
-- `catalogue.test.mjs` checks it against the world templates and the Soul client's own argument reader:
+- `catalogue.test.mjs` checks it against the world templates and the Soul client's command forms:
   `node --test tools/camera-reel/catalogue.test.mjs`. It starts no world.
 
 ## Scenes

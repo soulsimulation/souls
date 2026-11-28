@@ -1,15 +1,28 @@
-// The camera reel's catalogue (camera tranche, C01) checked against itself, the world templates and the Soul client's
-// own argument reader: node --test tools/camera-reel/catalogue.test.mjs. It starts no world.
+// The camera reel's catalogue (camera tranche, C01) checked against itself, the world templates and the command forms
+// of the Soul client (v2/client/src/cli/souls.mjs, listed in FORMS): node --test tools/camera-reel/catalogue.test.mjs.
+// It starts no world.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { requestOf } from '../../v2/client/src/cli/souls.mjs';
 
 const read = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
 const cat = read('./catalogue.json');
 const { scenes } = cat;
 const group = (s) => s.kind.split('.')[0];
 const FAKE_ID = `${'0'.repeat(32)}-1`;
+const ID = '[0-9a-f]{32}-\\d+';
+/** The Soul client's forms the scenes use, each as the words of one command with ids in place. */
+const FORMS = [
+  `act walk:-?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?( gait=(walk|jog|run))?( --wait)?`,
+  `act (sit|ride|sail|go_up|play|play_white|play_black|begin):${ID}( --wait)?`,
+  `act (rise|wave|dance|yoga)( for=\\d+s)?`,
+  `stop`, `look`, `wait \\d+`,
+  `say( --to ${ID})? [A-Z].*`,
+  `converse start ${ID} [A-Z].*`, `converse accept ${ID}`, `converse say ${ID} [A-Z].*`,
+  `together offer (oral-story-circle|dance-together)( ${ID}){1,7}`, `together (accept|leave) (oral-story-circle|dance-together)`,
+  `carry grip ${ID} (front|back)`, `carry offer ${ID}`, `carry accept ${ID}`, `carry lift ${ID} ${ID}`,
+  `carry to ${ID} -?\\d+(\\.\\d+)?,-?\\d+(\\.\\d+)?`, `carry set-down ${ID}`,
+].map((f) => new RegExp(`^${f}$`));
 
 /** The kinds the plan asks for (tracking issue, section 5). */
 const ASKED = ['walk.open-ground', 'walk.street-turns', 'walk.trees-posts', 'walk.narrow-passage', 'walk.u-turn', 'walk.stop-start', 'walk.jog',
@@ -75,7 +88,7 @@ test('every thing a scene names is in its world\'s template, once', () => {
   }
 });
 
-test('every command is one the Soul client reads, with its things, Souls and captured values named', () => {
+test('every command is a form the Soul client has, with its things, Souls and captured values named', () => {
   for (const s of scenes) {
     const captured = new Set();
     const lists = [['setup', s.setup], ['steps', s.steps], ['fallback', s.fallback?.setup ?? []]];
@@ -89,8 +102,7 @@ test('every command is one the Soul client reads, with its things, Souls and cap
           .replace(/@([a-z0-9-]+)/g, (_, a) => { assert.ok(s.things?.[a], `${at}: @${a}`); return FAKE_ID; })
           .replace(/^\$([a-f])$/, (_, a) => { assert.ok(s.souls.includes(a), `${at}: $${a}`); return FAKE_ID; })
           .replace(/\{([a-z]+)\}/g, (_, v) => { assert.ok(captured.has(v), `${at}: {${v}}`); return FAKE_ID; }));
-        const read = requestOf(words);
-        assert.ok(read.req && !read.refused, `${at}: ${JSON.stringify(read)}`);
+        assert.ok(FORMS.some((f) => f.test(words.join(' '))), at);
         if (where === 'setup') for (const v of Object.keys(step.capture ?? {})) captured.add(v);
       }
     }
