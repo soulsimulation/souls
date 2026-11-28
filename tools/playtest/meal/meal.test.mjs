@@ -89,7 +89,7 @@ function publicMeal({ lostHolder = false, missingBowlParameter = false, noMatchi
   const calls = [], state = { cooked: false, soup: 0, bowl: 0, parent: 'pot', water: 5000, running: false, chairPulled: false };
   const ids = { 'soup-pot': 'pot', 'meal-bowl': 'bowl', 'wash-sink': 'sink', 'meal-table': 'table', 'diner-chair': 'chair' };
   const offer = (id, name, params, who = 'anyone') => ({ name, act: `${name}-public:${id}`, who, ...(params ? { params } : {}) });
-  const inspect = (id) => ({ ok: true, id, card: id === 'pot' ? 'Cook 6; ladle 2. Meet position=serving_side or diner_side before giving bowl.' : `Public ${id} card`, ...(id === 'bowl' ? { parent: state.parent } : {}), state:
+  const inspect = (id) => ({ ok: true, id, card: id === 'pot' ? 'Cook 6; ladle 2 to empty shelf bowl. Meet position=serving_side or diner_side.' : `Public ${id} card`, ...(id === 'bowl' ? { parent: state.parent } : {}), state:
     id === 'pot' ? { soup: state.soup, vegetables: state.cooked ? 0 : 3, water: state.cooked ? 0 : 1500, fuel: state.cooked ? 0 : 1, cooked: state.cooked } :
     id === 'bowl' ? { soup: state.bowl } : id === 'sink' ? { water: state.water, running: state.running } : {},
     offers: [offer(id, 'walk'), ...(id === 'pot' ? [offer(id, 'cook'), offer(id, 'ladle', missingBowlParameter ? {} : { bowl: { type: 'thing', optional: true } }),

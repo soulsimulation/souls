@@ -15,7 +15,7 @@
             "schema": "def/1",
             "name": "core-camp_soup_pot",
             "version": 1,
-            "description": "Cook 6; ladle 2. Meet position=serving_side or diner_side before giving bowl.",
+            "description": "Cook 6; ladle 2 to empty shelf bowl. Meet position=serving_side or diner_side.",
             "tags": [
               "camping",
               "cooking",
