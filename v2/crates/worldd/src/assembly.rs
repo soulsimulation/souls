@@ -939,7 +939,10 @@ impl Assembly {
                 reach,
                 &[],
             )
-            .and_then(|()| self.seating.put(tree, acts, mint, now, activity, part, &target));
+            .and_then(|()| {
+                self.seating
+                    .put(tree, acts, mint, now, activity, part, &target)
+            });
         if let Err(r) = done {
             self.seating.parts.clear();
             return Err(r);

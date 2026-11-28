@@ -109,7 +109,10 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     }
     let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
     let entry = construction("rack_upright.json");
-    let (l, spec) = (Load::of(&entry).unwrap(), Spec::of(&entry).expect("a raise"));
+    let (l, spec) = (
+        Load::of(&entry).unwrap(),
+        Spec::of(&entry).expect("a raise"),
+    );
     let at = upright_at();
     // Carried lying: lifted from beside its edges (laid along the line its carriers stand on, Soul 1 east), walked
     // 6 m north and set down.
@@ -173,10 +176,15 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     assert_eq!(lying.frame.node, ground);
     let (foot, lie) = (lying.position, lying.orientation);
     let dir_of = |q: replica::pose::Quat, v: Vec3| q.rotate(v).unwrap();
-    let (along, across) = (dir_of(lie, Vec3::new(0, M, 0)), dir_of(lie, Vec3::new(M, 0, 0)));
+    let (along, across) = (
+        dir_of(lie, Vec3::new(0, M, 0)),
+        dir_of(lie, Vec3::new(M, 0, 0)),
+    );
     assert!(along.y.abs() <= 20_000, "it lies: {along:?}");
     let on = |a: i64, b: i64| {
-        let v = |x: i64, y: i64| (i128::from(x) * i128::from(a) + i128::from(y) * i128::from(b)) / i128::from(M);
+        let v = |x: i64, y: i64| {
+            (i128::from(x) * i128::from(a) + i128::from(y) * i128::from(b)) / i128::from(M)
+        };
         Vec3::new(
             foot.x + v(across.x, along.x) as i64,
             0,
@@ -240,7 +248,11 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     // The track: a sample a tick, the foot where it was on the plan, the top never more than 60 mm from the last.
     let top = |q: replica::pose::Quat| dir_of(q, Vec3::new(0, spec.height, 0));
     let checked = |track: &[(Vec3, replica::pose::Quat)], what: &str| {
-        assert!(track.len() >= 60, "{what}: a track, {} samples", track.len());
+        assert!(
+            track.len() >= 60,
+            "{what}: a track, {} samples",
+            track.len()
+        );
         for (p, _) in track {
             assert!(
                 (p.x - foot.x).abs() <= 1 && (p.z - foot.z).abs() <= 1,
@@ -251,12 +263,18 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             .windows(2)
             .map(|w| {
                 let (a, b) = (top(w[0].1), top(w[1].1));
-                (i128::from(a.x - b.x).pow(2) + i128::from(a.y - b.y).pow(2) + i128::from(a.z - b.z).pow(2))
-                    .isqrt()
+                (i128::from(a.x - b.x).pow(2)
+                    + i128::from(a.y - b.y).pow(2)
+                    + i128::from(a.z - b.z).pow(2))
+                .isqrt()
             })
             .max()
             .unwrap_or(0);
-        println!("{what}: {} samples, its top at most {} mm a tick", track.len(), step / 1000);
+        println!(
+            "{what}: {} samples, its top at most {} mm a tick",
+            track.len(),
+            step / 1000
+        );
         assert!(step <= 60_000, "{what}: no jump: {step} µm in a tick");
     };
     if restart {
@@ -275,13 +293,19 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             lean.y / 1000,
             spec.height / 1000
         );
-        assert!(lean.y > 100_000 && lean.y < spec.height - 100_000, "leaning: {lean:?}");
+        assert!(
+            lean.y > 100_000 && lean.y < spec.height - 100_000,
+            "leaning: {lean:?}"
+        );
         let served = super::grips::serve_again(&dir, &socket);
         served.line("listening ", 180);
         said(&dir, &served, carry, "souls:lowered", 1, 40).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         let all = samples(&dir, carry);
-        checked(&all[before..], "raised part way, then lowered by the world started again");
+        checked(
+            &all[before..],
+            "raised part way, then lowered by the world started again",
+        );
         let laid = moves_of(&dir, frame).last().cloned().expect("laid down");
         let y = dir_of(laid.orientation, Vec3::new(0, M, 0));
         println!(
@@ -401,11 +425,16 @@ async fn raise_and_lower(tag: &str, restart: bool) {
         "its foot where it stood: {:?}",
         laid.position
     );
-    assert!((laid.position.y - spec.half_thick).abs() <= 2_000, "on its face");
+    assert!(
+        (laid.position.y - spec.half_thick).abs() <= 2_000,
+        "on its face"
+    );
     let p = phases(&dir, carry);
     let of = |w: &str| p.iter().position(|x| x == w).unwrap_or(usize::MAX);
     assert!(
-        of("souls:raise") < of("souls:raised") && of("souls:raised") < of("souls:lower") && of("souls:lower") < of("souls:lowered"),
+        of("souls:raise") < of("souls:raised")
+            && of("souls:raised") < of("souls:lower")
+            && of("souls:lower") < of("souls:lowered"),
         "the words in order: {p:?}"
     );
     assert_eq!(
