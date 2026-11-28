@@ -8141,6 +8141,7 @@ mod tests {
             field: 22,
             row: Vec::new(),
             door: None,
+            bare: false,
         };
         let e = Edit {
             intent: id(9),

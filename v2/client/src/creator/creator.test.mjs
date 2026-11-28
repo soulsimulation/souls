@@ -19,7 +19,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { areaOf, buildOf, eventOps, historyOf, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
+import { areaOf, buildOf, eventOps, historyOf, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation, withJoins } from './souls-god.mjs';
 import { stopThenRemove } from '../../../tools/teardown/stop.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -157,6 +157,23 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('batch', [JSON.stringify([{ op: 'place', name: 1, kind: 'k', in: 'aa-0', title: ' frame 1 ', fields: { 9: 2 } }, { op: 'remove', node: 'aa-1' }])]),
     [{ op: 'place', name: 1, kind: 'k', in: 'aa-0', fields: { 9: 2, 4: { words: 'frame 1' } } }, { op: 'remove', node: 'aa-1' }]);
   for (const bad of ['', 'a\nb', 7]) assert.throws(() => opsOf('batch', [JSON.stringify([{ op: 'place', name: 1, kind: 'k', in: 'aa-0', title: bad }])]), (e) => e.code === 'usage');
+  // racks, lane C: a part's joins named, as part put --joins: bare links of the joint type its kind declares
+  assert.deepEqual(opsOf('place', ['mars:deck_beam', '--in', 'aa-0', '--slot', '3', '--joins', 'aa-1,aa-2']),
+    [{ op: 'place', kind: 'mars:deck_beam', in: 'aa-0', slot: 3, joins: ['aa-1', 'aa-2'], name: 1 }]);
+  assert.throws(() => opsOf('place', ['lamp', '--in', 'aa-0', '--at', '0,0,0', '--row', '2', '--gap', '1', '--joins', 'aa-1']), (e) => e.code === 'usage');
+  const entries = { 'mars:deck_beam': { kind: 'mars:deck_beam', links: { joint: { from: 'mars:rack_upright_12ft' } } } };
+  assert.deepEqual(withJoins([
+    { op: 'place', name: 1, kind: 'mars:rack_upright_12ft', in: 'aa-0', slot: 1 },
+    { op: 'place', name: 2, kind: 'mars:deck_beam@ab12', in: 'aa-0', slot: 3, joins: [1, 'aa-5'] },
+  ], entries), [
+    { op: 'place', name: 1, kind: 'mars:rack_upright_12ft', in: 'aa-0', slot: 1 },
+    { op: 'place', name: 2, kind: 'mars:deck_beam@ab12', in: 'aa-0', slot: 3 },
+    { op: 'link', name: 3, type: 'mars:joint', ends: [2, 1], owner: 0, bare: true },
+    { op: 'link', name: 4, type: 'mars:joint', ends: [2, 'aa-5'], owner: 0, bare: true },
+  ]);
+  const plain = [{ op: 'place', name: 1, kind: 'mars:deck_beam', in: 'aa-0', slot: 3 }];
+  assert.equal(withJoins(plain, entries), plain, 'no joins named: the world joins it as a put would');
+  assert.throws(() => withJoins([{ op: 'place', name: 1, kind: 'lamp', in: 'aa-0', joins: ['aa-1'] }], entries), (e) => e.code === 'joint-undeclared');
   // R8c: history asks one place, thing or Soul, with an optional span in world µs
   assert.deepEqual(historyOf(['--at', 'square']), { op: 'history', at: 'square' });
   assert.deepEqual(historyOf(['--thing', 'aa-3', '--since', '100', '--until', '200']), { op: 'history', thing: 'aa-3', since: 100, until: 200 });
@@ -342,11 +359,23 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   ]));
   assert.equal(good.ok, true, JSON.stringify(good));
   assert.equal(good.kinds, true);
+  // racks, lane C: a bare link (a creator's joint) is checked on the copy as the world checks it
+  const joined = await god('check', 'batch', JSON.stringify([
+    { op: 'place', name: 1, kind: 'room', in: place.id },
+    { op: 'place', name: 2, kind: 'room', in: place.id },
+    { op: 'link', name: 3, type: 'test:joint', ends: [2, 1], owner: 0, bare: true },
+  ]));
+  assert.equal(joined.ok, true, JSON.stringify(joined));
+  const self = await god('check', 'batch', JSON.stringify([
+    { op: 'place', name: 1, kind: 'room', in: place.id },
+    { op: 'link', name: 2, type: 'test:joint', ends: [1, 1], owner: 0, bare: true },
+  ]));
+  assert.equal(self.code, 'edit.link', JSON.stringify(self));
   const missing = await god('check', 'remove', `${creatorScope}-999`);
   assert.equal(missing.code, 'edit.node-missing');
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(relay.up, before, 'check sent nothing to the world');
-  console.log(`check: 3 checks, ${relay.up - before} bytes sent to the world`);
+  console.log(`check: 5 checks, ${relay.up - before} bytes sent to the world`);
 
   // The edits, one answer each, the receipt naming the minted ids.
   const room = await god('place', 'room', '--in', place.id);

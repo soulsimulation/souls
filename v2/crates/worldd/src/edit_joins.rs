@@ -128,9 +128,6 @@ pub fn with_joins(
         .filter(|(_, n, ..)| !named.contains_key(n))
         .cloned()
         .collect();
-    if defaulted.is_empty() {
-        return Ok(());
-    }
     // The batch as it would stand, on a copy (no structure rule: only where its parts would be). A batch the world's
     // check refuses is left for that check.
     let Ok(planned) =
@@ -223,5 +220,67 @@ pub fn with_joins(
         }
     }
     batch.ops.extend(added);
-    Ok(())
+    // The structure rule on the joined batch, on a copy: a part it leaves hanging refuses it here, the operation that
+    // places the part named and its kind and slot written where the world's verdict names a node not minted yet. The
+    // commit judges it again on its tick.
+    let verdict = edit::check(batch.clone(), copy, world)
+        .and_then(|c| sim::edit::plan(c, copy, ground))
+        .and_then(|p| {
+            sim::edit::commit_guarded(
+                &mut copy.frozen(),
+                &mut Minter::new(sim::edit::PROVISIONAL),
+                &p,
+                &[],
+                0,
+                structure,
+            )
+        });
+    match verdict {
+        Err(r) if r.name.starts_with("support.") => Err(placed_named(r, &order, &places)),
+        _ => Ok(()),
+    }
+}
+
+/// `r` with each node the batch places written as the operation that places it, its kind and its slot (the first
+/// one named is the refusal's operation).
+fn placed_named(
+    mut r: Refused,
+    order: &BTreeMap<Id, (usize, u64)>,
+    places: &[(usize, u64, Name, Ref, u64)],
+) -> Refused {
+    let shown: BTreeMap<String, (usize, u64)> =
+        order.iter().map(|(id, at)| (show(*id), *at)).collect();
+    let mut first = None;
+    let mut out = String::new();
+    let mut rest = r.detail.as_str();
+    // Each id as `show` writes it (`ff:12`), read whole: its scope byte, a colon and every digit after it.
+    while let Some(at) = rest.find(':') {
+        let digits = rest[at + 1..]
+            .find(|c: char| !c.is_ascii_digit())
+            .map_or(rest.len(), |e| at + 1 + e);
+        let start = at.saturating_sub(2);
+        let token = rest.get(start..digits).filter(|_| digits > at + 1);
+        match token.and_then(|t| shown.get(t)) {
+            Some((i, name)) => {
+                first.get_or_insert(*i);
+                let what = places.iter().find(|(_, n, ..)| n == name).map_or(
+                    format!("operation {i}"),
+                    |(_, _, kind, _, k)| {
+                        format!(
+                            "operation {i} ({} in slot {k})",
+                            replica::world_model::plain(kind.as_str())
+                        )
+                    },
+                );
+                out.push_str(&rest[..start]);
+                out.push_str(&what);
+            }
+            None => out.push_str(&rest[..digits]),
+        }
+        rest = &rest[digits..];
+    }
+    out.push_str(rest);
+    r.detail = out;
+    r.op = first.or(r.op);
+    r
 }
