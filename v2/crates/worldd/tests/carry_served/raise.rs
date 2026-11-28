@@ -86,7 +86,9 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     let d = scratch(tag);
     let facts = world(&d);
     let socket = d.join("s");
-    let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 2);
+    // Two carry and raise it; a third walks near by all through the raise and its end (the camp's walkers: #5067,
+    // its standing commit was refused `edit.body-stale` while bodies moved).
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 3);
     served.line("listening ", 180);
     let im = import_eden::load(&facts).unwrap();
     let (ground, frame) = (im.nodes["ground"], im.nodes["loose-upright"]);
@@ -116,10 +118,10 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     for (k, p) in places.iter().enumerate() {
         souls[k].send("eden:walk", ground, point(*p)).await;
     }
-    for s in souls.iter_mut() {
+    for s in souls[..2].iter_mut() {
         s.answer().await.expect("walks to its end");
     }
-    together(&dir, &bodies, &places, 60).await;
+    together(&dir, &bodies[..2], &places, 60).await;
     let offered = souls[0]
         .act(
             "activity:offer",
@@ -159,7 +161,7 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     for (k, p) in north.iter().enumerate() {
         souls[k].send("eden:walk", ground, point(*p)).await;
     }
-    for s in souls.iter_mut() {
+    for s in souls[..2].iter_mut() {
         s.answer().await.expect("carries it north");
     }
     souls[1]
@@ -198,7 +200,7 @@ async fn raise_and_lower(tag: &str, restart: bool) {
     for (k, p) in stations.iter().enumerate() {
         souls[k].send("eden:walk", ground, point(*p)).await;
     }
-    for s in souls.iter_mut() {
+    for s in souls[..2].iter_mut() {
         s.answer().await.expect("walks to its raise station");
     }
     for (b, p) in bodies.iter().zip(&stations) {
@@ -217,6 +219,24 @@ async fn raise_and_lower(tag: &str, restart: bool) {
         .act("part:raise", carry, BTreeMap::from([(1, frame.to_value())]))
         .await
         .expect("the raise begins");
+    // The third Soul walks to and fro 3 m off the frame's other side while it is raised and stood, until it is held.
+    if !restart {
+        let (a, b) = (on(-3 * M, 0), on(-3 * M, 2 * M));
+        let end = Instant::now() + Duration::from_secs(30);
+        for k in 0.. {
+            let to = if k % 2 == 0 { b } else { a };
+            souls[2]
+                .act("eden:walk", ground, point(to))
+                .await
+                .expect("the third walks near by");
+            let held = grips_said(&dir, carry).iter().any(|g| g.0 == "souls:held");
+            let turned = phases(&dir, carry).iter().any(|p| p == "souls:lowered");
+            if held || turned || Instant::now() > end {
+                println!("the third walked {} legs near by", k + 1);
+                break;
+            }
+        }
+    }
     // The track: a sample a tick, the foot where it was on the plan, the top never more than 60 mm from the last.
     let top = |q: replica::pose::Quat| dir_of(q, Vec3::new(0, spec.height, 0));
     let checked = |track: &[(Vec3, replica::pose::Quat)], what: &str| {
@@ -360,7 +380,7 @@ async fn raise_and_lower(tag: &str, restart: bool) {
         Some("souls:released".to_owned())
     );
     // Its crew may leave now.
-    for s in souls.iter_mut() {
+    for s in souls[..2].iter_mut() {
         s.act("activity:leave", carry, BTreeMap::new())
             .await
             .expect("a leave is accepted once it lies");
