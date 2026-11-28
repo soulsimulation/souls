@@ -2767,7 +2767,9 @@ impl Grounds<'_> {
     /// Whether a body of class `size` standing at `p` (µm, `node`'s frame) would be in a doorway or on a stair itself:
     /// within its radius and margin of a link's end or of its width along its line (#5254), not [`CLEAR`].
     fn passage_within(&self, node: Id, p: Vec3, size: Size) -> bool {
-        let clear = (size.radius_mm() + crate::ground::MARGIN) * 1000;
+        // Never wider than a walker's clearance: a body wider than that (a giant's) is in the passage wherever the
+        // walkers' rule says it is, and the buildings' boxes reach no further.
+        let clear = ((size.radius_mm() + crate::ground::MARGIN) * 1000).min(CLEAR);
         passage_named(
             self.buildings,
             self.passages,
