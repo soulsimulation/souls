@@ -11,10 +11,11 @@ import { requireConferenceRecipe, downloadConferenceClient, pairConferenceSeat, 
 
 const states = new Map();
 // Private archive encoding only; delivered Worker objects and selected checkpoint spelling stay unchanged.
-// $mealArchive tags retain BigInt decimal values, Uint8Array bytes and explicit undefined.
+// $mealArchive tags retain numbers (including documented NaN sentinels), BigInt, bytes and explicit undefined.
 // Literal objects carrying that tag key are escaped as entries, so they cannot impersonate a typed value.
 export function mealArchiveJSON(value) {
-  return JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? { $mealArchive: 'BigInt', decimal: String(v) }
+  return JSON.stringify(value, (_key, v) => typeof v === 'number' && !Number.isFinite(v) ? { $mealArchive: 'Number', value: Number.isNaN(v) ? 'NaN' : v > 0 ? '+Infinity' : '-Infinity' }
+    : typeof v === 'bigint' ? { $mealArchive: 'BigInt', decimal: String(v) }
     : v instanceof Uint8Array ? { $mealArchive: 'Uint8Array', bytes: Array.from(v) }
     : v === undefined ? { $mealArchive: 'undefined' }
     : v && typeof v === 'object' && Object.hasOwn(v, '$mealArchive') ? { $mealArchive: 'object', entries: Object.entries(v) } : v, 2);
@@ -144,13 +145,13 @@ export function mealBrowserInstall({ bowl, bodies, identities, limit = 361, maxB
   for (const [value, cap] of [[limit,bounds.messages],[maxBytes,bounds.bytes],[maxNodes,bounds.nodes],[maxRecords,bounds.records]]) {
     if (!Number.isSafeInteger(value) || value <= 0 || value > cap) throw Error('meal invalid public observation budget');
   }
-  const observer = { original, listeners: [], workers: [], messages: [], failures: [], rejections: [], identities, limit, stopped: false,
+  const observer = { original, listeners: [], workers: [], messages: [], failures: [], rejections: [], soundSentinelCount: 0, identities, limit, stopped: false,
     limits: { messages: limit, workers: 8, publicMessageByteUpperBound: maxBytes, nodes: maxNodes, records: maxRecords, depth: 64 },
     retained: { publicMessageByteUpperBound: 0, nodes: 0, records: 0 } };
   // Conservative compact-JSON cost upper bound checked BEFORE cloning. No reference to the delivered object is retained.
   const measure = (message, worker) => {
     const cost = { publicMessageByteUpperBound: 0, nodes: (message.t === 'snapshot' ? message.s?.nodes : message.p?.nodes)?.length ?? 0, records: 0 };
-    const ancestors = new Set();
+    const ancestors = new Set(); let soundSentinelCount = 0;
     const charge = (bytes, records = 0) => {
       cost.publicMessageByteUpperBound += bytes; cost.records += records;
       if (observer.retained.publicMessageByteUpperBound + cost.publicMessageByteUpperBound > maxBytes) throw Error('meal public archive byte limit exceeded');
@@ -164,6 +165,15 @@ export function mealBrowserInstall({ bowl, bodies, identities, limit = 361, maxB
       if (typeof v === 'string') { charge(v.length*6+2); return; }
       if (typeof v === 'number') {
         if (!Number.isFinite(v)) {
+          // Existing sound-record.ts projects nonnumeric field changes to NaN. No other public number is exempt.
+          const row = message.t === 'part' && path.length === 4 && path[0] === 'p' && path[1] === 'happened'
+            && /^(0|[1-9][0-9]*)$/.test(path[2]) && path[3] === 'to' && Array.isArray(message.p?.happened)
+            ? message.p.happened[Number(path[2])] : null;
+          if (Number.isNaN(v) && row && !Array.isArray(row) && Number.isFinite(row.at)
+            && typeof row.node === 'string' && row.node.length > 0 && Number.isSafeInteger(row.field) && row.field >= 0
+            && Object.hasOwn(row, 'to') && !Object.hasOwn(row, 'name')) {
+            soundSentinelCount++; charge(128); return;
+          }
           const keys = path.map(key => key.slice(0, 128));
           const diagnostic = { worker, category: message.t, path: keys, pathTruncated: path.some((key,i) => key !== keys[i]),
             valueType: 'number', nonfinite: Number.isNaN(v) ? 'NaN' : v > 0 ? 'positive Infinity' : 'negative Infinity' };
@@ -187,7 +197,7 @@ export function mealBrowserInstall({ bowl, bodies, identities, limit = 361, maxB
       if (Array.isArray(v) && arrayKeys !== v.length) throw Error('meal unsupported public sparse array');
       ancestors.delete(v);
     };
-    visit(message,0,[]); return cost;
+    visit(message,0,[]); return {cost, soundSentinelCount};
   };
   const copy = value => JSON.parse(JSON.stringify(value, (_key, v) => typeof v === 'bigint' ? { big: String(v) }
     : v instanceof Map ? Object.fromEntries(v) : v instanceof Uint8Array ? Array.from(v) : v));
@@ -208,7 +218,7 @@ export function mealBrowserInstall({ bowl, bodies, identities, limit = 361, maxB
           if (!payload) return; // Other public message types are explicitly outside this snapshot/part archive.
           if (payload.nodes !== undefined && !Array.isArray(payload.nodes)) throw Error('meal malformed public node list');
           if (observer.messages.length >= limit) throw Error('meal public payload storage limit exceeded');
-          const cost = measure(message, worker.number), publicMessage = structuredClone(message);
+          const {cost, soundSentinelCount} = measure(message, worker.number), publicMessage = structuredClone(message);
           if (message.t === 'snapshot') worker.latest.clear();
           const removed = (payload.removed ?? []).filter(id => known.has(id));
           for (const id of removed) worker.latest.delete(id);
@@ -217,7 +227,8 @@ export function mealBrowserInstall({ bowl, bodies, identities, limit = 361, maxB
           for (const node of nodes) worker.latest.set(node.id, node);
           worker.worldAt = Number.isSafeInteger(payload.to) ? payload.to : null;
           for (const key of Object.keys(cost)) observer.retained[key] += cost[key];
-          observer.messages.push({ worker: worker.number, receivedAt: performance.now(), worldAt: worker.worldAt, type: message.t, nodes, removed, publicMessage });
+          observer.soundSentinelCount += soundSentinelCount;
+          observer.messages.push({ soundSentinelCount, worker: worker.number, receivedAt: performance.now(), worldAt: worker.worldAt, type: message.t, nodes, removed, publicMessage });
         } catch (error) {
           if (observer.failures.length < 10) { observer.failures.push(String(error)); if (error.mealDiagnostic) observer.rejections.push(error.mealDiagnostic); }
         }
@@ -282,8 +293,8 @@ export function mealBrowserStop() {
     for (const [worker, listener] of observer.listeners) worker.removeEventListener('message', listener);
     if (window.Worker !== observer.wrapped) throw Error('meal observer ownership changed');
     window.Worker = observer.original;
-    return observer.result = { messages: observer.messages, failures: observer.failures, rejections: observer.rejections, identities: observer.identities, limit: observer.limit, limits: observer.limits, retained: observer.retained,
-      qualification: 'Full passive structured-cloned snapshot/part messages with original emitted names/types, including moves, runEnds, samples, courses, leaves, chair/ancestor nodes and unknown fields; other message types (pointer/error/format/catching) are not archived. Private JSON tags preserve BigInt/Uint8Array/undefined and escape literal tag objects; tags are not native protocol fields. Selected nodes/latest retain legacy checkpoint semantics. Byte budget bounds public message trees by conservative compact-JSON cost; legacy selected views, envelope metadata and JSON indentation add overhead, so this is not pretty-printed file size. No contact/final-draw or missing-native-capability claim.' };
+    return observer.result = { messages: observer.messages, failures: observer.failures, rejections: observer.rejections, soundSentinelCount: observer.soundSentinelCount, identities: observer.identities, limit: observer.limit, limits: observer.limits, retained: observer.retained,
+      qualification: 'Full passive structured-cloned snapshot/part messages with original emitted names/types, including moves, runEnds, samples, courses, leaves, chair/ancestor nodes and unknown fields; other message types (pointer/error/format/catching) are not archived. Only the documented nonnumeric field-change NaN at part.happened[].to is accepted and counted; other nonfinite public values remain rejected. Private JSON tags preserve Number/BigInt/Uint8Array/undefined and escape literal tag objects; tags are not native protocol fields. Selected nodes/latest retain legacy checkpoint semantics. Byte budget bounds public message trees by conservative compact-JSON cost; legacy selected views, envelope metadata and JSON indentation add overhead, so this is not pretty-printed file size. No contact/final-draw or missing-native-capability claim.' };
   } catch (error) { observer.error = error; throw error; }
 }
 

@@ -139,6 +139,7 @@ test('public world discovery rejects an unrelated or duplicate fixture and never
 const archiveValue = value => {
   if (Array.isArray(value)) return value.map(archiveValue);
   if (!value || typeof value !== 'object') return value;
+  if (value.$mealArchive === 'Number') return value.value === 'NaN' ? NaN : value.value === '+Infinity' ? Infinity : -Infinity;
   if (value.$mealArchive === 'BigInt') return BigInt(value.decimal);
   if (value.$mealArchive === 'Uint8Array') return Uint8Array.from(value.bytes);
   if (value.$mealArchive === 'undefined') return undefined;
@@ -304,4 +305,49 @@ test('numeric diagnostics distinguish snapshot workers, unusual keys and bounded
  second.message({t:'snapshot',s:{nodes:[],[key]:{['a/b~c']:Infinity}}});
  const result=mealBrowserStop();assert.equal(result.messages.length,1);assert.equal(result.messages[0].publicMessage.p.value,12);
  assert.deepEqual(result.rejections[0],{worker:1,category:'snapshot',path:['s','x'.repeat(128),'a/b~c'],pathTruncated:true,valueType:'number',nonfinite:'positive Infinity'});
+}));
+
+
+// Actual retained nonnumeric native values: weather string, activity tuple, and the admitted monster hash.
+const retainedSoundProjections=[
+ {field:89,native:'souls:clear-day'},
+ {field:68,native:[1,1]},
+ {field:32,native:Uint8Array.from(Buffer.from('3002d89e46ed6a662374f6670173030c7347ec9b793bf90848250e22cfc06987','hex'))},
+];
+test('documented nonnumeric sound projections remain NaN in full original delivery and lossless private archive',async()=>inPage(async page=>{
+ mealBrowserInstall({bowl:'bowl',bodies:[]});const worker=new page.Worker();let delivered;worker.addEventListener('message',e=>delivered=e.data);
+ for(const {native} of retainedSoundProjections)assert(!['number','boolean'].includes(typeof native),'retained source values are genuinely nonnumeric');
+ const happened=retainedSoundProjections.map(({field})=>({at:1795830057500000,node:'public.1',field,to:NaN}));
+ const message={t:'part',p:{nodes:[],happened,unknown:{literal:{$mealArchive:'Number',value:'NaN'}}}};worker.message(message);
+ const result=mealBrowserStop();assert.equal(delivered,message);assert.equal(result.failures.length,0);assert.equal(result.soundSentinelCount,3);assert.equal(result.messages[0].soundSentinelCount,3);
+ assert.deepEqual(result.messages[0].publicMessage,message);assert.notEqual(result.messages[0].publicMessage,message);
+ const roundtrip=archiveValue(JSON.parse(mealArchiveJSON(result)));assert.deepEqual(roundtrip.messages[0].publicMessage,message);
+ assert.deepEqual(roundtrip.messages[0].publicMessage.p.unknown.literal,{$mealArchive:'Number',value:'NaN'});
+ for(let i=0;i<3;i++)assert(Number.isNaN(roundtrip.messages[0].publicMessage.p.happened[i].to));
+ assert.deepEqual(result.rejections,[]);assert(result.retained.publicMessageByteUpperBound>3*128);
+}));
+test('private number tags are lossless storage rather than permission to accept nonfinite public geometry',()=>{
+ const value={nan:NaN,pos:Infinity,neg:-Infinity,literal:{$mealArchive:'Number',value:'+Infinity'}};
+ assert.deepEqual(archiveValue(JSON.parse(mealArchiveJSON(value))),value);
+});
+const validSoundRow={at:10,node:'public.1',field:32,to:NaN};
+for(const [name,message]of[
+ ['snapshot',{t:'snapshot',s:{nodes:[],happened:[validSoundRow]}}],
+ ['wrong path',{t:'part',p:{nodes:[],other:[validSoundRow]}}],
+ ['named event',{t:'part',p:{nodes:[],happened:[{...validSoundRow,name:'souls:awake'}]}}],
+ ['undefined named key',{t:'part',p:{nodes:[],happened:[{...validSoundRow,name:undefined}]}}],
+ ['nonfinite time',{t:'part',p:{nodes:[],happened:[{...validSoundRow,at:NaN}]}}],
+ ['missing node',{t:'part',p:{nodes:[],happened:[{...validSoundRow,node:''}]}}],
+ ['fractional field',{t:'part',p:{nodes:[],happened:[{...validSoundRow,field:1.5}]}}],
+ ['negative field',{t:'part',p:{nodes:[],happened:[{...validSoundRow,field:-1}]}}],
+ ['Infinity sentinel',{t:'part',p:{nodes:[],happened:[{...validSoundRow,to:Infinity}]}}],
+ ['node position',{t:'part',p:{nodes:[node('bowl',{pos:[0,NaN,0]})]}}],
+ ['node rotation',{t:'part',p:{nodes:[node('bowl',{rot:[1,0,NaN,0]})]}}],
+ ['sample position',{t:'part',p:{nodes:[],samples:[['body','frame',null,10,0,NaN,0]]}}],
+ ['move end',{t:'part',p:{nodes:[],moves:[{start:10,ends:[NaN]}]}}],
+ ['contact',{t:'part',p:{nodes:[],contact:{at:NaN}}}],
+])test(`documented sound sentinel never permits ${name}`,async()=>inPage(async page=>{
+ mealBrowserInstall({bowl:'bowl',bodies:[]});const worker=new page.Worker();worker.message(message);const result=mealBrowserStop();
+ assert.equal(result.failures.length,1);assert.equal(result.messages.length,0);assert.equal(result.soundSentinelCount,0);assert.equal(result.rejections.length,1);
+ assert.match(result.failures[0],/unsupported public nonfinite number/);
 }));
