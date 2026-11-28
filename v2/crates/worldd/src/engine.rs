@@ -2891,6 +2891,8 @@ impl Engine {
             .iter()
             .filter_map(|h| tree.node(*h))
             .filter(|n| n.id() != activity)
+            // Only a crew's node is a kept hold: a floor the part holds keeps its level in the same field number.
+            .filter(|n| self.asm.as_ref().is_some_and(|s| s.structure().is_crew(n.kind().as_str())))
             .filter(|n| {
                 matches!(n.fields().get(&sim::structure::F_KEPT), Some(Value::Uint(k)) if *k > 0)
             })

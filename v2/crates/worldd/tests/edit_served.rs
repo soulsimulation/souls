@@ -2340,6 +2340,9 @@ mod k18d;
 #[path = "edit_served/shade.rs"]
 mod shade;
 
+#[path = "edit_served/deck.rs"]
+mod deck;
+
 #[path = "edit_served/sit_by_kind.rs"]
 mod sit_by_kind;
 
