@@ -447,7 +447,7 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
         let dump = |id: Id, what: &str| {
             for h in t.children(t.handle(id).unwrap()).unwrap_or(&[]) {
                 let n = t.node(*h).unwrap();
-                println!("{what} child {} {}: {:?}", show(n.id()), n.kind().as_str(), n.fields());
+                println!("{what} child {} {}: {:?}", replica::world_model::show(n.id()), n.kind().as_str(), n.fields());
                 for e in t.links_at(n.id()) {
                     println!("{what}   link {:?}", t.link(e.link));
                 }
@@ -478,7 +478,7 @@ async fn a_soul_walks_up_a_creator_placed_bays_stair_and_another_climbs_its_fram
         let fl = im.nodes["flight"];
         for h in st.children(st.handle(fl).unwrap()).unwrap_or(&[]) {
             let n = st.node(*h).unwrap();
-            println!("seeded flight child {} {}: {:?}", show(n.id()), n.kind().as_str(), n.fields());
+            println!("seeded flight child {} {}: {:?}", replica::world_model::show(n.id()), n.kind().as_str(), n.fields());
             for e in st.links_at(n.id()) {
                 println!("seeded flight   link {:?}", st.link(e.link));
             }
