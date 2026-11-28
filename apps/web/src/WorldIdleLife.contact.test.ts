@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import *as THREE from 'three';import {WorldIdleLife}from './WorldIdleLife.ts';
+test('native contacts own torso breathing, speaking and root facing until ownership ends',()=>{const root=new THREE.Group(),torso=new THREE.Bone(),head=new THREE.Bone(),hips=new THREE.Bone();torso.name='Torso';head.name='Head';hips.name='Hips';root.add(hips);hips.add(torso);torso.add(head);const life=new WorldIdleLife(),bones=[root,hips,torso,head],before=bones.map(b=>b.quaternion.clone()),soul={id:'contact-owner',root,p:[0,0,0]as const,yaw:0,activity:'carry',speaking:true,contactOwned:true};
+ for(const seconds of [0,.7,2]){life.apply([soul],seconds,.016);assert(bones.every((b,i)=>b.quaternion.equals(before[i])));life.restore();}
+ life.apply([{...soul,contactOwned:false}],.7,.016);assert(!torso.quaternion.equals(before[2]),'ordinary breathing remains active without native contact ownership');life.restore();assert(bones.every((b,i)=>b.quaternion.equals(before[i])));
+});

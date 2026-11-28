@@ -74,7 +74,7 @@ function observeRender(renderer, world, sample, onError) {
 }
 
 /** Certify only the native two-point contract. Entry-centre distances are a separate legacy diagnostic. */
-function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM = CONTACT_LIMIT_M } = {}) {
+function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM = CONTACT_LIMIT_M, previousAssignments = {} } = {}) {
   const invalid = reason => ({ status: 'failed-measurement', basis: 'unavailable', ok: false, reason, contacts: [] });
   const id = v => typeof v === 'string' && v.length > 0;
   const distinct = xs => new Set(xs).size === xs.length;
@@ -116,16 +116,44 @@ function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM 
     if (typeof hold.grip !== 'string' || !/^point:[a-zA-Z0-9_-]+$/.test(hold.grip) || !finite3(hold.gripUm) || !hold.gripUm.every(Number.isSafeInteger) || !Array.isArray(hold.handsUm) || hold.handsUm.length !== 2 || hold.handsUm.some(p => !finite3(p) || !p.every(Number.isSafeInteger)) || hold.handsUm[0].every((n, i) => n === hold.handsUm[1][i])) return invalid('native ordered contact pair missing or malformed');
     const body = sample.bodies.find(b => b.native === hold.body), targets = hold.handsUm.map(worldPoint);
     if (targets.some(p => !finite3(p))) return invalid('native world contact unavailable');
-    // Native indices run along the carry, not anatomical left/right. Compare the only two bijections.
-    const candidates = [[0, 1], [1, 0]].map(order => {
-      const pair = ['left', 'right'].map((hand, i) => ({ body: body.native, entity: body.entity, hand, grip: hold.grip, targetIndex: order[i], targetLocalUm: hold.handsUm[order[i]], targetWorld: targets[order[i]], palm: body.palms[hand], errorM: distance(body.palms[hand], targets[order[i]]) }));
-      return { pair, max: Math.max(...pair.map(c => c.errorM)), sum: pair.reduce((n, c) => n + c.errorM, 0) };
-    });
-    candidates.sort((a, b) => a.max - b.max || a.sum - b.sum);
-    contacts.push(...candidates[0].pair);
+    // The page fixes this bijection at the native assignment boundary. Never bless a per-frame palm swap.
+    const history=sample.nativeHistory;
+    if(!Array.isArray(history)||!history.length)return invalid('native assignment history unavailable');
+    const same=h=>h.body===hold.body&&h.grip===hold.grip&&JSON.stringify(h.handsUm)===JSON.stringify(hold.handsUm);
+    let episode=native.sinceUs,found=false;
+    for(let i=history.length-1;i>=0;i--){const g=history[i];if(g.crew!==native.crew||g.sinceUs>atUs)return invalid('native assignment history identity/time');if(g.load!==native.load)break;if(g.phase==='souls:released'||!g.holds?.some(same))break;episode=g.sinceUs;found=true;}
+    if(!found)return invalid('native assignment episode unavailable');
+    const order=body.order,key=[native.crew,native.load,body.native,hold.grip,episode].join('|');
+    if(!Array.isArray(order)||order.length!==2||order.some(n=>n!==0&&n!==1)||order[0]===order[1])return invalid('anatomical assignment missing');
+    if(previousAssignments[key]&&previousAssignments[key].some((n,i)=>n!==order[i]))return invalid('anatomical assignment changed during a turn');
+    contacts.push(...['left','right'].map((hand,i)=>({body:body.native,entity:body.entity,hand,grip:hold.grip,targetIndex:order[i],targetLocalUm:hold.handsUm[order[i]],targetWorld:targets[order[i]],palm:body.palms[hand],errorM:distance(body.palms[hand],targets[order[i]])})));
   }
-  const failed = contacts.some(c => c.errorM > limitM);
-  return { status: failed ? 'failed-native-pair' : 'passed-native-pair', basis: 'native-local-pair', ok: !failed, limitM, crew: native.crew, load: native.load, phase: native.phase, observedWorldUs: atUs, contacts, legacy };
+  const clock=gradeLoadClock(sample);if(clock.reason)return invalid(clock.reason);
+  const failed=contacts.some(c=>c.errorM>limitM)||!clock.ok;
+  return {status:failed?'failed-native-pair':'passed-native-pair',basis:'native-local-pair',ok:!failed,limitM,crew:native.crew,load:native.load,phase:native.phase,observedWorldUs:atUs,contacts,legacy,clock};
+}
+
+/** The independent native load clock remains required even when no hand contact is currently owned. */
+function gradeLoadClock(sample){
+ const expected=sample.expectedLoad,m=sample.load?.matrix,atUs=Math.round(sample.worldSeconds*1e6);
+ if(!Array.isArray(m)||m.length!==16||!m.every(Number.isFinite)||expected?.source!=='native-records'||expected.atUs!==atUs||!Array.isArray(expected.matrix)||expected.matrix.length!==16||!expected.matrix.every(Number.isFinite)||!Array.isArray(expected.previousMatrix)||expected.previousMatrix.length!==16||!expected.previousMatrix.every(Number.isFinite)||!Number.isSafeInteger(expected.previousAtUs)||expected.previousAtUs>atUs||atUs-expected.previousAtUs>250000||!Array.isArray(expected.pointsUm)||expected.pointsUm.length<2||expected.pointsUm.some(p=>!finite3(p))||!expected.pointsUm.some(p=>Math.hypot(...p)>.1e6))return{ok:false,reason:'independent full native pose/endpoint clock witness unavailable'};
+ const transform=(matrix,p)=>[0,1,2].map(i=>matrix[i]*p[0]/1e6+matrix[i+4]*p[1]/1e6+matrix[i+8]*p[2]/1e6+matrix[i+12]);
+ const clockErrorM=Math.max(...expected.pointsUm.map(p=>distance(transform(m,p),transform(expected.matrix,p)))),oneFrameTravelM=Math.max(...expected.pointsUm.map(p=>distance(transform(expected.matrix,p),transform(expected.previousMatrix,p))));
+ return{ok:clockErrorM<=oneFrameTravelM+1e-6,clockErrorM,oneFrameTravelM};
+}
+function gradeInactive(sample,{now,previousFrame=-1,maxAgeMs=250}={}){
+ const invalid=reason=>({status:'failed-measurement',basis:'unavailable',ok:false,reason,contacts:[]});
+ if(sample?.stage!=='after-world-render'||sample.units!=='m'||!sample.currentCanvas||sample.renderTarget!==null||![sample.frame,sample.at,sample.worldSeconds,now].every(Number.isFinite)||sample.frame<=previousFrame||now<sample.at||now-sample.at>maxAgeMs)return invalid('stale or missing inactive draw');
+ if(!sample.load?.parts||!sample.bodies?.length||sample.bodies.some(b=>!b.visibleSkin||!finite3(b.palms?.left)||!finite3(b.palms?.right)))return invalid('inactive load/body visibility unavailable');
+ const state=sample.contactState,atUs=Math.round(sample.worldSeconds*1e6);
+ if(state?.at!==atUs||!state.crew||state.field==='invalid')return invalid('native inactive state unavailable');
+ const released=state.field==='valid'&&state.grips?.phase==='souls:released'&&state.grips.load===sample.load.native&&state.grips.sinceUs<=atUs;
+ const absent=state.field==='absent'&&Array.isArray(state.members)&&state.members.length>0&&state.members.every(m=>sample.bodies.some(b=>b.native===m.body));
+ if(!released&&!absent)return invalid('missing/unknown contacts are not a native inactive interval');
+ const clock=gradeLoadClock(sample);if(clock.reason)return invalid(clock.reason);
+ const complete=released&&atUs-state.grips.sinceUs>=300000;
+ if(complete&&sample.bodies.some(b=>{if(!b.nativeCarryOwned)return false;const owner=b.nativeCarryIdentity;return !owner||!sample.nativeUpcoming?.some(g=>g.crew===owner.crew&&g.load===owner.load&&g.sinceUs===owner.sinceUs&&g.sinceUs>atUs&&g.sinceUs-atUs<=300000&&g.holds.some(h=>h.body===b.native));}))return invalid('native release did not clear body contact ownership');
+ return{status:clock.ok?(released?'native-release-observation':'native-inactive-observation'):'failed-load-clock',basis:'inactive-interval',ok:clock.ok,certifiesActiveContact:false,contacts:[],clock,releaseComplete:complete,sinceUs:released?state.grips.sinceUs:null};
 }
 
 
@@ -150,18 +178,45 @@ function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM 
     if (!skins) fail('actual visible indexed body skin unavailable');
     return skins;
   }
-  const tools = { CONTACT_LIMIT_M, drawnLoad, drawnGrips, observeRender, gradeContact, retainResult, bodyGeometry };
+  const tools = { CONTACT_LIMIT_M, drawnLoad, drawnGrips, observeRender, gradeContact, gradeInactive, gradeLoadClock, retainResult, bodyGeometry };
   if (!config) return tools;
   return (async () => {
+    // Diagnostic receipts observe installation only; no pose, clock or renderer call is injected.
+    const stage = (name, detail = {}) => {
+      const row = { stage: name, at: performance.now(), documentURL: location.href, ...detail };
+      window.__carryInstallState = row;
+      console.debug('carry-install-stage ' + JSON.stringify(row));
+    };
+    stage('factory-enter', { kitURL: config.kitURL, resolvedURL: new URL(config.kitURL, document.baseURI).href });
+    try {
     const world = window.__soulsEntity;
     if (!world?.scene || !world?.camera || !world?.renderer || window.__carryContactObserver) fail('world unavailable or observer already installed');
+    stage('import-begin');
     const kit = await import(config.kitURL), prototype = kit.TakePeople?.prototype;
+    stage('import-complete', { exports: Object.keys(kit) });
     if (!prototype?.show || !prototype?.palmOf || !prototype?.bodyObject) fail('production people interface unavailable');
     let people;
     const originalShow = prototype.show;
     function show(...args) { const result = originalShow.apply(this, args); people = this; return result; }
+    stage('show-hook-begin');
     prototype.show = show;
+    stage('show-hook-complete');
+    const nativeMatrix=(evidence,time)=>{
+      if(evidence?.source!=='native-records'||!evidence.frames?.length)fail('native pose evidence unavailable');
+      const result=world.camera.matrix.clone().identity();
+      for(const f of [...evidence.frames].reverse()){
+        let p=f.record.pos,q=f.record.rot;const a=f.bracket?.[0],b=f.bracket?.[1];
+        if(a&&a[3]>=f.recordAt&&time>=a[3]){p=a.slice(4,7);q=a[7];if(!q)fail('native quaternion unavailable');
+          if(b&&a[1]===b[1]&&a[2]===b[2]){if(!b[7])fail('native quaternion unavailable');const u=Math.max(0,Math.min(1,(time-a[3])/(b[3]-a[3])));p=p.map((n,i)=>n+(b[i+4]-n)*u);const qa=world.camera.quaternion.clone().set(q[1],q[2],q[3],q[0]).normalize(),qb=qa.clone().set(b[7][1],b[7][2],b[7][3],b[7][0]).normalize();qa.slerp(qb,u);q=[qa.w,qa.x,qa.y,qa.z];}
+        }
+        const rotation=world.camera.quaternion.clone().set(q[1],q[2],q[3],q[0]).normalize(),position=world.camera.position.clone().set(...p.map(n=>n/1e6));
+        if(f.slotPoint)position.add(world.camera.position.clone().set(...f.slotPoint.slice(1,4).map(n=>n/1000)));
+        result.multiply(world.camera.matrix.clone().compose(position,rotation,world.camera.position.clone().set(1,1,1)));
+      }return result.toArray();
+    };
+    let previousExpected=null;
     const observer = window.__carryContactObserver = { active: false, samples: [], failures: [], dropped: 0, source: config.source, previousFrame: -1, total: 0, counts: {}, maxima: {}, failedWitnesses: [] };
+    stage('render-hook-begin');
     const stopRender = observeRender(world.renderer, world, stamp => {
       const now = performance.now();
       if (!observer.active) return;
@@ -169,8 +224,16 @@ function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM 
       const load = drawnLoad(world.layer, world.scene, config.binding.load.entity);
       const vector = (...p) => world.camera.position.clone().set(...p);
       const grips = drawnGrips(config.entry, load.matrix, vector);
-      const frame = world.gameFrame();
-      const bodies = config.binding.bodies.map(binding => {
+      const frame = world.gameFrame(),nativeFrame=window.__soulsCarry,atUs=Math.round(world.worldSeconds*1e6);
+      if(nativeFrame?.at!==atUs)fail('native/body depiction clocks disagree');
+      if(nativeFrame.errors?.length)fail('native carry recording: '+nativeFrame.errors.join(';'));
+      const contactState=nativeFrame?.contactStates?.find(o=>o.grips?.load===config.binding.load.native&&o.grips.phase!=='souls:released')??nativeFrame?.contactStates?.find(o=>o.crew===config.binding.crew)??nativeFrame?.contactStates?.find(o=>o.grips?.load===config.binding.load.native);
+      if(contactState?.field==='invalid')fail('invalid native contact field');
+      const observation=nativeFrame?.observations?.find(o=>o.grips.load===config.binding.load.native);
+      const activeMembers=observation?.members;
+      const observedBodies=contactState?.grips?.phase==='souls:released'?contactState.grips.holds.map(h=>({body:h.body})):activeMembers??contactState?.members;
+      const selectedBindings=observedBodies?observedBodies.map(m=>{const b=config.binding.bodies.find(b=>b.native===m.body);if(!b)fail('whole native crew binding unavailable');return b;}):config.binding.bodies;
+      const bodies = selectedBindings.map(binding => {
         const matches = frame.souls.filter(s => s.id === binding.soul && s.entityId === binding.entity);
         if (matches.length !== 1) fail('carrier Soul/entity mapping changed');
         const root = people.bodyObject(binding.entity);
@@ -181,24 +244,47 @@ function gradeContact(sample, { now, previousFrame = -1, maxAgeMs = 250, limitM 
           if (!people.palmOf(binding.entity, hand, out)) fail('live palm unavailable');
           palms[hand] = out.toArray();
         }
-        return { ...binding, visibleSkin, palms, root: root.matrixWorld.toArray() };
+        return { ...binding, visibleSkin, palms, root: root.matrixWorld.toArray(),nativeCarryOwned:!!frame.entities[binding.entity]?.state?.nativeCarry,nativeCarryIdentity:frame.entities[binding.entity]?.state?.nativeCarryIdentity,order:nativeFrame?.bodies?.[binding.entity]?.order };
       });
       const sample = { stage: 'after-world-render', units: 'm', currentCanvas: stamp.canvas === world.renderer.domElement && stamp.canvas.isConnected,
         renderTarget: world.renderer.getRenderTarget(), frame: stamp.frame, at: now, tick: frame.tick, worldSeconds: world.worldSeconds,
         load: { ...config.binding.load, parts: load.parts, matrix: load.matrix.toArray(), source: load.source, matrices: load.matrices ?? null }, bodies, grips,
-        nativeContacts: null, crew: null };
-      const result = gradeContact(sample, { now: performance.now(), previousFrame: observer.previousFrame });
+        nativeContacts: observation?{...observation.grips,source:'souls:carry-grips',units:'um',space:'load-local',observedWorldUs:atUs}:null,
+        crew:observation&&activeMembers?{native:observation.grips.crew,source:'native-membership',observedWorldUs:atUs,members:activeMembers.map(m=>m.body)}:null,
+        expectedLoad:null,contactState,nativeUpcoming:nativeFrame.preparations,nativeHistory:observation?nativeFrame.phaseHistory?.[observation.grips.crew]:null };
+      {const evidence=nativeFrame.evidence?.[config.binding.load.native],matrix=nativeMatrix(evidence,atUs);
+        const bounds=config.entry?.geometry?.bounds_mm;if(!finite3(bounds))fail('load bounds unavailable');
+        const pointsUm=[-1,1].flatMap(x=>[0,1].flatMap(y=>[-1,1].map(z=>[x*bounds[0]*500,y*bounds[1]*1000,z*bounds[2]*500])));
+        const before=previousExpected??{matrix,atUs};
+        sample.expectedLoad={source:'native-records',atUs,matrix,previousMatrix:before.matrix,previousAtUs:before.atUs,pointsUm};previousExpected={matrix,atUs};
+      }
+      let result;
+      const active=observation&&['souls:carry','souls:set-in','souls:return','souls:held'].includes(observation.grips.phase);
+      if(active){
+        result=gradeContact(sample,{now:performance.now(),previousFrame:observer.previousFrame,previousAssignments:observer.assignments??{}});
+        observer.assignments??={};if(result.basis==='native-local-pair')for(const c of result.contacts){
+          const h=sample.nativeContacts.holds.find(h=>h.body===c.body);let episode=sample.nativeContacts.sinceUs;
+          for(let i=sample.nativeHistory.length-1;i>=0;i--){const g=sample.nativeHistory[i];if(g.load!==sample.nativeContacts.load)break;if(g.phase==='souls:released'||!g.holds.some(p=>p.body===h.body&&p.grip===h.grip&&JSON.stringify(p.handsUm)===JSON.stringify(h.handsUm)))break;episode=g.sinceUs;}
+          const body=sample.bodies.find(b=>b.native===c.body);observer.assignments[[sample.nativeContacts.crew,sample.nativeContacts.load,c.body,c.grip,episode].join('|')]=body.order;
+        }
+      }else{
+        // These are recorded, native-timed noncontact observations, never active-contact passes or a grace period.
+        result=gradeInactive(sample,{now,previousFrame:observer.previousFrame});
+      }
       observer.previousFrame = stamp.frame;
       retainResult(observer, sample, result);
     }, error => { observer.total++; observer.counts['failed-measurement'] = (observer.counts['failed-measurement'] ?? 0) + 1; if (observer.failures.length < 30) observer.failures.push({ at: performance.now(), message: String(error) }); });
+    stage('render-hook-complete');
     observer.stop = () => {
       stopRender();
       if (prototype.show === show) prototype.show = originalShow; else fail('people observer ownership changed');
       observer.active = false;
       return { stopped: true };
     };
+    stage('install-return');
     return { installed: true };
+    } catch (error) { stage('install-error', { message: String(error), stack: String(error?.stack ?? '') }); throw error; }
   })();
 
 }
-export const { CONTACT_LIMIT_M, drawnLoad, drawnGrips, observeRender, gradeContact, retainResult, bodyGeometry } = contactTools();
+export const { CONTACT_LIMIT_M, drawnLoad, drawnGrips, observeRender, gradeContact, gradeInactive, gradeLoadClock, retainResult, bodyGeometry } = contactTools();
