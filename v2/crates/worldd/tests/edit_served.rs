@@ -3124,10 +3124,16 @@ fn a2_parts_rest_at_the_grounds_height() {
     // the world): Soul `ab.1` keeps the hold alone (a seated frame's holder may not just let go).
     let seat = |hands: &mut [Hand], ab: (usize, usize), fa: Id, what: &str| {
         let (p, q) = frame_ends_of(&w, fa);
-        println!(
-            "{what}: frame A at {:?}, its ends {p:?} {q:?}",
-            where_is(&w, fa).2
-        );
+        if what.contains("again") {
+            for (k, s) in w.souls.iter().enumerate() {
+                let b = body_of(&w, *s);
+                let (copy, _) = served_copy(&w);
+                let here = copy.tree().handle(b).is_some();
+                drop(copy);
+                println!("{what}: Soul {} at {:?}, in the world {here}", k + 1, body_at(&w, b));
+            }
+            println!("{what}: its ends {p:?} {q:?}");
+        }
         both(hands, ab, p, q, what);
         let c = crew(hands, ab);
         let got = hands[ab.0].act("part:take", c, part(fa));
