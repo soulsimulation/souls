@@ -1,9 +1,9 @@
 // Racks V: a Soul climbs a built bay's frame by the name its own copy gives the place. N2's test world with worldd's
 // deck test bay (`sim/src/structure/fixtures`: the bay, its two frames, its four beams) at the site, served by worldd,
 // gatewayd and directoryd; five Souls paired and joined through the gateway. Four build the frames and the four
-// beams with the thin command's `carry` and `part` steps; the fifth reads `object <frame>`, finds the climb to the
-// frame's outer standing place there, and sends that offer by its name alone (`object <frame> climb to <name>`): its
-// walk goes to the standing place's node with the place's own point, and the body ends on the place, 1.8 m up. Run from
+// beams with the thin command's `carry` and `part` steps; the fifth reads `object <frame>`: with no deck built on the
+// frame there is nothing to stand on at its ladders' tops, so it offers no climb, and `object <frame> climb` is refused
+// `climb.nothing-to-stand-on` (N14). Run from
 // v2/ after `cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked`, and replica's wasm-bindgen package
 // in target/wasm-load/pkg.
 
@@ -43,7 +43,7 @@ function bayFacts(text) {
   return JSON.stringify(f);
 }
 
-test('served: after the bay is built, a Soul climbs to the standing place its own object <frame> names', { timeout: 600_000 }, async (t) => {
+test('served: a bay framed with no deck: object <frame> offers no climb, and a climb is refused, nothing to stand on', { timeout: 600_000 }, async (t) => {
   const base = mkdtempSync(join(scratch, 'run-')), children = [], home = join(base, 'home');
   mkdirSync(home, { mode: 0o700 });
   const run = (path, args, ready = null, env = {}) => new Promise((ok, fail) => {
@@ -141,23 +141,18 @@ test('served: after the bay is built, a Soul climbs to the standing place its ow
   ok(await cli(a, 'carry', 'leave', beams), 'a leaves the beam crew');
   ok(await cli(d, 'carry', 'leave', beams), 'd leaves the beam crew');
 
-  // The fifth Soul, at the ladder's foot, reads the frame and climbs by the offer's name alone.
+  // The fifth Soul, outside frame 1, reads the frame: with no deck built on it there is nothing to stand on at its
+  // ladders' tops (N14: a frame holds no standing place of its own), so it offers no climb, and one asked is refused by
+  // name, the body staying on the ground.
   await walk([[e, [0, -3_900]]]);
   const seen = ok(await cli(e, 'object', ids['frame-1']), 'object frame-1');
   writeFileSync(join(base, 'object-frame-1.json'), JSON.stringify(seen, null, 2));
   console.log(`object frame-1: ${JSON.stringify({ places: seen.places, ways_up: seen.ways_up, offers: seen.offers.map((o) => o.name) })}`);
-  const inside = await cli(e, 'query', JSON.stringify([{ place: ids.bay, depth: 3 }]));
-  writeFileSync(join(base, 'bay-inside.json'), JSON.stringify(inside, null, 2));
-  console.log(`the bay in e's copy: ${JSON.stringify(inside.answers?.[0])}`);
-  const climb = seen.offers.find((o) => o.name.startsWith('climb to ') && /back face/.test(o.name));
-  assert.ok(climb, `a climb to the outer standing place among ${JSON.stringify(seen.offers.map((o) => o.name))}`);
-  assert.ok(seen.ways_up?.some((w) => w.to === climb.place && /^ladder up /.test(w.name)), 'the ladder up to it');
-  const name = climb.name.slice('climb to '.length);
-  const sent = ok(await cli(e, 'object', ids['frame-1'], 'climb', 'to', name), 'the climb sent');
-  const end = await receipt(e, sent.sequence);
-  assert.equal(end.answer, 'receipt', `the climb ends: ${JSON.stringify(end)}`);
-  const looked = await until(async () => { const l = await cli(e, 'look'); return l.room?.name === name ? l : null; }, 15_000, 'the copy shows the body on the place');
-  console.log(`look on the place: ${JSON.stringify(looked.room)}`);
-  const sent2 = (await request(e.rt.socket, { op: 'receipt', sequence: sent.sequence })).receipt;
-  assert.match(String(sent2.target ?? ''), new RegExp(climb.place), 'the walk went to the standing place\'s node');
+  assert.ok(!seen.offers.some((o) => o.name.startsWith('climb to ')), `no climb offer among ${JSON.stringify(seen.offers.map((o) => o.name))}`);
+  assert.equal(seen.places, undefined, 'no place on the frame');
+  const refused = await cli(e, 'object', ids['frame-1'], 'climb');
+  assert.equal(refused.ok, false, JSON.stringify(refused));
+  assert.equal(refused.code, 'climb.nothing-to-stand-on', JSON.stringify(refused));
+  const looked = await cli(e, 'look');
+  assert.ok(!/standing place/.test(JSON.stringify(looked.room ?? {})), 'still on the ground');
 });

@@ -172,7 +172,7 @@ import { stats, transcriptOf } from '../stats/stats.mjs';
 import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, metresFrom, query } from './reads.mjs';
-import { climbNamed, climbOffers, placeAt, placesIn, rowsWithPlaces, waysOf } from '../view/ways.mjs';
+import { climbNamed, climbOffers, nothingToStandOn, placeAt, placesIn, rowsWithPlaces, waysOf } from '../view/ways.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { aboardOf, aboardWords } from '../check/aboard.mjs';
 import { otherSlot, wireArgs } from '../check/other-slot.mjs';
@@ -2194,6 +2194,9 @@ async function answer(req, conn = null) {
       if (!seen.ok) return closing(seen, null, { now: true });
       // `object <frame> climb to <place id | its name>` (`../view/ways.mjs`): a walk to that standing place.
       const climb = climbNamed(seen.offers, req.action, req.args);
+      // N14: a frame with no deck on it has nothing to stand on at its ladders' tops.
+      const none = (climb !== undefined || String(req.action) === 'climb') && !climb ? nothingToStandOn(seen.ways, req.this) : null;
+      if (none) return closing(none, null, { now: true });
       if (climb !== undefined) req.args = [];
       const offer = climb !== undefined ? climb : offerNamed(seen.offers, req.action);
       if (!offer) {
@@ -2504,7 +2507,7 @@ function thingOf(id) {
   // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
   const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
   // A part's ways (`../view/ways.mjs`): its places that exist now, the ways up to them, and a climb to each standing place.
-  const ways = waysOf(rows, row, entry);
+  const ways = waysOf(rows, row, entry, undefined, kinds);
   return { ok: true, row, entry, ways, offers: [...offersOf(row.id, entry, { moving: Boolean(row.moving) }), ...climbOffers(ways)], fields: heldState(kinds).nodes[row.id]?.fields };
 }
 
