@@ -213,7 +213,17 @@ async function run(o, d) {
     requireThat(digest({ count: state.historicalCaptures, evidence: state.historicalEvidence }) === digest(o.history ?? { count: 0, evidence: [] }), 'historical-record-changed');
     if (cycle?.id !== o.cycle.id) {
       changed(o.cycle.fix, current, d.changed);
-      if (cycle) requireThat([...Object.values(cycle.armSources), cycle.toolSource, cycle.driverSource].filter(Boolean).some(s => s.root === resolve(o.cycle.fix.root) && s.head === o.cycle.fix.from), 'cycle-change-from-mismatch');
+      if (cycle) {
+        const recorded = { product: Object.values(cycle.armSources), tool: [cycle.toolSource], driver: [cycle.driverSource] };
+        const direct = Object.values(recorded).flat().filter(Boolean).some(s => s.root === resolve(o.cycle.fix.root) && s.head === o.cycle.fix.from);
+        const relocated = continuation?.relocations.some(r => {
+          const kind = r.kind ?? 'product';
+          return recorded[kind]?.some(s => s && sameSource({ [kind]: s }, { [kind]: r.from }))
+            && r.from.head === o.cycle.fix.from && r.to.root === resolve(o.cycle.fix.root) && r.to.head === o.cycle.fix.to
+            && sameSource({ [kind]: r.to }, { [kind]: current[kind] });
+        });
+        requireThat(direct || relocated, 'cycle-change-from-mismatch');
+      }
       requireThat(!state.cycles.some(c => c.id === o.cycle.id), 'cycle-id-reused');
       requireThat(new Set(o.cycle.plan.map(s => `${s.arm}:${s.repeat}`)).size === o.cycle.plan.length, 'duplicate-measurement-slot');
       requireThat(o.cycle.plan.every(s => o.cycle.arms?.[s.arm]?.head && isAbsolute(o.cycle.arms[s.arm].root) && Number.isSafeInteger(s.repeat) && s.repeat > 0), 'planned-source-required');
