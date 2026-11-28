@@ -159,7 +159,7 @@ fn walked(
     what: &str,
 ) -> Vec<(Id, Vec3)> {
     let body = match r.controller.body(who) {
-        Some(b) => b.clone(),
+        Some(b) => *b,
         None => panic!("{what}: no such body"),
     };
     let legs = walk(r, t, body, SPEED, node, goal)

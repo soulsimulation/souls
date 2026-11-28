@@ -250,7 +250,7 @@ mod tests {
         )
         .unwrap();
         let w = Ways::read(&e).unwrap();
-        assert_eq!(w.floors[0].while_joined, true);
+        assert!(w.floors[0].while_joined);
         assert_eq!(w.ladders[0].path(38), [[0, -638], [0, -38]]);
         let [f, s, l] = w.diag();
         assert_eq!(f.as_deref(), Some("[[1800, 1144, 700, 0, -388, 1]]"));
