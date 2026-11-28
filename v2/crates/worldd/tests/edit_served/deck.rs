@@ -557,7 +557,9 @@ fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
 #[test]
 fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_under_it_leaves() {
     let mut k = Deck::serve("deck-floor", 5);
+    dump(&k.w, &[k.sheet, k.deck, k.flight]);
     k.frame();
+    dump(&k.w, &[k.sheet, k.deck, k.flight]);
     let g = k.w.ground;
     let (sheet, flight, deck) = (k.sheet, k.flight, k.deck);
     let [jb, jf] = k.joists;
@@ -571,10 +573,12 @@ fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_un
     }
     let c = k.crew_at((0, 1), SHEET_ENDS, "Souls 1 and 2 to the sheet's ends");
     done(k.take(0, c, sheet), "Souls 1 and 2 take the sheet");
+    dump(&k.w, &[k.sheet, k.deck]);
     done(
         k.put(0, c, "sheet", Some(&[jb, jf])),
         "the sheet on both joists",
     );
+    dump(&k.w, &[k.sheet, k.deck]);
     done(k.leave(0, c), "Soul 1 leaves");
     done(k.leave(1, c), "Soul 2 leaves");
 
