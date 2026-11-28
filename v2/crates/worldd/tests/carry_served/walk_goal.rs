@@ -5,6 +5,28 @@
 //! to beside the deck bay and arrives within 0.4 m.
 
 use super::*;
+use replica::effects::{Header, schema_hash};
+use replica::ids::{Hash, Purpose};
+use sim::links::Doors;
+use sim::walk::town::Town;
+
+/// `facts` as a town ([`Town::new`]), to ask what counts as a passage where a body stood.
+fn town_of(facts: &str) -> Town {
+    let im = import_eden::load(facts).expect("the facts load");
+    let v = Value::Map(BTreeMap::from([
+        (1, Value::Bytes(Hash::of(Purpose::Fixture, b"souls/5254-walk-goal/1").to_bytes())),
+        (2, Value::Bytes(schema_hash().to_bytes())),
+        (3, Value::Bytes(im.nodes["world"].scope().0.to_vec())),
+        (4, im.nodes["world"].to_value()),
+        (5, Value::Uint(0)),
+        (6, Value::Array(Vec::new())),
+        (7, Value::Array(Vec::new())),
+    ]));
+    let header = Header::read(&encode(&v).unwrap()).unwrap();
+    let next = im.tree.to_state().next;
+    let ground = im.nodes["ground"];
+    Town::new(im.tree, ground, Doors::new(header, im.rules, next)).expect("the town")
+}
 
 /// The last `souls:move-ended` of `body` in the log: its fields.
 fn move_ended(dir: &Path, body: Id) -> BTreeMap<u64, Value> {
@@ -69,7 +91,16 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
     };
     let mm = i64::try_from(*mm).unwrap();
     assert!((mm - off / 1000).abs() <= 2, "field 7 ({mm} mm) is how far it stands from its goal ({off} µm)");
-    assert!(mm >= 340 && mm < 700, "moved clear of the doorway itself and no further than a walker is kept: {mm} mm");
+    // Clear of the doorway itself (at least the body's radius and margin, 0.34 m, off the goal in it), yet still within
+    // the 0.7 m a walker is kept from it: moved only as far as needed, never the full clearance.
+    assert!(mm >= 340, "moved clear of the doorway itself: {mm} mm");
+    let end = stood(&dir)[&body];
+    let town = town_of(&facts);
+    assert!(
+        town.passage_at(ground, end).is_some(),
+        "it stands within the 0.7 m a walker is kept from the doorway, not moved the full clearance: {end:?}"
+    );
+    assert!(town.passage_at(ground, goal).is_some(), "the goal was in the doorway");
     assert_eq!(text(f.get(&10)).as_deref(), Some("doorway"), "the passage it cleared");
     assert!(f.contains_key(&9), "the thing the doorway belongs to: {f:?}");
     drop(served);
