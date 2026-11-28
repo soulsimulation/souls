@@ -135,8 +135,9 @@ pub mod io {
     thread_local!(static HERE: Cell<u8> = const { Cell::new(0) });
     /// On the stream's thread, inside [`stage`]: its syncs are one wait, counted when it ends.
     thread_local!(static STAGED: Cell<u32> = const { Cell::new(0) });
-    /// Bytes written, files synced, sync waits and parts published, in that order.
-    static COUNTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+    /// Bytes written, files synced, sync waits, parts published, and the files synced and waits while writing a part
+    /// (from its recovery objects to its pointer), in that order.
+    static COUNTS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
     /// Nanoseconds spent in syncs, summed over the threads that synced (profile only).
     static SYNC_NS: AtomicU64 = AtomicU64::new(0);
     /// Counts what this thread writes and syncs from now on: the stream's own thread.
@@ -186,13 +187,20 @@ pub mod io {
         }
         done
     }
-    pub(super) fn part() {
+    /// A part begins to be written: the syncs and waits so far.
+    pub(super) fn part_begins() -> [u64; 2] {
+        [COUNTS[1].load(Relaxed), COUNTS[2].load(Relaxed)]
+    }
+    /// The part begun at `at` is written: one part, and its syncs and waits.
+    pub(super) fn part_written(at: [u64; 2]) {
         if HERE.get() == 1 {
             COUNTS[3].fetch_add(1, Relaxed);
+            COUNTS[4].fetch_add(COUNTS[1].load(Relaxed).saturating_sub(at[0]), Relaxed);
+            COUNTS[5].fetch_add(COUNTS[2].load(Relaxed).saturating_sub(at[1]), Relaxed);
         }
     }
-    /// `[bytes, syncs, waits, parts]` so far, and the syncs' time (ns, profile only).
-    pub fn totals() -> ([u64; 4], u64) {
+    /// `[bytes, syncs, waits, parts, part syncs, part waits]` so far, and the syncs' time (ns, profile only).
+    pub fn totals() -> ([u64; 6], u64) {
         (
             std::array::from_fn(|i| COUNTS[i].load(Relaxed)),
             SYNC_NS.load(Relaxed),
@@ -247,7 +255,7 @@ mod prof {
     }
     pub struct Lap(Option<(Instant, [u64; 4])>);
     fn io_now() -> [u64; 4] {
-        let ([bytes, syncs, waits, _], ns) = super::io::totals();
+        let ([bytes, syncs, waits, ..], ns) = super::io::totals();
         [bytes, syncs, waits, ns]
     }
     impl Lap {
@@ -1560,14 +1568,7 @@ fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(io)?;
     }
-    let same = |path: &Path| -> R<()> {
-        let meta = fs::symlink_metadata(path).map_err(io)?;
-        if !meta.is_file() || meta.file_type().is_symlink() || fs::read(path).map_err(io)? != bytes
-        {
-            return Err(fault("stream-immutable", "existing bytes differ"));
-        }
-        Ok(())
-    };
+    let same = |path: &Path| same_bytes(path, bytes);
     if path.exists() {
         return same(path);
     }
@@ -1590,6 +1591,143 @@ fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => same(path),
         Err(e) => Err(io(e)),
+    }
+}
+
+/// Whether `path` is a plain file holding `bytes`: an immutable file already there (`stream-immutable` if not).
+fn same_bytes(path: &Path, bytes: &[u8]) -> R<()> {
+    let meta = fs::symlink_metadata(path).map_err(io)?;
+    if !meta.is_file() || meta.file_type().is_symlink() || fs::read(path).map_err(io)? != bytes {
+        return Err(fault("stream-immutable", "existing bytes differ"));
+    }
+    Ok(())
+}
+
+/// One part's files (#2803 follow-up): each written under its temporary name with no sync, then all synced together,
+/// the stream's thread waiting once ([`Group::sync`]), then named in the order they were added ([`Group::name`]), the
+/// last ([`Group::last`], the pointer) on its own ([`Group::name_last`]). So every file is still synced before its
+/// name (B1-7) and named after the files it names, as [`write_whole`] and [`immutable`] each do one at a time. What is
+/// not named when the group is dropped (a refused write) leaves no temporary file.
+#[derive(Default)]
+struct Group<'a> {
+    files: Vec<Pending<'a>>,
+    last: Option<Pending<'a>>,
+}
+
+struct Pending<'a> {
+    tmp: PathBuf,
+    path: PathBuf,
+    file: Option<fs::File>,
+    /// An immutable file's bytes: linked to its name, which may only ever hold them ([`immutable`]). None: renamed
+    /// over its name ([`write_whole`]).
+    immutable: Option<&'a [u8]>,
+}
+
+impl<'a> Group<'a> {
+    fn written(path: &Path, bytes: &[u8], immutable: Option<&'a [u8]>) -> R<Pending<'a>> {
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = PathBuf::from(tmp);
+        let file = fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).map(|_| f));
+        match file {
+            Ok(f) => {
+                self::io::wrote(bytes.len());
+                Ok(Pending {
+                    tmp,
+                    path: path.to_owned(),
+                    file: Some(f),
+                    immutable,
+                })
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&tmp);
+                Err(io(e))
+            }
+        }
+    }
+    /// `bytes` to go whole over `path`, as [`write_whole`].
+    fn whole(&mut self, path: &Path, bytes: &[u8]) -> R<()> {
+        self.files.push(Self::written(path, bytes, None)?);
+        Ok(())
+    }
+    /// The immutable file `path`, as [`immutable`]: one already there must hold `bytes`, and is not written again.
+    fn immutable(&mut self, path: &Path, bytes: &'a [u8]) -> R<()> {
+        if let Some(p) = path.parent() {
+            fs::create_dir_all(p).map_err(io)?;
+        }
+        if path.exists() {
+            return same_bytes(path, bytes);
+        }
+        self.files.push(Self::written(path, bytes, Some(bytes))?);
+        Ok(())
+    }
+    /// `bytes` to go whole over `path` after every other file of the group is named.
+    fn last(&mut self, path: &Path, bytes: &[u8]) -> R<()> {
+        self.last = Some(Self::written(path, bytes, None)?);
+        Ok(())
+    }
+    /// Every file synced, each on a thread of its own beside this one: one wait.
+    fn sync(&mut self) -> R<()> {
+        let files: Vec<&fs::File> = self
+            .files
+            .iter()
+            .chain(&self.last)
+            .filter_map(|p| p.file.as_ref())
+            .collect();
+        let Some((first, rest)) = files.split_first() else {
+            return Ok(());
+        };
+        self::io::stage(|| {
+            std::thread::scope(|s| {
+                let others: Vec<_> = rest
+                    .iter()
+                    .map(|f| beside(s, move || self::io::sync(f).map_err(io)))
+                    .collect();
+                let mut done = self::io::sync(first).map_err(io);
+                for h in others {
+                    done = done.and(h.join("a file's sync panicked"));
+                }
+                done
+            })
+        })
+    }
+    fn name_one(p: Pending<'_>) -> R<()> {
+        drop(p.file);
+        match p.immutable {
+            None => fs::rename(&p.tmp, &p.path).map_err(|e| {
+                let _ = fs::remove_file(&p.tmp);
+                io(e)
+            }),
+            Some(bytes) => {
+                let linked = fs::hard_link(&p.tmp, &p.path);
+                let _ = fs::remove_file(&p.tmp);
+                match linked {
+                    Ok(()) => Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        same_bytes(&p.path, bytes)
+                    }
+                    Err(e) => Err(io(e)),
+                }
+            }
+        }
+    }
+    /// The files named, in the order they were added; the last is kept for [`Group::name_last`].
+    fn name(&mut self) -> R<()> {
+        while !self.files.is_empty() {
+            Self::name_one(self.files.remove(0))?;
+        }
+        Ok(())
+    }
+    fn name_last(&mut self) -> R<()> {
+        self.last.take().map_or(Ok(()), Self::name_one)
+    }
+}
+
+impl Drop for Group<'_> {
+    fn drop(&mut self) {
+        for p in self.files.drain(..).chain(self.last.take()) {
+            let _ = fs::remove_file(&p.tmp);
+        }
     }
 }
 pub struct PublicStart<'a> {
@@ -1770,37 +1908,47 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         Ok(hash)
     }
-    /// [`PublicWriter::put`] of each of `objects`. To the spool all at once, each on its own thread (the first on this
-    /// one), as no object waits on another's sync; to a store one by one.
-    fn put_all(&self, objects: &[&[u8]]) -> R<()> {
-        let (Some(spool), Some((first, rest))) = (&self.spool, objects.split_first()) else {
+    /// [`PublicWriter::put`] of each of `objects` into a part's `group` (#2803 follow-up): to the spool, each object not
+    /// there yet is written to be synced with the part's other files; to a store, put one by one.
+    fn put_all_into(&self, objects: &[&[u8]], group: &mut Group<'_>) -> R<()> {
+        let Some(spool) = &self.spool else {
             for o in objects {
                 self.put(o)?;
             }
             return Ok(());
         };
-        let prefix = &self.prefix;
-        let key = |b: &[u8]| {
-            format!(
-                "{prefix}objects/{}",
-                replica::encode::to_hex(&replica::ids::sha256(b))
-            )
-        };
         // The same bytes twice are one object, written once (two writers would share its temporary name).
-        let mut rest: Vec<&[u8]> = rest.iter().copied().filter(|o| o != first).collect();
-        rest.sort_unstable();
-        rest.dedup();
-        std::thread::scope(|s| {
-            let others: Vec<_> = rest
-                .iter()
-                .map(|o| beside(s, move || spool.object(&key(o), o)))
-                .collect();
-            let mut done = spool.object(&key(first), first);
-            for h in others {
-                done = done.and(h.join("an object's writer panicked"));
-            }
-            done
-        })
+        let mut unique: Vec<&[u8]> = objects.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        for o in unique {
+            let key = format!(
+                "{}objects/{}",
+                self.prefix,
+                replica::encode::to_hex(&replica::ids::sha256(o))
+            );
+            spool.object_into(&key, o, group)?;
+        }
+        Ok(())
+    }
+    /// [`PublicWriter::commit`] into a part's `group`: to the spool, the head is written to be synced with the part's
+    /// other files and named after its objects; to a store, put as before.
+    fn commit_into(&mut self, manifest: &[u8], group: &mut Group<'_>) -> R<()> {
+        if self.spool.is_none() {
+            return self.commit(manifest);
+        }
+        // Its object is in the group already ([`PublicWriter::put_all_into`]).
+        let hash = replica::ids::sha256(manifest).to_vec();
+        self.name_live(&hash, &object_map(manifest)?);
+        let bytes = wire(Value::Map(BTreeMap::from([(
+            1,
+            Value::Bytes(hash.clone()),
+        )])))?;
+        if let Some(spool) = &self.spool {
+            spool.head_into(&format!("{}head", self.prefix), &bytes, group)?;
+        }
+        self.head = Some(hash);
+        Ok(())
     }
     fn get(&self, hash: &[u8]) -> R<Vec<u8>> {
         if hash.len() != 32 {
@@ -4098,18 +4246,21 @@ impl<S: ObjectStore> PublicWriter<S> {
             (6, Value::Bytes(hash(&text))),
             (7, Value::Uint(self.cursor)),
         ])))?;
-        // The part's objects are named by their hashes and wait on nothing but their own bytes: each is written and
-        // synced beside the others, so a part waits on one sync there, not four (on a busy disk the writer fell a
-        // part behind each period, and the page held after each activity accept).
-        self::io::stage(|| self.put_all(&[&chunk, &bytes, &text, &manifest]))?;
+        // A part's files are written, then synced together, one wait, then named (#2803 follow-up): its recovery
+        // objects (named by their hashes, to the spool, R15; a store's are put as before), the chain's head, the part
+        // and text files, and the pointer. Each is synced before its name (B1-7) and named after every file it
+        // names: the objects before the head, the head before the part's files (a killed publication replays the
+        // same committed bytes, never a new cut at an orphan file's address), the files before the pointer. Before,
+        // each of those four steps waited on its own syncs, and on a disk shared with other writers the stream fell
+        // minutes behind the world.
+        let begun = self::io::part_begins();
+        let mut group = Group::default();
+        self.put_all_into(&[&chunk, &bytes, &text, &manifest], &mut group)?;
         lap.mark(4);
         self.player.play(&bytes)?;
         lap.mark(6);
-        self.commit(&manifest)?;
+        self.commit_into(&manifest, &mut group)?;
         lap.mark(7);
-        // Commit exact recovery bytes (to the spool, R15, or else the store) before exposing local immutable files. A
-        // killed publication replays the same committed bytes, never a new cut at an orphan file's address. The two
-        // files are written side by side, as the objects are.
         let (part_file, text_file) = (
             self.generation_dir().join(number.to_string()),
             self.generation_dir().join(format!("{number}.text")),
@@ -4121,23 +4272,38 @@ impl<S: ObjectStore> PublicWriter<S> {
             Some(list) => purge_text(&text, list)?,
             None => None,
         };
-        let (part_written, text_written) = self::io::stage(|| std::thread::scope(|s| {
-            let text = beside(s, || match &derived {
-                Some(purged) => derive(&text_file, purged),
-                None => immutable(&text_file, &text),
-            });
-            (
-                immutable(&part_file, &bytes),
-                text.join("the text file's writer panicked"),
-            )
-        }));
-        part_written?;
-        text_written?;
+        group.immutable(&part_file, &bytes)?;
+        if derived.is_none() {
+            group.immutable(&text_file, &text)?;
+        }
+        self.last_to = Some(sp.to);
+        // The pointer goes with them unless the part starts a generation (its pointer names the new baseline, written
+        // after it) or a removal's text is derived (written on its own below, before the pointer).
+        let generation_full =
+            self.generation_parts > 0 && self.player.next() >= self.generation_parts;
+        let with_pointer = !generation_full && derived.is_none();
+        let mut shown = None;
+        if with_pointer {
+            let (pointer, at) = self.pointer_bytes(None)?;
+            group.last(&self.dir.join(POINTER), &pointer)?;
+            shown = at;
+        }
+        group.sync()?;
+        group.name()?;
+        if let Some(spool) = &self.spool {
+            spool.poke();
+        }
+        if let Some(purged) = &derived {
+            derive(&text_file, purged)?;
+        }
         if let (Some(store), Some(list)) = (&self.text, list) {
             settle(store, &text_file, &text, list)?;
         }
+        if with_pointer {
+            group.name_last()?;
+            self.note_shown(shown);
+        }
         lap.mark(8);
-        self.last_to = Some(sp.to);
         if let Some(began) = began {
             let wall = trace::now_ms();
             eprintln!(
@@ -4164,17 +4330,26 @@ impl<S: ObjectStore> PublicWriter<S> {
             ));
         }
         lap.mark(9);
-        self.pointer(None)?;
+        if !with_pointer {
+            self.pointer(None)?;
+        }
         self.quiet_from = self.last_to;
+        self::io::part_written(begun);
         lap.mark(10);
         // Old generations' deletes once the part is out: they never hold it back from the page.
         self.delete_some(DELETES_PER_PART);
         lap.mark(9);
         prof::count(0, 1, 0);
-        self::io::part();
         Ok(())
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
+        let (bytes, shown) = self.pointer_bytes(quiet)?;
+        write_whole(&self.dir.join(POINTER), &bytes)?;
+        self.note_shown(shown);
+        Ok(())
+    }
+    /// The pointer's bytes now, and the wall time (ms) at which the newest world time it names fell, by its anchor.
+    fn pointer_bytes(&self, quiet: Option<i64>) -> R<(Vec<u8>, Option<i64>)> {
         // The anchor pairs the world's time with the machine's wall clock, which viewers compare with their own: the
         // world's clock runs ahead of the machine's by a step (O10, `measures::CLOCK_AHEAD_MS`).
         let wall = crate::answers::now();
@@ -4227,15 +4402,18 @@ impl<S: ObjectStore> PublicWriter<S> {
         if let Some(due) = self.asleep {
             value.insert(11, Value::Array(due.map(int).into_iter().collect()));
         }
-        write_whole(&self.dir.join(POINTER), &wire(Value::Map(value))?)?;
-        if let Some(shown) = self.last_to.max(quiet) {
-            let behind = world.saturating_sub(shown).div_euclid(1000);
-            self.shown_wall_ms.store(
-                wall.div_euclid(1000).saturating_sub(behind),
-                std::sync::atomic::Ordering::Relaxed,
-            );
+        let shown = self.last_to.max(quiet).map(|shown| {
+            wall.div_euclid(1000)
+                .saturating_sub(world.saturating_sub(shown).div_euclid(1000))
+        });
+        Ok((wire(Value::Map(value))?, shown))
+    }
+    /// A pointer naming `shown` (its [`PublicWriter::pointer_bytes`]) is on the disk.
+    fn note_shown(&self, shown: Option<i64>) {
+        if let Some(at) = shown {
+            self.shown_wall_ms
+                .store(at, std::sync::atomic::Ordering::Relaxed);
         }
-        Ok(())
     }
     /// The wall time, ms, at which the newest world time this stream's pointer names fell; none before its first.
     pub fn shown_wall_ms(&self) -> Option<i64> {
