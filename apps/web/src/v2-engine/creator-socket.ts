@@ -272,6 +272,12 @@ export async function mayCreate(place: MailboxPlace, view: (p: MailboxPlace) => 
   try { return creatorGrant((await view(place)).owned) !== null; } catch (e) { return !(e instanceof NothingOwned); }
 }
 
+/** Whether the exchange's refusal stands for this page's sign-in: the account is not the world's creator, the world
+ *  has none, or the page names no gateway. Anything else (`creator-authority-unavailable` while a new world's gateway
+ *  waits for its creator, a directory out of reach, a 5xx) can pass, so it is asked again (27 Nov: a world New world
+ *  made never showed its creator God Mode). */
+export const settledRefusal = (refused: string): boolean => ['not-the-creator', 'no-creator', 'no-gateway', 'session-refused'].includes(refused);
+
 /** The panel's creator on a v2 world: the exchange, the socket and the creator's mailbox. One a page and sign-in. */
 export class V2Creator {
   private session: Promise<CreatorSession> | null = null;
@@ -288,7 +294,11 @@ export class V2Creator {
       if (!(await mayCreate(place))) return { creator: false as const, refused: 'not-the-creator' };
       try { return { creator: true as const, grant: (await creatorToken(place)).grant }; } catch (e) { return { creator: false as const, refused: (e as Error).message }; }
     })();
-    return this.whoAsked;
+    const asked = this.whoAsked;
+    // A refusal that can pass (the gateway not yet holding the world's creator, a 503) is asked again on the status's
+    // next poll; a settled one (not this world's creator, a world with none) is kept for the page's sign-in.
+    void asked.then((w) => { if (!w.creator && !settledRefusal(w.refused) && this.whoAsked === asked) this.whoAsked = null; });
+    return asked;
   }
   private whoAsked: Promise<{ creator: true; grant: string } | { creator: false; refused: string }> | null = null;
 

@@ -567,7 +567,8 @@ pub struct OnTrack<'a> {
     pub holding: &'a [Id],
 }
 
-/// The conjugate of a unit quaternion: its inverse turn.
+/// The conjugate of a unit quaternion: its inverse turn. A half turn (w 0) is written with its other sign, its one
+/// byte form (a crew whose front stands straight behind its back along -x faced a 2x4 the wrong way: `orientation-sign`).
 fn conj(q: Quat) -> R<Quat> {
     let [w, x, y, z] = q.parts();
     // A half turn (w 0) is written with its other sign, its one byte form (as the deck lane's #5256 has it).
@@ -1162,8 +1163,8 @@ impl Assembly {
             }
             Err(r) => return Err(r),
         };
-        // By default a bearing part joins the bay's standing parts; a resting one (a cloth) the bay's bearing parts
-        // (its rails), which it rests on.
+        // By default a part joins the bay's seated parts of the kinds its own kind rests on (a rail its frames, a
+        // sheet its joists).
         let rests = s.rests(pk.as_str());
         let named = joins.is_some();
         let joins = match joins {
@@ -1175,7 +1176,7 @@ impl Assembly {
                 .filter_map(|h| tree.node(*h))
                 .filter(|n| {
                     let k = n.kind().as_str();
-                    n.slot().is_some() && if rests { s.bears(k) } else { s.stands(k) }
+                    n.slot().is_some() && s.rests_on(pk.as_str(), k)
                 })
                 .map(|n| n.id())
                 .collect::<Vec<_>>(),

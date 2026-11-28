@@ -53,7 +53,7 @@ use super::water::Water;
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::open::Index;
-use crate::ground::scene::xform_to;
+use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::{
     HUMAN_RADIUS, Meet, OpenGround, Piece, Terrain, Versions, changed, exits, grounds,
 };
@@ -63,7 +63,7 @@ use crate::links::{
     Building, Doors, F_OPEN, Kind, Open, SquareMeet, back, floor_joins, ground_doors,
 };
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
+use crate::routes::{CLIMB, HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
 use crate::spots::{Ask, CLEAR, ClassGround, Granted, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
@@ -73,7 +73,7 @@ use replica::kinds::sizes::Size;
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
-use replica::world_model::show;
+use replica::world_model::{plain, show};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -340,6 +340,18 @@ fn reach(b: &Building) -> Option<[i64; 4]> {
     })
 }
 
+/// Whether `thing` is a building in `tree`, as a whole build lists them (`Map::build_cut`): there, with a floor among
+/// its children. A thing whose last floor was removed (#5216: a deck whose one floor went) is one no longer.
+fn is_building(tree: &Tree, thing: Id) -> bool {
+    let floor = |&c| {
+        tree.node(c)
+            .is_some_and(|n| plain(n.kind().as_str()) == FLOOR)
+    };
+    tree.handle(thing)
+        .and_then(|h| tree.children(h))
+        .is_some_and(|kids| kids.iter().any(floor))
+}
+
 /// Whether boxes `a` and `b` meet.
 fn overlap(a: [i64; 4], b: [i64; 4]) -> bool {
     a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
@@ -494,6 +506,14 @@ impl Rebuilt {
         match &self.fresh {
             Fresh::Squares(sq, ..) => sq.len(),
             _ => 0,
+        }
+    }
+
+    /// How many buildings were read again alone: 0 when the whole was built.
+    pub fn buildings(&self) -> usize {
+        match &self.fresh {
+            Fresh::Squares(_, _, bs) | Fresh::Buildings(bs) => bs.len(),
+            Fresh::Whole(_) => 0,
         }
     }
 }
@@ -678,11 +698,23 @@ impl Installing<'_> {
                         next += n;
                     }
                 }
-                put_buildings(self.map, self.surfaces, self.buildings, tree, bs, versions);
+                put_buildings(
+                    self.map,
+                    self.surfaces,
+                    self.buildings,
+                    (tree, ground),
+                    bs,
+                    versions,
+                );
             }
-            Fresh::Buildings(bs) => {
-                put_buildings(self.map, self.surfaces, self.buildings, tree, bs, versions)
-            }
+            Fresh::Buildings(bs) => put_buildings(
+                self.map,
+                self.surfaces,
+                self.buildings,
+                (tree, ground),
+                bs,
+                versions,
+            ),
         }
         *self.basis = after;
         *self.link_at = link_index(self.buildings);
@@ -690,12 +722,13 @@ impl Installing<'_> {
     }
 }
 
-/// Each building read again replaced on the route map, its floors' surfaces with it; `tree` as the part left it.
+/// Each building read again replaced on the route map, its floors' surfaces with it; `tree` as the part left it, and
+/// its open ground (whose gates are a building of its own, never one that left).
 fn put_buildings(
     map: &mut Map,
     surfaces: &mut BTreeMap<Id, Surface>,
     buildings: &mut Vec<Building>,
-    tree: &Tree,
+    (tree, ground): (&Tree, Id),
     bs: Vec<(Building, BTreeMap<Id, Surface>)>,
     versions: &Versions,
 ) {
@@ -704,8 +737,8 @@ fn put_buildings(
         map.replace(&b, &|n| versions.of(n));
         surfaces.extend(floors);
         let at = buildings.iter().position(|o| o.thing == b.thing);
-        // A building removed (S13): it leaves the list, with its floors' surfaces.
-        if tree.handle(b.thing).is_none() {
+        // A building removed (S13), or left with no floor (#5216): it leaves the list, with its floors' surfaces.
+        if b.thing != ground && !is_building(tree, b.thing) {
             if let Some(i) = at {
                 for f in buildings.remove(i).floors.keys() {
                     surfaces.remove(f);
@@ -958,6 +991,31 @@ impl Town {
         crate::commit::off_clock();
         // What the part changes is read in the tree before it is applied to it in place: no second copy (G3b).
         let ids = changed(base, part);
+        // A part that holds a floor, a stair or a ladder of its own, or a frame whose standing place a joint makes or
+        // unmakes (racks T9, T6), changes what is ground where it is: the ground is built again from the tree, as a
+        // start builds it, never left as it was. A part is in a thing (a bay, a crew) before or after the change; a
+        // building on the open ground before and after is read again where it is, as before (G3b).
+        let in_thing = |t: &Tree, id: &Id| {
+            t.handle(*id)
+                .and_then(|h| t.node(h))
+                .and_then(|n| n.parent())
+                .is_some_and(|p| p != ground)
+        };
+        // Read before the change and after it: a part made straight into a bay holds its floor only after.
+        let holds_ways = |t: &Tree, id: &Id| {
+            t.handle(*id)
+                .and_then(|h| t.children(h))
+                .unwrap_or(&[])
+                .iter()
+                .any(|&c| {
+                    t.node(c).is_some_and(|n| {
+                        replica::world_model::plain(n.kind().as_str())
+                            == crate::ground::scene::FLOOR
+                    })
+                })
+        };
+        let part_ways = |t: &Tree| ids.iter().any(|id| holds_ways(t, id) && in_thing(t, id));
+        let mut ways = part_ways(base);
         let mut touched = BTreeSet::new();
         grounds(base, &ids, &mut touched);
         let kids = basis.index.children(base, &ids);
@@ -969,6 +1027,7 @@ impl Town {
         base.apply(header, part)
             .map_err(|e| format!("{}: {}", e.name, e.detail))?;
         grounds(base, &ids, &mut touched);
+        ways = ways || part_ways(base);
         let mut versions = versions.clone();
         versions.bump(&touched);
         let (versions, base): (Versions, &Tree) = (versions, base);
@@ -976,7 +1035,12 @@ impl Town {
         // its own squares and the same read of its buildings (S13b), each built whole only when it must be.
         let class = |basis: &Basis| -> Result<(Fresh, Basis, Option<&'static str>), String> {
             let mut why = None;
-            let fresh = if touched.contains(&ground) {
+            let fresh = if ways {
+                why = Some("a part that holds a floor, a stair or a ladder moved");
+                Fresh::Whole(Box::new(Town::assemble_for(
+                    base, ground, &versions, basis.size, 1,
+                )?))
+            } else if touched.contains(&ground) {
                 // The buildings whose floors the part touches besides the open ground (a creator's new building, S13):
                 // read again with the squares cut again, not the whole ground built.
                 let things: Option<BTreeSet<Id>> = touched
@@ -1039,7 +1103,7 @@ impl Town {
                     for (id, surface) in surfaces {
                         floors.insert(*id, Arc::new(surface.clone()));
                     }
-                    if building.thing != ground && base.handle(building.thing).is_none() {
+                    if building.thing != ground && !is_building(base, building.thing) {
                         known.remove(&building.thing);
                         reaches.remove(&building.thing);
                     } else if building.thing != ground {
@@ -1287,8 +1351,9 @@ impl Town {
                 return None;
             }
             // A building removed with the squares it stood on cut again (S13): a building of nothing, whose floors
-            // and links leave the map, when its links met the open ground on those squares only.
-            if cut.is_some() && after.handle(thing).is_none() {
+            // and links leave the map, when its links met the open ground on those squares only. So is a thing left
+            // with no floor (#5216: a deck whose one floor was removed): a whole build lists it no longer.
+            if cut.is_some() && thing != ground && !is_building(after, thing) {
                 let elsewhere = |l: &Id| {
                     open.meets
                         .iter()
@@ -2541,6 +2606,15 @@ fn link_passage(
     if l.kind == Kind::Step && l.nodes[0] == l.nodes[1] {
         return Lies::Clear;
     }
+    // So is a step between two things' floors, neither the open ground (racks T9): the seam where two deck sheets meet,
+    // a boat beside a pier.
+    if l.kind == Kind::Step && !l.nodes.contains(&ground) {
+        return Lies::Clear;
+    }
+    // And a ladder's top on a floor its own thing holds (racks T6: a frame's standing place) is where one stands.
+    if l.kind == Kind::Ladder && node != ground && b.floors.contains_key(&node) {
+        return Lies::Clear;
+    }
     let doorway = l.kind == Kind::Doorway;
     let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
     let (mut on, mut at_end) = (false, false);
@@ -2771,7 +2845,9 @@ impl Ground for Grounds<'_> {
         if !self.map.get().may_reach(from.piece, to.piece) {
             return None;
         }
-        let r = self.map.route(self.tree, from, to, HANDS).ok()?;
+        // A place up a ladder is a place (racks T6: a frame's standing place): the walk there is the body's, which
+        // still needs the climb.
+        let r = self.map.route(self.tree, from, to, HANDS | CLIMB).ok()?;
         // As a body could walk it, not by the coarse search's middles of the squares' edges (#5012's short walk).
         Some(self.map.walked(&r, from, to) as i64 * 1000)
     }
@@ -2988,7 +3064,7 @@ impl Town {
         let (has, wet) = if size == Size::Standard {
             (self.water.has(body.id), self.water.here(&self.map, body))
         } else {
-            (HANDS, None)
+            (super::water::WALKER, None)
         };
         let (map, link_at, buildings) = if size == Size::Standard {
             (&mut self.map, &self.link_at, self.buildings.as_slice())
@@ -3107,8 +3183,9 @@ fn plan_on(
 impl<'a> View<'a> {
     /// `body`'s abilities, and its own wet piece when it stands in the water (#3225).
     fn wet(&self, body: &Body) -> (Mask, Option<Spot>) {
-        self.water
-            .map_or((HANDS, None), |w| (w.has(body.id), w.here(self.map, body)))
+        self.water.map_or((super::water::WALKER, None), |w| {
+            (w.has(body.id), w.here(self.map, body))
+        })
     }
 
     /// The ground `body` stands on (#3225).

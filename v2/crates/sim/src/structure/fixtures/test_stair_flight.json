@@ -1,0 +1,163 @@
+{
+  "format": "souls-entry/1",
+  "kind": "mars:test_stair_flight",
+  "owner": "thing",
+  "state": {
+    "carry_crew": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "hold_crew": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "links": {
+    "joint": {
+      "n": 1,
+      "from": "mars:test_two_by_four",
+      "most": 1,
+      "most_per": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip_back": {
+      "role": "grip",
+      "at_mm": [
+        -1000,
+        0,
+        0
+      ]
+    },
+    "grip_front": {
+      "role": "grip",
+      "at_mm": [
+        1000,
+        0,
+        0
+      ]
+    },
+    "bottom": {
+      "role": "stand",
+      "at_mm": [
+        -1550,
+        0,
+        0
+      ]
+    },
+    "hook": {
+      "role": "joint",
+      "connector": "sheet_edge",
+      "mates": "sheet_seat",
+      "at_mm": [
+        1250,
+        2010,
+        0
+      ],
+      "yaw_mdeg": 0
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      2500,
+      2010,
+      900
+    ],
+    "stairs": [
+      {
+        "from_mm": [
+          -1250,
+          0
+        ],
+        "to_mm": [
+          1250,
+          0
+        ],
+        "bottom_mm": 0,
+        "top_mm": 2010,
+        "width_mm": 900
+      }
+    ],
+    "floors": [
+      {
+        "top_mm": 2010,
+        "size_mm": [
+          500,
+          900
+        ],
+        "at_mm": [
+          1500,
+          0
+        ]
+      }
+    ]
+  },
+  "looks": {
+    "shape": {
+      "round": 3,
+      "palette": {
+        "timber": "#b8905a"
+      },
+      "tags": [
+        "stair",
+        "stringer",
+        "deck"
+      ],
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            990,
+            -431
+          ],
+          "size": [
+            2500,
+            60,
+            38
+          ],
+          "tint": "timber"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            990,
+            431
+          ],
+          "size": [
+            2500,
+            60,
+            38
+          ],
+          "tint": "timber"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A test stair flight, 2.5 m of run rising 2.01 m, its treads part of it: two to four carry it."
+  },
+  "card": {
+    "text": "card"
+  }
+}

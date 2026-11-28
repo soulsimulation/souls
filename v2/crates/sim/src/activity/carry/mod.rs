@@ -103,7 +103,7 @@ use replica::time::Micros;
 use replica::tree::{Handle, Tree};
 use replica::world_model::{Audience, plain};
 
-use crate::ground::scene::{FLOOR, GROUND, Scene, Terrain, Xz, xform_to};
+use crate::ground::scene::{FLOOR, GROUND, Scene, Terrain, Xz, carried, xform_to};
 use crate::ground::{BODY_HIGH, BODY_LOW};
 use crate::slots::hands::{Entry, Log};
 
@@ -844,6 +844,11 @@ impl Fixed {
         while let Some(h) = stack.pop() {
             let kids = tree.children(h).ok_or("a node that is gone")?;
             for &c in kids.iter() {
+                // A thing being carried is nowhere on the ground: neither it nor a floor it holds is fixed geometry,
+                // its own carriers' included (racks T9).
+                if carried(tree, c) {
+                    continue;
+                }
                 let n = tree.node(c).ok_or("a node that is gone")?;
                 if plain(n.kind().as_str()) == FLOOR {
                     let y = xform_to(tree, c, gh)?.pos.y;

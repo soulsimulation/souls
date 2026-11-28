@@ -153,9 +153,9 @@ struct World {
     family: Family,
 }
 
-fn load_world() -> (Tree, Rules) {
+fn load_world(world: &str) -> (Tree, Rules) {
     let kinds = parse_kinds(KINDS).expect("the kinds");
-    Tree::load(&parse_world(&kinds, WORLD).expect("the world")).expect("loads")
+    Tree::load(&parse_world(&kinds, world).expect("the world")).expect("loads")
 }
 
 fn header(zone: Id) -> Header {
@@ -175,7 +175,12 @@ fn header(zone: Id) -> Header {
 }
 
 fn world() -> World {
-    let (tree, rules) = load_world();
+    world_with(WORLD, &[])
+}
+
+/// [`world`] from `text`, with the further walkers `more` (each standing at 0, beside the first).
+fn world_with(text: &str, more: &[Id]) -> World {
+    let (tree, rules) = load_world(text);
     let next = tree.to_state().next;
     let ground_id = id(1);
     let corners = vec![
@@ -199,7 +204,11 @@ fn world() -> World {
     };
     let (with, without) = families();
     let mut c = Controller::new();
-    for (body, family) in [(id(2), with.clone()), (id(3), without)] {
+    let others = more.iter().map(|b| (*b, with.clone()));
+    for (body, family) in [(id(2), with.clone()), (id(3), without)]
+        .into_iter()
+        .chain(others)
+    {
         let placed = ground
             .place(body, frame, Vec3::ZERO, Quat::IDENTITY)
             .expect("placed");
@@ -207,7 +216,7 @@ fn world() -> World {
     }
     // The walker and the hound stand at 0; the stand at 0.3 m, the table at 0.4 m, the pole at 0.2 m, the switch at
     // 1.2 m: beyond the press's 0.6 m from the hand, within it from the tip of the 1 m pole.
-    let x = BTreeMap::from([
+    let mut x = BTreeMap::from([
         (id(2), 0),
         (id(3), 0),
         (id(4), 300_000),
@@ -217,6 +226,7 @@ fn world() -> World {
         (id(8), 1_200_000),
         (id(9), 300_000),
     ]);
+    x.extend(more.iter().map(|b| (*b, 0)));
     let tip = Name::new("souls:tip").expect("a name");
     World {
         log: Log::new(header(ground_id), rules, next),
@@ -299,7 +309,7 @@ impl World {
 
 /// Every node that lists `thing` as a child, after each part of the log, replayed from the start.
 fn holders_over_log(w: &World, thing: Id) -> Vec<Vec<Id>> {
-    let (mut tree, _) = load_world();
+    let (mut tree, _) = load_world(WORLD);
     let ids: Vec<Id> = (1..=8).map(id).collect();
     let holders = |tree: &Tree| {
         let Some(h) = tree.handle(thing) else {
@@ -570,5 +580,108 @@ fn a_thing_a_body_sits_in_is_not_taken() {
         w.parent(rider),
         (Some(cart), Some(1)),
         "the rider stays seated"
+    );
+}
+
+/// The world with a second walker (11) beside the first.
+const TWO_WALKERS: &str = r#"
+{
+  1: [],
+  2: {},
+  3: [
+    {1: 1, 2: "test:ground"},
+    {1: 2, 2: "test:walker", 3: 1},
+    {1: 3, 2: "test:hound", 3: 1},
+    {1: 4, 2: "test:stand", 3: 1},
+    {1: 5, 2: "test:table", 3: 1},
+    {1: 6, 2: "test:mug", 3: 4, 4: 1},
+    {1: 7, 2: "test:pole", 3: 1},
+    {1: 8, 2: "test:switch", 3: 1},
+    {1: 9, 2: "test:cart", 3: 1},
+    {1: 10, 2: "test:hound", 3: 9, 4: 1},
+    {1: 11, 2: "test:walker", 3: 1}
+  ],
+  4: []
+}
+"#;
+
+/// #5275: a thing in another body's hand is that body's. Two walkers take the mug at once: one contact transfers it,
+/// the other is refused `held-by-another` at contact, naming the holder, and the mug stays. A take asked after is
+/// refused the same way at once, with nothing started; and the forms' take effect (`amounts`, at its contact) is
+/// refused so too, while the holder's own take of what it holds is not.
+#[test]
+fn i5275_a_thing_in_another_bodys_hand_is_refused_held_by_another_naming_the_holder() {
+    let mut w = world_with(TWO_WALKERS, &[id(11)]);
+    let (one, two, mug) = (id(2), id(11), id(6));
+    let take = read_move(TAKE);
+    w.holding
+        .take(&mut cx!(w), one, &take, mug, 0)
+        .expect("one's take started");
+    w.holding
+        .take(&mut cx!(w), two, &take, mug, 0)
+        .expect("two's take started: the mug is on the stand");
+    let (contacts, _) = w.run();
+    println!("#5275 two takes at once: {contacts:?}");
+    assert_eq!(contacts.len(), 2);
+    assert!(contacts.contains(&Ok(())), "one contact transfers");
+    assert!(
+        contacts.contains(&Err("held-by-another")),
+        "the other is refused at contact"
+    );
+    let (holder, slot) = w.parent(mug);
+    let holder = holder.expect("held");
+    assert!(holder == one || holder == two, "in a walker's hand");
+    let other = if holder == one { two } else { one };
+    let parts = w.log.parts.len();
+    let r = w
+        .holding
+        .take(&mut cx!(w), other, &take, mug, 2_000_000)
+        .expect_err("refused");
+    println!("#5275 take from a hand: {}: {}", r.name, r.detail);
+    assert_eq!(r.name, "held-by-another");
+    assert!(r.detail.contains(&replica::world_model::show(holder)));
+    assert!(
+        w.moves.is_empty() && w.holding.is_empty(),
+        "nothing started"
+    );
+    assert_eq!(w.log.parts.len(), parts, "nothing written");
+    assert_eq!(w.parent(mug), (Some(holder), slot), "the mug stays");
+    // The forms' take effect, at its contact.
+    let slots: Vec<u64> = hands(&w.family).iter().map(|h| h.slot).collect();
+    let limits = crate::forms::amounts::Limits::default();
+    let stocks = crate::forms::Stocks::new();
+    let effect = |body: Id| {
+        crate::forms::amounts::Cx {
+            view: crate::forms::amounts::View {
+                tree: &w.tree,
+                out: &[],
+            },
+            limits: &limits,
+            defs: &Default::default(),
+            header: None,
+            body,
+            soul: body,
+            hands: &slots,
+            controller: &w.c,
+            node: mug,
+            reserved: &[],
+            now: 2_000_000,
+            stocks: &stocks,
+        }
+        .entries(
+            &mut Minter::new(Scope([0x52; 16])),
+            &skills::form_runner::Effect::Take {
+                what: skills::form_runner::Of::This,
+            },
+        )
+        .err()
+    };
+    let r = effect(other).expect("refused");
+    assert_eq!(r.name, "held-by-another");
+    assert!(r.detail.contains(&replica::world_model::show(holder)));
+    assert_ne!(
+        effect(holder).map(|r| r.name),
+        Some("held-by-another"),
+        "a body's own held thing is not another's"
     );
 }
