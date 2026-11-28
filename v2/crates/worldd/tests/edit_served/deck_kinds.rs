@@ -354,8 +354,10 @@ impl Yard {
     /// Souls `a` and `b` beside the bay at the ends of the joist `name` lying under slot `slot` (`dz` along the bay)
     /// take it and seat it there across the two 1.8 m beams. → the crew, still holding it
     fn joist(&mut self, (a, b): (usize, usize), name: &str, slot: &str, dz: i64) -> Id {
+        // The back 20 mm off the front's line: with both on one line along x this crew's take was refused `part-pose`
+        // (`OrientationSign`) on #5207's head 70a07fdca, an engine defect reported to that lane.
         self.walk(
-            &[(a, (-1_082, dz)), (b, (1_082, dz))],
+            &[(a, (-1_082, dz)), (b, (1_082, dz + 20))],
             "at a joist's ends, either side of the bay",
         );
         let c = self.crew(a, &[b]);
@@ -465,7 +467,7 @@ fn deck_two_carry_a_plywood_sheet_and_a_crew_seats_a_two_by_four_across_two_seat
 
     // The joist out again by its crew, and laid back where it lay.
     y.walk(
-        &[(0, (-1_082, J4_Z)), (5, (1_082, J4_Z))],
+        &[(0, (-1_082, J4_Z)), (5, (1_082, J4_Z + 20))],
         "Souls 1 and 6 back at the joist's ends",
     );
     let pair = y.crew(0, &[5]);
@@ -533,7 +535,7 @@ fn deck_a_crew_seats_a_plywood_sheet_on_two_joists_and_a_joist_under_it_stays() 
         "it stays, unheld"
     );
     y.walk(
-        &[(0, (-1_082, J1_Z)), (5, (1_082, J1_Z))],
+        &[(0, (-1_082, J1_Z)), (5, (1_082, J1_Z + 20))],
         "Souls 1 and 6 at joist 1's ends",
     );
     let out = y.crew(0, &[5]);
