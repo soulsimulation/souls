@@ -1354,7 +1354,11 @@ export class HumanViews {
     // a carried item (engine human.prop) shows in the hand whenever it is set; an activity's own prop while it runs
     const heldArmBlocked=!!(hasHands || gripping || v.grip || v.on || v.itemPose || v.handActuator || v.transfer || v.watering || v.cup || v.letGo || v.lastHandActuator || v.instrument || v.handHold || v.rps || v.partner || v.formPress?.length || proneW || lib.sleep || fp || v.sleepPose);
     const canonicalHeld = this.prepareHeld(v,heldArmBlocked);
-    const propKind = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute' : propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    // An observed empty native hand set cannot be replaced by a generic activity-default plate/book/tool.
+    // Explicit instrument owners are independent; legacy worlds without a held observation keep their defaults.
+    const propActivity=act || clipBody || lib.cur ? v.activity : '';
+    const propKind = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute'
+      : v.heldEntries?.entries.length===0&&!v.instrument ? null : propFor(propActivity,v.propWanted,v.instrument) : null;
     // a thing the body carries (the engine's prop) with no activity posing the hands is in one hand at the carry point,
     // standing or walking (below); a book is carried closed and read open
     const held = !!propKind && propKind === v.propWanted;
