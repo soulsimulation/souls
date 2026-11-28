@@ -345,8 +345,8 @@ async fn walk_goal_on_the_mars_camp_a_crew_walks_from_the_rack_pile_to_beside_th
 
 /// N4 item 6 (#5279 follow-up): a walk a crowd holds off its point keeps A2-4, never `walk.goal-moved`. Soul 1 walks to
 /// a clear point on the square and stands there; Soul 2 is sent to the same point: its place is the nearest the crowd
-/// leaves it, a ring out, and its walk is done there, said `done.as-near-as-the-crowd-allows`, not moved off a passage
-/// or off the ground.
+/// leaves it, a ring out, and its walk is done there, said `done.as-near-as-the-crowd-allows` with how far short (field
+/// 7) and the body that held it off (field 11), not moved off a passage nor stopped short.
 #[tokio::test(flavor = "multi_thread")]
 async fn walk_goal_a_walk_a_crowd_holds_off_its_point_is_done_as_near_as_the_crowd_allows() {
     let d = scratch("wgcrowd");
@@ -382,5 +382,17 @@ async fn walk_goal_a_walk_a_crowd_holds_off_its_point_is_done_as_near_as_the_cro
         "its end's word: {f:?}"
     );
     assert!(off >= 500_000, "held off the point by Soul 1: {off} µm");
+    let Some(Value::Uint(mm)) = f.get(&7) else {
+        panic!("how far, field 7: {f:?}")
+    };
+    assert!(
+        (i64::try_from(*mm).unwrap() - off / 1000).abs() <= 2,
+        "field 7 is how far short it stands"
+    );
+    assert_eq!(
+        f.get(&11),
+        Some(&body_of(&dir, ids[0]).to_value()),
+        "field 11 names the body that held it off: {f:?}"
+    );
     drop(served);
 }

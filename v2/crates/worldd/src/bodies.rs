@@ -100,6 +100,9 @@ pub const WALK: i64 = sim::gaits::WALK.speed;
 /// `walk.stopped-short`.
 pub const STOPPED_SHORT_MM: u64 = 400;
 pub const WALK_AGAIN: u8 = 6;
+/// How near its point another body stands to be named as the one that held a walk off it (A2-4), µm: two rings of the
+/// spot tables (`sim::spots::PITCH`).
+pub const HELD_OFF_NEAR: i64 = 2 * sim::spots::PITCH;
 /// How long after a walk stopped short it is sent again, µs: bodies in its way have time to move off (six times, three
 /// seconds).
 pub const WALK_AGAIN_AFTER: Micros = 500_000;
@@ -248,6 +251,9 @@ pub struct Bodies {
     /// its ground), how far, mm, and the passage it cleared (the thing it belongs to and its kind; none off the
     /// ground), until its answer is written.
     pub goal_moved: BTreeMap<Id, (u64, Option<(Id, sim::links::Kind)>)>,
+    /// Each walk done as near as the crowd allows (A2-4): the body nearest its point, which held it off, until its
+    /// answer is written (its end's field 11).
+    pub held_off: BTreeMap<Id, Id>,
     /// How many times each such walk was sent again while bodies moved round its goal ([`WALK_AGAIN`]).
     walked_again: BTreeMap<Id, u8>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
@@ -515,6 +521,7 @@ impl Bodies {
             short: BTreeSet::new(),
             stopped_short: BTreeMap::new(),
             goal_moved: BTreeMap::new(),
+            held_off: BTreeMap::new(),
             walked_again: BTreeMap::new(),
             took: BTreeMap::new(),
             walked_to: BTreeMap::new(),
@@ -1642,7 +1649,7 @@ impl Bodies {
 
     /// The walks whose target or end distance is still kept: none once every walk has ended and been written.
     pub fn walks_kept(&self) -> usize {
-        self.walked_to.len() + self.away_of.len() + self.walked_again.len()
+        self.walked_to.len() + self.away_of.len() + self.walked_again.len() + self.held_off.len()
     }
 
     /// How far `body` stands from point `p` (µm, the frame of node `node`) on the level, mm; `None` when it stands in
@@ -2203,6 +2210,26 @@ impl Bodies {
                 // 0.133: its target goes however it ended; a done walk keeps how far from it it ended, for its end,
                 // and ends facing it (0.135)
                 if let Some((t, point)) = self.walked_to.remove(&id).filter(|_| how.is_ok()) {
+                    // A2-4: who held it off, the other body nearest its point (within [`HELD_OFF_NEAR`]), for its end.
+                    if self.short.contains(&id)
+                        && let Some(p) = point
+                        && let Some(by) = self
+                            .runner
+                            .controller
+                            .bodies()
+                            .filter(|m| m.id != body && m.pose.frame.node == t)
+                            .map(|m| {
+                                let (dx, dz) = (m.pose.position.x - p.x, m.pose.position.z - p.z);
+                                (
+                                    (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt(),
+                                    m.id,
+                                )
+                            })
+                            .filter(|(d, _)| *d <= i128::from(HELD_OFF_NEAR))
+                            .min()
+                    {
+                        self.held_off.insert(id, by.1);
+                    }
                     // From the point it was sent to (a grip's place on the ground), not from the ground node it named; a walk
                     // that ended in another frame (overflowed from a floor onto the open ground) as before.
                     let gap = point

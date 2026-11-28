@@ -1432,6 +1432,8 @@ struct Clock {
     passage_next: Option<(Id, sim::links::Kind)>,
     /// [`Clock::form_ended`]'s words for the next note (#5063: a move made from afar), field 8.
     words_next: Option<String>,
+    /// The body that held a walk off its point, for the next note (field 11, A2-4).
+    held_next: Option<Id>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<EditQueue>,
@@ -1919,7 +1921,8 @@ pub const MOVE_ENDED: &str = "souls:move-ended";
 pub const TIMED_OUT: &str = "act.timed-out";
 /// How an act its own Soul stopped ends (#3705, a `souls:cancel` naming it), and the walk it drove with it.
 pub const STOPPED: &str = "act.stopped";
-/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done.
+/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done. Its
+/// end says how far from its point it stood (field 7, mm) and the body nearest that point, which held it off (field 11).
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
 /// A walk done at a place moved off the point it was sent to, that point in a doorway's or a stair's clearance (moved
 /// only as far as clears the passage itself) or off the ground a body stands on, as near as stands clear (#5254): said
@@ -4267,6 +4270,9 @@ impl Clock {
         if let Some(w) = self.words_next.take() {
             fields.insert(8, Value::Bytes(w.into_bytes()));
         }
+        if let Some(by) = self.held_next.take() {
+            fields.insert(11, by.to_value());
+        }
         if let Some((thing, kind)) = self.passage_next.take() {
             fields.insert(9, thing.to_value());
             fields.insert(10, Value::Bytes(passage_word(kind).as_bytes().to_vec()));
@@ -5773,6 +5779,7 @@ impl Clock {
             .and_then(|b| b.stopped_short.remove(&id));
         // #5254: one done at a place moved off its point (that point in a passage's clearance), within its tolerance.
         let moved = self.bodies.as_mut().and_then(|b| b.goal_moved.remove(&id));
+        let held = self.bodies.as_mut().and_then(|b| b.held_off.remove(&id));
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
@@ -5802,6 +5809,7 @@ impl Clock {
                     self.passage_next = why;
                     GOAL_MOVED
                 } else if short {
+                    self.held_next = held;
                     DONE_SHORT
                 } else {
                     "done"
@@ -7151,6 +7159,7 @@ pub fn start<S: Storage + 'static>(
         away_next: None,
         passage_next: None,
         words_next: None,
+        held_next: None,
         edits,
         editing,
         set_down: Vec::new(),
