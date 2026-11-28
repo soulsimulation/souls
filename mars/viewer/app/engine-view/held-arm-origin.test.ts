@@ -27,3 +27,8 @@ test('adjacent exact history carries a predecessor across cuts; real/foreign gap
  const foreign={...a,rulesVersion:'foreign'},gap=reader(b,[foreign,b]);try{assert.equal(gap.at(.1).heldArmOrigin!.history!.length,0,'known empty at current cut permits entry but foreign earlier chain is absent');}finally{gap.dispose();}
  const still=take([held(0),held(1900000,2)],40),unknown=reader(still,[foreign,still]);try{assert.equal(unknown.at(.1).heldArmKnown,false);}finally{unknown.dispose();}
 });
+
+test('partner-only contact boundaries invalidate free-arm origins without changing the activity',()=>{
+ const t=take([held(0),held(100000,2)]);t.changes.push([4,'person','partner','other'],[6,'person','partner',null]);t.changes.sort((a,b)=>a[0]-b[0]);
+ const r=reader(t);try{assert.equal(r.at(.15).heldArmKnown,true);assert.equal(r.at(.25).partner,'other');assert.equal(r.at(.25).heldArmKnown,false);assert.equal(r.at(.325).heldArmKnown,false,'ending an owner is not a fabricated free-arm predecessor');assert.equal(r.at(.325).heldArmOrigin,undefined);}finally{r.dispose();}
+});

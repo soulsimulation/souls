@@ -392,7 +392,7 @@ export class TakePeople {
     if(bodyModel!==current.bodyModel)return;
     const steps=this.walks.has(id)?this.gaitSteps(id):null,walk=steps?walkWeightAt(steps,tick,this.take.dt):0;
     // Native contact/locomotion handoffs retain their own authority; this free-arm layer never invents their origin.
-    if(walk>=.01||e.hands?.left||e.hands?.right||['grip','on','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','instrument'].some(k=>!!st[k])||Array.isArray(st.formPress)&&st.formPress.length)return;
+    if(walk>=.01||e.hands?.left||e.hands?.right||['grip','on','partner','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','instrument'].some(k=>!!st[k])||Array.isArray(st.formPress)&&st.formPress.length)return;
     return {id,p:current.p,yaw:current.yaw,walk:0,walkDist:0,activity,nativeHands,heldEntries,
       ...(bodyModel?{bodyModel}:{}),...(typeof st.prop==='string'?{prop:st.prop}:{}),
       ...(typeof st.baseActivity==='string'?{baseActivity:st.baseActivity}:{}),...(typeof st.seatHeight==='number'?{seatHeight:st.seatHeight}:{}),
@@ -401,7 +401,7 @@ export class TakePeople {
 
   private heldOrigin(id:string,tick:number,current:SampledHuman):{heldArmKnown:boolean;heldArmOrigin?:HeldArmOrigin}{
     if(heldArmBinding(current)===undefined)return {heldArmKnown:false};
-    const times=new Set<number>(),fields=new Set(['heldEntries','body','activity','baseActivity','seatHeight','hands','grip','on','prop','instrument','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','formPress']);
+    const times=new Set<number>(),fields=new Set(['heldEntries','body','activity','baseActivity','seatHeight','hands','grip','on','prop','instrument','partner','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','formPress']);
     for(const [take,offset]of this.heldWindows){
       let streams=this.heldStreams.get(take);if(!streams){streams=new Map();for(const [at,actor,key]of take.changes)if(fields.has(key)){const list=streams.get(actor)??[];if(list.at(-1)!==at)list.push(at);streams.set(actor,list);}this.heldStreams.set(take,streams);}
       for(const at of streams.get(id)??[])if(at+offset<=tick)times.add(at+offset);
@@ -544,7 +544,7 @@ export class TakePeople {
       let owners=this.clipOwnerStreams.get(take);
       if(!owners){
         owners=new Map();
-        const fields=new Set(['hands','grip','on','prop','instrument','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','formPress']);
+        const fields=new Set(['hands','grip','on','prop','instrument','partner','handHold','rps','handActuator','itemTransferV1','heldItemsV1','handTransferV1','carryContactV1','wateringV1','letGoV1','cupV1','formPress']);
         for(const [tick,id,field,value]of take.changes)if(fields.has(field)&&value&&(typeof value!=='object'||Object.keys(value).length)){
           let ticks=owners.get(id);if(!ticks)owners.set(id,(ticks=[]));ticks.push(tick);
         }
