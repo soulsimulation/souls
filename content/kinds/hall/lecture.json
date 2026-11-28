@@ -100,7 +100,7 @@
         { "kind": "box", "at": [0, 50, 0], "size": [1600, 100, 1600], "round": 10, "tint": "dais" },
         { "kind": "box", "at": [0, 130, 100], "size": [560, 60, 420], "round": 10, "tint": "wood" },
         { "kind": "box", "at": [0, 640, 100], "size": [380, 980, 300], "round": 12, "tint": "wood" },
-        { "kind": "box", "at": [0, 1160, 140], "size": [700, 50, 500], "round": 8, "pitch": -20000, "tint": "top" }
+        { "kind": "box", "at": [0, 1160, 180], "size": [700, 50, 500], "round": 8, "pitch": -20000, "tint": "top" }
       ],
       "palette": { "dais": "#6b5a4a", "wood": "#9a6b3f", "top": "#b98a57" },
       "tags": ["hall", "lectern", "lecture"]
