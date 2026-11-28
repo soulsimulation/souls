@@ -241,7 +241,12 @@ impl Deck {
     pub fn ok(&self, got: Got, what: &str) {
         println!("{what}: {got:?}");
         if got.kind != 1 {
-            for l in self._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
+            for l in self
+                ._s
+                .lines
+                .try_iter()
+                .filter(|l| l.starts_with("worldd:"))
+            {
                 println!("  {l}");
             }
             panic!("{what}: {got:?}");
@@ -270,7 +275,10 @@ impl Deck {
 
     /// `part:put` into the site's `slot`, naming the parts it joins when `joins` is given.
     pub fn put(&mut self, k: usize, c: Id, slot: &str, joins: Option<&[Id]>) -> Got {
-        let mut p = BTreeMap::from([(1, self.site.to_value()), (2, Value::Uint(self.slots[slot]))]);
+        let mut p = BTreeMap::from([
+            (1, self.site.to_value()),
+            (2, Value::Uint(self.slots[slot])),
+        ]);
         if let Some(j) = joins {
             p.insert(4, Value::Array(j.iter().map(|i| i.to_value()).collect()));
         }
@@ -319,9 +327,9 @@ impl Deck {
             };
             rail = Some(c);
             let got = self.take(0, c, rails[k]);
-        self.ok(got, "a rail taken");
+            self.ok(got, "a rail taken");
             let got = self.put(0, c, slot, None);
-        self.ok(got, slot);
+            self.ok(got, slot);
             assert_eq!(joints_at(&self.w, rails[k]), 2, "{slot} joins both bents");
         }
         let got = self.leave(1, hold_a);
@@ -463,7 +471,11 @@ fn deck_joists_on_rails_take_a_sheet_and_a_joist_under_it_stays_until_the_sheet_
         "Souls 3 and 4 under the back joist's ends",
     );
     let got = k.unseat(2, under, jb);
-    refused_as(&got, "support.none", "the back joist out from under the sheet");
+    refused_as(
+        &got,
+        "support.none",
+        "the back joist out from under the sheet",
+    );
     let named = show(sheet);
     assert!(
         got.detail.contains(&named) && got.detail.contains("would rest on"),
@@ -508,14 +520,25 @@ fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
     at.expect("a body row")
 }
 
-/// Every row of body `body` in the log, in order: the node it was on and its place there.
-fn body_rows(w: &Seeded, body: Id) -> Vec<(Id, Vec3)> {
+/// Every row of body `body` in the log, in order, from every part (those with no effect too): the tick, the node it
+/// was on and its place there.
+fn body_ticks(w: &Seeded, body: Id) -> Vec<(u64, Id, Vec3)> {
     let mut out = Vec::new();
-    for p in logged(w) {
+    for r in sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+    {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let p = replica::effects::Part::read(&r).unwrap();
+        let Some(Value::Uint(t)) = p.rest.get(&answers::TICK) else {
+            continue;
+        };
         if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
             for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
                 if b == body {
-                    out.push((pose.frame.node, pose.position));
+                    out.push((*t, pose.frame.node, pose.position));
                 }
             }
         }
@@ -761,7 +784,12 @@ impl Bay {
     fn ok(&self, got: Got, what: &str) {
         println!("{what}: {got:?}");
         if got.kind != 1 {
-            for l in self._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
+            for l in self
+                ._s
+                .lines
+                .try_iter()
+                .filter(|l| l.starts_with("worldd:"))
+            {
                 println!("  {l}");
             }
             panic!("{what}: {got:?}");
@@ -863,7 +891,11 @@ impl Bay {
     fn deck(&mut self) {
         let high = self.high;
         for (k, (j, slot)) in self.joists.into_iter().zip(["j2", "j3", "j4"]).enumerate() {
-            let c = self.crew_at((2, 3), (1_082, JOISTS_Z[k]), "Souls 3 and 4 to a 2x4's ends");
+            let c = self.crew_at(
+                (2, 3),
+                (1_082, JOISTS_Z[k]),
+                "Souls 3 and 4 to a 2x4's ends",
+            );
             let got = self.act(2, "part:take", c, j);
             self.ok(got, "a 2x4 taken");
             let got = self.put(2, c, slot, Some(&high));
@@ -884,7 +916,11 @@ impl Bay {
             self.ok(got, "a sheet taken");
             let got = self.put(0, c, slot, Some(&on));
             self.ok(got, slot);
-            assert_eq!(joints_at(&self.w, self.sheets[k]), 2, "{slot}: its two joints");
+            assert_eq!(
+                joints_at(&self.w, self.sheets[k]),
+                2,
+                "{slot}: its two joints"
+            );
             self.leave(0, c);
             self.leave(1, c);
         }
@@ -930,7 +966,10 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
     );
 
     // Soul 5 walks up onto the first sheet, then across onto the second.
-    k.walk(&[(4, Bay::at(-4_500, STAIR_AT[1]))], "Soul 5 to the flight's foot");
+    k.walk(
+        &[(4, Bay::at(-4_500, STAIR_AT[1]))],
+        "Soul 5 to the flight's foot",
+    );
     let walker = body_of(&k.w, k.w.souls[4]);
     // The served tree's geometry, read afresh: a body stands on the first sheet's top.
     assert!(
@@ -953,32 +992,61 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
         at
     };
     // Past the stair's top, more than 0.7 m in from the deck's edge: no stopping on a stair.
-    let (on, at) = up(&mut k, decks[0], v3(400_000, 19_000, 0), "Soul 5 up onto the first sheet");
+    let (on, at) = up(
+        &mut k,
+        decks[0],
+        v3(400_000, 19_000, 0),
+        "Soul 5 up onto the first sheet",
+    );
     assert_eq!((on, at.y), (decks[0], 19_000), "on the first sheet's top");
     assert!(at.x > 0, "past the stair's top: {at:?}");
-    let (on, at) = up(&mut k, decks[1], v3(400_000, 19_000, 100_000), "Soul 5 across to the second sheet");
+    let (on, at) = up(
+        &mut k,
+        decks[1],
+        v3(400_000, 19_000, 100_000),
+        "Soul 5 across to the second sheet",
+    );
     assert_eq!((on, at.y), (decks[1], 19_000), "on the second sheet's top");
 
     // Nothing under it leaves.
     let under = {
         k.walk(
-            &[(2, Bay::at(-1_264, SHEETS_Z[1])), (3, Bay::at(1_264, SHEETS_Z[1]))],
+            &[
+                (2, Bay::at(-1_264, SHEETS_Z[1])),
+                (3, Bay::at(1_264, SHEETS_Z[1])),
+            ],
             "Souls 3 and 4 under the second sheet's ends",
         );
         k.crew(2, &[3])
     };
     let got = k.act(2, "part:unseat", under, sheets[1]);
-    refused_as(&got, "part.stood-on", "the second sheet out from under Soul 5");
-    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
+    refused_as(
+        &got,
+        "part.stood-on",
+        "the second sheet out from under Soul 5",
+    );
+    assert!(
+        got.detail.contains(&show(walker)),
+        "names the body: {got:?}"
+    );
     assert_eq!(where_is(&k.w, sheets[1]).0, Some(k.bay), "the sheet stays");
     assert_eq!(body_on(&k.w, walker).0, decks[1], "the body where it was");
 
     // Down again, and the sheet comes out.
-    let (on, at) = up(&mut k, g, Bay::at(-5_000, 3_000), "Soul 5 down to the ground");
+    let (on, at) = up(
+        &mut k,
+        g,
+        Bay::at(-5_000, 3_000),
+        "Soul 5 down to the ground",
+    );
     assert_eq!((on, at.y), (g, 0), "on the open ground");
     let got = k.act(2, "part:unseat", under, sheets[1]);
     k.ok(got, "the second sheet out, nobody on it");
-    assert_eq!(where_is(&k.w, sheets[1]).0, Some(under), "the sheet rides its crew");
+    assert_eq!(
+        where_is(&k.w, sheets[1]).0,
+        Some(under),
+        "the sheet rides its crew"
+    );
 }
 
 /// Racks T6, the brief's task 4, in a served world by Souls' intents: a Soul climbs a frame to its 1.8 m standing place.
@@ -1007,48 +1075,50 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
         k.fresh(perch, v3(0, 1_800_000, -488_000)).is_some(),
         "a town built afresh from the served tree stands a body on the standing place"
     );
-    let before = body_rows(&k.w, walker).len();
+    let before = body_ticks(&k.w, walker).len();
     let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
     k.hands[4].send("eden:walk", perch, to);
     let got = socket_end(&mut k.hands[4].s);
     println!("Soul 5 climbs to the 1.8 m standing place: {got:?}");
     k.ok(got, "the climb ends on the standing place");
-    let rows = body_rows(&k.w, walker);
-    let (on, at) = *rows.last().expect("rows");
+    let rows = body_ticks(&k.w, walker);
+    let (_, on, at) = *rows.last().expect("rows");
     println!("the body on {} at {at:?}", show(on));
-    for (n, p) in &rows[before.saturating_sub(2)..] {
-        println!("  row: on {} at {p:?}", show(*n));
-    }
     assert_eq!(on, perch, "the body stands on the frame's standing place");
     assert_eq!(at.y, 1_800_000, "at the beam level");
-    let climb: Vec<Vec3> = rows[before..]
+    // The climb is a track the controller follows a sample a tick; a body on a track writes no body row (the page
+    // lane's gap, #5256), so the rows show it last at the ladder's foot and next on the place. No jump: the time
+    // between is at least the rise at the walk's speed (1.4 m/s), in 50 ms ticks.
+    let first = rows[before..]
         .iter()
-        .filter(|(n, p)| *n == g && p.y > 0)
-        .map(|(_, p)| *p)
-        .collect();
-    let mut most = 0;
-    for w in climb.windows(2) {
-        let d = |a: i64, b: i64| i128::from(a - b) * i128::from(a - b);
-        let step = (d(w[0].x, w[1].x) + d(w[0].y, w[1].y) + d(w[0].z, w[1].z)).isqrt() as i64;
-        most = most.max(step);
-    }
-    let high = climb.iter().map(|p| p.y).max().unwrap_or(0);
+        .position(|r| r.1 == perch)
+        .map(|i| before + i)
+        .expect("a row on the standing place");
+    let (t0, n0, foot) = rows[first - 1];
+    let (t1, ..) = rows[first];
     println!(
-        "the climb: {} rows off the ground, the highest {} mm up, the longest step between two {} mm",
-        climb.len(),
-        high / 1000,
-        most / 1000
+        "the climb: last on {} at {foot:?} at tick {t0}, first on the place at tick {t1}",
+        show(n0)
     );
-    assert!(climb.len() >= 10, "sampled on the way up: {}", climb.len());
-    assert!(high > 1_500_000, "up the ladder: {high}");
-    assert!(most <= 300_000, "no jump on the way: {most}");
+    assert_eq!((n0, foot.y), (g, 0), "it leaves from the ground");
+    assert!(
+        (t1 - t0) * 50_000 * 1_400_000 / 1_000_000 >= 1_800_000,
+        "no jump: {} ticks for a 1.8 m rise",
+        t1 - t0
+    );
 
     // A second step, off the place's outer edge (0.9 m from the face), is refused.
-    let off = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-1_300_000)]))]);
+    let off = BTreeMap::from([(
+        1,
+        Value::Array(vec![int(0), int(1_800_000), int(-1_300_000)]),
+    )]);
     k.hands[4].send("eden:walk", perch, off);
     let got = socket_end(&mut k.hands[4].s);
     println!("Soul 5 steps off the edge: {got:?}");
-    assert_eq!(got.kind, 2, "a step off the standing place's edge is refused: {got:?}");
+    assert_eq!(
+        got.kind, 2,
+        "a step off the standing place's edge is refused: {got:?}"
+    );
     assert_eq!(body_on(&k.w, walker).0, perch, "the body where it was");
 
     // Lowering the frame under it is refused.
@@ -1059,7 +1129,10 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     let c = k.crew(0, &[1]);
     let got = k.act(0, "part:unseat", c, frame);
     refused_as(&got, "part.stood-on", "frame 1 lowered with Soul 5 on it");
-    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
+    assert!(
+        got.detail.contains(&show(walker)),
+        "names the body: {got:?}"
+    );
     assert_eq!(where_is(&k.w, frame).0, Some(k.bay), "the frame stays");
     k.leave(0, c);
     k.leave(1, c);
