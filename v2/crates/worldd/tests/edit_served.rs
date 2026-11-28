@@ -3029,14 +3029,15 @@ fn act(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, verb: &str, targ
 /// 0.135 A2, review round seven: parts rest at the ground's height. On ground raised 1 m (terrain tiles, as Eden's),
 /// a lone holder's lay-down rests frame A on the ground beside the bay, not 1 m under it; a retiring last holder out of
 /// reach lays it flat where it stands, on its own base; and, with a Soul standing where it would lie, leaves it standing
-/// on its base, with no jump.
+/// on its base, with no jump. Under the two-holder rule (a 12 ft frame's `hold_crew` is two, N4 item 5) a frame is put
+/// in its slot by two, and is held by one alone only once the other retires (the kept hold): each case seats it by
+/// two and retires one first. Six Souls: four of them retire.
 #[test]
-#[ignore = "#5067 task 4 (coordinator, 27 Nov): its choreography stands crews 2.2 m off; rewrite for carriers at their grips, after raise and lower"]
 fn a2_parts_rest_at_the_grounds_height() {
     const RAISE: i64 = 1_000_000;
     let d = scratch("a2raised");
     let (facts, slots) = yard_world_raised(&d, RAISE / 1000);
-    let w = seed_entries(&d, &facts, 4, (36, -20), Some(&d.join("entries")));
+    let w = seed_entries(&d, &facts, 6, (36, -20), Some(&d.join("entries")));
     let socket = d.join("s");
     let s = serve_with(&w, &socket, None);
     s.line("listening ", 120);
@@ -3115,7 +3116,8 @@ fn a2_parts_rest_at_the_grounds_height() {
             .1
     };
     let ends = frame_ends;
-    // A crew of Souls `ab` takes frame A from where it lies, puts it in upright_a, and Soul `ab.0` lets go.
+    // A crew of Souls `ab` takes frame A from where it lies, puts it in upright_a, and Soul `ab.0` retires (it leaves
+    // the world): Soul `ab.1` keeps the hold alone (a seated frame's holder may not just let go).
     let seat = |hands: &mut [Hand], ab: (usize, usize), what: &str| {
         let (p, q) = frame_ends_of(&w, fa);
         both(hands, ab, p, q, what);
@@ -3135,12 +3137,9 @@ fn a2_parts_rest_at_the_grounds_height() {
             BTreeMap::from([(1, bay.to_value()), (2, Value::Uint(slots["upright_a"]))]),
         );
         assert_eq!(got.kind, 1, "{what}: put: {got:?}");
-        let got = hands[ab.0].act("activity:leave", c, BTreeMap::new());
-        assert_eq!(got.kind, 1, "{what}: one lets go: {got:?}");
-        // It steps away: it stood beside the frame's edge, where the frame would be laid.
-        hands[ab.0].walk_to(g, v3(ua.x - 4_000_000, 0, ua.z - 4_000_000));
+        hands[ab.0].send_to(answers::LEAVE, None, BTreeMap::new());
         let got = socket_end(&mut hands[ab.0].s);
-        assert_eq!(got.kind, 1, "{what}: and steps away: {got:?}");
+        assert_eq!(got.kind, 1, "{what}: Soul {} retires: {got:?}", ab.0 + 1);
         c
     };
     let on_ground = |what: &str, mid: i64| {
@@ -3171,16 +3170,16 @@ fn a2_parts_rest_at_the_grounds_height() {
     assert_eq!(hands[1].act("activity:leave", c, BTreeMap::new()).kind, 1);
 
     // A retiring last holder out of reach: laid flat where it stands.
-    seat(&mut hands, (0, 1), "frame A in again");
+    seat(&mut hands, (1, 2), "frame A in again");
     one(
         &mut hands,
-        1,
+        2,
         v3(ua.x + 2_000_000, 0, ua.z),
-        "Soul 2 2 m off",
+        "Soul 3 2 m off",
     );
-    hands[1].send_to(answers::LEAVE, None, BTreeMap::new());
-    let got = socket_end(&mut hands[1].s);
-    assert_eq!(got.kind, 1, "Soul 2 leaves the world: {got:?}");
+    hands[2].send_to(answers::LEAVE, None, BTreeMap::new());
+    let got = socket_end(&mut hands[2].s);
+    assert_eq!(got.kind, 1, "Soul 3 leaves the world: {got:?}");
     let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
     assert!(
         why.contains(&(fa, "souls:holder-left-flat".into())),
@@ -3190,29 +3189,29 @@ fn a2_parts_rest_at_the_grounds_height() {
     assert!(lying, "laid flat");
     on_ground("laid flat where it stood", mid);
 
-    // With Soul 4 standing where it would lie: left standing on its base.
-    seat(&mut hands, (0, 2), "frame A in a third time");
+    // With Soul 6 standing where it would lie: left standing on its base.
+    seat(&mut hands, (3, 4), "frame A in a third time");
     one(
         &mut hands,
-        3,
+        5,
         v3(ua.x + 1_000_000, 0, ua.z),
-        "Soul 4 where frame A would lie",
+        "Soul 6 where frame A would lie",
     );
     one(
         &mut hands,
-        2,
+        4,
         v3(ua.x, 0, ua.z - 2_000_000),
-        "Soul 3 2 m off",
+        "Soul 5 2 m off",
     );
-    hands[2].send_to(answers::LEAVE, None, BTreeMap::new());
-    let got = socket_end(&mut hands[2].s);
-    assert_eq!(got.kind, 1, "Soul 3 leaves the world: {got:?}");
-    // Its set-down goes through the walkers' maps, which a Soul beside it moving holds back: Soul 4 walks off.
+    hands[4].send_to(answers::LEAVE, None, BTreeMap::new());
+    let got = socket_end(&mut hands[4].s);
+    assert_eq!(got.kind, 1, "Soul 5 leaves the world: {got:?}");
+    // Its set-down goes through the walkers' maps, which a Soul beside it moving holds back: Soul 6 walks off.
     one(
         &mut hands,
-        3,
+        5,
         v3(ua.x + 4_000_000, 0, ua.z),
-        "Soul 4 walks off",
+        "Soul 6 walks off",
     );
     let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
     assert!(
