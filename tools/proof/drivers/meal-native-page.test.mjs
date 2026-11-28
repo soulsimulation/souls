@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { proveMealCreator, mealWorldPage, mealNodeIdentity, mealArchiveJSON, mealBrowserInstall, mealBrowserStop, mealCheckpoint, mealFinalization } from './meal-native-page.mjs';
+import {createHash} from 'node:crypto';
+import { wearMealBody, mealBodyReadiness, proveMealCreator, mealWorldPage, mealNodeIdentity, mealArchiveJSON, mealBrowserInstall, mealBrowserStop, mealCheckpoint, mealFinalization } from './meal-native-page.mjs';
 
 class PublicWorker extends EventTarget {
   message(data) { this.dispatchEvent(new MessageEvent('message', { data })); }
@@ -240,3 +241,27 @@ for(const [label,options,why] of [
 ]) test(`creator rejects ${label} without fallback`,async()=>{
   const f=creatorFixture(options);await assert.rejects(f.run(),why);assert.equal(f.calls.filter(words=>words[0]==='place').length,1);
 });
+
+
+function declaredFixture(t,{refused=false,badEntryHash=false}={}) {
+ const root=resolve('.local/meal-body-source-tests');mkdirSync(root,{recursive:true});const dir=mkdtempSync(join(root,'declared-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+ const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),kind='ab'.repeat(32),resources=[['souls:hand-left',2,1],['souls:hand-right',2,2],['souls:voice',4]];
+ const entry=JSON.stringify({kindHash:kind,resources});writeFileSync(join(dir,'monster.json'),entry);
+ const catalogue=JSON.stringify({format:'souls/bodies/1',bodies:[{preset:'monster',hash:kind,entry:'monster.json',entryHash:badEntryHash?'0'.repeat(64):hash(entry)}]});writeFileSync(join(dir,'bodies.json'),catalogue);
+ const calls=[],rows=[];let verified=0;return{calls,rows,resources,kind,run:()=>wearMealBody({seat:{label:'diner',cli:async(...words)=>{calls.push(words);return refused?{ok:false,phase:'refused',code:'body-unknown'}:{ok:true,phase:'done',sequence:7};}},bodies:{catalogue:join(dir,'bodies.json'),sha256:hash(catalogue)},verify:()=>verified++,record:row=>rows.push(row)}),verified:()=>verified};
+}
+test('declared meal wear uses the ordinary completed receipt and exact qualified companion identity',async t=>{
+ const f=declaredFixture(t),r=await f.run();assert.deepEqual(f.calls,[['wear','monster','--wait']]);assert.equal(f.verified(),1);assert.equal(r.hash,f.kind);assert.equal(r.sequence,7);assert.deepEqual(r.resources,f.resources);assert.equal(f.rows.length,1);
+});
+test('wear refusal and companion drift stop without choosing a substitute body',async t=>{
+ const refused=declaredFixture(t,{refused:true});await assert.rejects(refused.run(),/body-unknown/);assert.equal(refused.calls.length,1);
+ const drift=declaredFixture(t,{badEntryHash:true});await assert.rejects(drift.run(),/entryHash drift/);assert.equal(drift.calls.length,0);
+});
+test('page qualification requires actual native hash and verified hand mapping while default stays unknown',async()=>inPage(async page=>{
+ const hash='ab'.repeat(32),resources=[['souls:hand-left',2,1],['souls:hand-right',2,2]],expected={preset:'monster',hash,resources};
+ mealBrowserInstall({bowl:'bowl',bodies:['diner-body','cook-body']});const worker=new page.Worker();worker.message({t:'snapshot',s:{nodes:[node('diner-body',{body:hash}),node('cook-body')]}});
+ const drawn={souls:[{id:'diner',entityId:'draw-diner'},{id:'cook',entityId:'draw-cook'}],entities:{'draw-diner':{state:{body:{nativeBody:'diner-body',nativeKindHash:hash,nativeResources:resources}}},'draw-cook':{state:{}}}};
+ page.__soulsEntity={gameFrame:()=>drawn};const args={declared:'diner-body',defaultBody:'cook-body',soul:'diner',defaultSoul:'cook',expected};
+ assert.equal(mealBodyReadiness(args).nativeHash,hash);drawn.entities['draw-diner'].state.body.nativeResources=[];assert.equal(mealBodyReadiness(args),null,'unverified/missing companion mapping never passes');drawn.entities['draw-diner'].state.body.nativeResources=resources;
+ drawn.entities['draw-cook'].state.body={nativeResources:resources};assert.equal(mealBodyReadiness(args),null,'declared mapping must not leak onto default control');mealBrowserStop();
+}));

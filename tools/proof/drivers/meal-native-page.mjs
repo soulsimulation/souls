@@ -1,10 +1,11 @@
 // Source-only adapter until separately approved runtime accounting and immutable artifacts exist.
 // The unchanged runOwnedAttempt owns every world, browser, resident and finite command.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import {createHash} from 'node:crypto';
+import { dirname, join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
-import { meal, foundId } from '../../playtest/meal/meal.mjs';
+import { meal, foundId, requireDone } from '../../playtest/meal/meal.mjs';
 import { requireConferenceRecipe, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
@@ -77,6 +78,23 @@ export async function proveMealCreator({ creator, record = () => {}, signal }) {
     qualification: 'Ordinary exact-revision place and returned-ID plain-kind readback; optional admission metadata may be unknown. No readback revision, post-boot drawing, meal consumption or contact claim.' };
 }
 
+/** Ordinary wear is a real native command/receipt; catalogue identity remains a separate observed page check. */
+export async function wearMealBody({seat,bodies,verify,record=()=>{},signal}) {
+  verify();signal?.throwIfAborted();
+  const bytes=readFileSync(bodies.catalogue);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),bodies.sha256,'meal catalogue receipt drift');
+  const catalogue=JSON.parse(bytes),rows=catalogue.bodies?.filter(row=>row.preset==='monster')??[];
+  assert.equal(rows.length,1,'meal declared monster preset must be unique');
+  const row=rows[0];assert(/^[a-z][a-z0-9_]*\.json$/.test(row.entry)&&/^[a-f0-9]{64}$/.test(row.hash),'meal declared body identity malformed');
+  const companionBytes=readFileSync(join(dirname(bodies.catalogue),row.entry)),companion=JSON.parse(companionBytes);
+  assert.equal(companion.kindHash,row.hash,'meal companion kind differs from admitted preset');
+  assert.equal(createHash('sha256').update(companionBytes).digest('hex'),row.entryHash,'meal companion entryHash drift');
+  assert.deepEqual(companion.resources.filter(r=>r[0]==='souls:hand-left'||r[0]==='souls:hand-right').map(r=>r.slice(0,2)),[['souls:hand-left',2],['souls:hand-right',2]],'meal declared body requires actual named hands');
+  const words=['wear',row.preset,'--wait'],answer=await seat.cli(...words);record({role:seat.label,words,answer});requireDone(answer,'wear declared meal body');assert(Number.isSafeInteger(answer.sequence)&&answer.sequence>0,'meal wear sequence missing');
+  return {preset:row.preset,hash:row.hash,entryHash:row.entryHash,resources:companion.resources,sequence:answer.sequence,
+    qualification:'Declared existing admitted preset only; default body resource mapping remains unproved.'};
+}
+
 export async function prepare({ base, paths, recipe, signal }) {
   requireConferenceRecipe(recipe);
   const state = { rows: [], checkpoints: [], seats: [], installed: false }; states.set(paths.dir, state);
@@ -87,6 +105,7 @@ export async function prepare({ base, paths, recipe, signal }) {
   for (const seat of state.seats) seat.run = async (...words) => {
     const answer = await seat.cli(...words); state.rows.push({ role: seat.label, words, answer }); return answer;
   };
+  if(recipe.bodies)state.declaredBody=await wearMealBody({seat:state.seats[2],bodies:recipe.bodies,verify:recipe.verify,signal,record:row=>state.rows.push(row)});
   state.bowl = foundId(await state.seats[0].run('find', 'meal-bowl'), 'meal-bowl');
   state.creator = await pairConferenceCreator({ recipe, paths, bundle, signal });
   const creatorRows = [];
@@ -181,6 +200,21 @@ export function mealBrowserInstall({ bowl, bodies, identities, limit = 361, maxB
 }
 
 /** Serialized page read, deliberately separate native observation and depicted clocks. No hand labels inferred. */
+/** Actual public hash plus verified companion mapping, and an independent default-body negative control. */
+export function mealBodyReadiness({declared,defaultBody,soul,defaultSoul,expected}) {
+  const observer=window.__mealPayloadObserver,world=window.__soulsEntity;if(!observer||!world?.gameFrame)return null;
+  if(observer.failures.length)throw Error(observer.failures.join('; '));
+  const frame=world.gameFrame(),person=(who)=>{const people=frame.souls?.filter(s=>s.id===who)??[];return people.length===1?frame.entities?.[people[0].entityId]:null;};
+  const actual=person(soul)?.state?.body,control=person(defaultSoul)?.state?.body;
+  const workers=observer.workers.filter(w=>w.latest.get(declared)?.body===expected.hash&&w.latest.has(defaultBody));if(workers.length!==1)return null;
+  const raw=workers[0].latest.get(declared),negative=workers[0].latest.get(defaultBody);
+  if(negative.body!==undefined||control?.nativeResources!==undefined||control?.nativeKindHash!==undefined)return null;
+  if(actual?.nativeBody!==declared||actual?.nativeKindHash!==expected.hash||JSON.stringify(actual?.nativeResources)!==JSON.stringify(expected.resources))return null;
+  return {preset:expected.preset,nativeHash:raw.body,depictedHash:actual.nativeKindHash,resources:actual.nativeResources,
+    defaultControl:{nativeHash:negative.body??null,resources:control?.nativeResources??null},
+    qualification:'Declared-body metadata observed; default-body mapping remains unknown. No physical contact claim.'};
+}
+
 export function mealCheckpoint({ bowl, holder, soul, soup, phase }) {
   const observer = window.__mealPayloadObserver, world = window.__soulsEntity;
   if (!observer || !world?.gameFrame) return null;
@@ -260,6 +294,12 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   const snapshot = async label => writeFileSync(join(paths.dir, `meal-accessibility-${label}.yml`), await page.locator('body').ariaSnapshot(), { flag: 'wx' });
   await nativeCameraMode(page, 'manual', snapshot); await page.keyboard.press('Escape');
   assert(await page.evaluate(() => !!window.__mealPayloadObserver), 'meal observer not installed'); state.installed = true;
+  if(state.declaredBody){
+    const handle=await page.waitForFunction(mealBodyReadiness,{declared:mealNodeIdentity(state.seats[2].body).worker,defaultBody:mealNodeIdentity(state.seats[0].body).worker,soul:state.seats[2].soul,defaultSoul:state.seats[0].soul,expected:state.declaredBody},{timeout:8000});
+    state.bodyReadiness=await handle.jsonValue();await handle.dispose();save(paths,'command-meal-body-readiness.json',{wear:state.declaredBody,observed:state.bodyReadiness});
+    check('meal-declared-body-and-default-control',!!state.bodyReadiness,state.bodyReadiness);
+  }
+
   const observe = async row => {
     signal.throwIfAborted();
     const seat = state.seats.find(s => s.label === row.role);
