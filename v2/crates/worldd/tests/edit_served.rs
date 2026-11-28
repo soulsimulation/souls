@@ -5018,7 +5018,9 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     use sim::activity::carry::raise::{SIDE, Spec};
     let d = scratch("raiseinto");
     let (facts, slots) = yard_world(&d);
-    let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
+    // Two raise it; two more walk past the bay all through the raise and its end (the camp's walkers: its standing
+    // commit was refused `edit.body-stale` while bodies moved, #5067).
+    let w = seed_entries(&d, &facts, 4, (52, -20), Some(&d.join("entries")));
     let (creator_id, creator_actor) = creator(0xa8);
     static_creator(&w, creator_id);
     let socket = d.join("s");
@@ -5082,7 +5084,7 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     for (k, p) in stations.iter().enumerate() {
         hands[k].walk_to(g, *p);
     }
-    for h in hands.iter_mut() {
+    for h in hands[..2].iter_mut() {
         let e = socket_end(&mut h.s);
         assert_eq!(e.kind, 1, "to its raise station: {e:?}");
     }
@@ -5109,6 +5111,12 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     let got = hands[0].act("part:raise", crew, into(slots["upright_a"]));
     println!("raised into upright_a: {got:?}");
     assert_eq!(got.kind, 1, "the raise begins: {got:?}");
+    // The two walk to and fro 3 m west of the bay while it is raised, slid and seated.
+    let lanes = [(v3(53 * M, 0, -20 * M), v3(53 * M, 0, -30 * M)), (v3(52 * M, 0, -30 * M), v3(52 * M, 0, -20 * M))];
+    let mut leg = [0usize; 2];
+    for (k, (a, _)) in lanes.iter().enumerate() {
+        hands[2 + k].walk_to(g, *a);
+    }
     // Raised, slid and seated, held by both.
     let t0 = std::time::Instant::now();
     let held = loop {
@@ -5121,6 +5129,17 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
             .next_back();
         if let Some(h) = h.filter(|h| h.phase == HELD) {
             break h;
+        }
+        // A bystander whose walk has ended sets off along its lane the other way.
+        for k in 0..2 {
+            let b = body_at(&w, body_of(&w, w.souls[2 + k]));
+            let (a, z) = lanes[k];
+            let goal = if leg[k] % 2 == 0 { a } else { z };
+            if apart_mm(b, goal) < 400 {
+                leg[k] += 1;
+                let _ = socket_end(&mut hands[2 + k].s);
+                hands[2 + k].walk_to(g, if leg[k] % 2 == 0 { a } else { z });
+            }
         }
         if t0.elapsed() > Duration::from_secs(40) {
             while let Ok(l) = s.lines.try_recv() {
@@ -5140,7 +5159,7 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
         std::thread::sleep(Duration::from_millis(200));
     };
     let (parent, slot, pos) = where_is(&w, frame);
-    println!("seated: {parent:?} slot {slot:?} at {pos:?}; held {:?}", held.holds);
+    println!("seated: {parent:?} slot {slot:?} at {pos:?}, the bystanders walking {leg:?} legs; held {:?}", held.holds);
     assert_eq!((parent, slot), (Some(bay), Some(slots["upright_a"])), "in upright_a");
     assert!(apart_mm(pos, ua) <= 2, "where the slot is: {pos:?} {ua:?}");
     // Held from outside the bay: away from upright_b, which is at the bay's +z of upright_a, so the frame's own -z.
@@ -5172,7 +5191,7 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     // The holders walk round behind its posts: each 0.35 m off its outer face, outside the bay.
     let t0 = std::time::Instant::now();
     loop {
-        let z: Vec<i64> = w.souls.iter().map(|s| body_at(&w, body_of(&w, *s)).z).collect();
+        let z: Vec<i64> = w.souls[..2].iter().map(|s| body_at(&w, body_of(&w, *s)).z).collect();
         if z.iter().all(|z| *z < ua.z - 300_000) {
             println!("the holders stand outside the bay, z {z:?} mm off {}", ua.z);
             break;

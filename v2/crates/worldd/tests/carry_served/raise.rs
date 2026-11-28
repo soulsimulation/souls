@@ -524,3 +524,76 @@ async fn turn_two_souls_turn_a_lying_frame_a_quarter_turn_about_its_middle() {
     assert_eq!(laid.frame.node, ground);
     drop(served);
 }
+
+/// #5254: a walk never answers as an arrival short of its goal. A Soul sent to a point inside the loose frame's post
+/// (no ground it can stand on there) is answered `walk.stopped-short`, or refused before it starts; sent to beside the
+/// frame's edge it arrives, within 0.4 m. Then two crews of two walk past each other on crossing lanes: each walk that
+/// answers done stands within 0.4 m of its goal; any other answers by name.
+#[tokio::test(flavor = "multi_thread")]
+async fn walk_a_walk_short_of_its_goal_says_so_and_two_crews_walk_past_each_other() {
+    let d = scratch("cwalk");
+    let facts = world(&d);
+    let socket = d.join("s");
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (44, -18), &socket, 4);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let ground = im.nodes["ground"];
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &ids).await;
+    let mut souls = Vec::new();
+    for (s, t) in ids.iter().zip(&tokens) {
+        souls.push(Soul::connect(&url, *s, lineage, t).await);
+    }
+    for (j, s) in souls.iter_mut().enumerate() {
+        s.act("eden:walk", ground, point(Vec3::new((40 + 2 * j as i64) * M, 0, -18 * M)))
+            .await
+            .expect("born");
+    }
+    let bodies: Vec<Id> = ids.iter().map(|s| body_of(&dir, *s)).collect();
+    let l = Load::of(&construction("rack_upright.json")).unwrap();
+    let at = upright_at();
+    let off = |b: Id, p: Vec3| {
+        let f = stood(&dir)[&b];
+        (i128::from(f.x - p.x).pow(2) + i128::from(f.z - p.z).pow(2)).isqrt() as i64
+    };
+    // Inside its post: no ground a body stands on.
+    let post = Vec3::new(at.x + l.half_width - 38_000, 0, at.z);
+    let inside = souls[0].act("eden:walk", ground, point(post)).await;
+    println!("to inside the frame's post: {inside:?}, {} mm off", off(bodies[0], post) / 1000);
+    match &inside {
+        Ok(_) => panic!("answered as arrived {} mm off its goal", off(bodies[0], post) / 1000),
+        Err(name) => assert!(!name.is_empty(), "named"),
+    }
+    // Beside its edge: arrives.
+    let edge = spot(at, l.half_width + 350_000, false);
+    souls[0].act("eden:walk", ground, point(edge)).await.expect("arrives beside its edge");
+    assert!(off(bodies[0], edge) <= 400_000, "within 0.4 m: {}", off(bodies[0], edge));
+    // Two pairs on crossing lanes, 8 m each, meeting halfway.
+    let c = Vec3::new(44 * M, 0, -24 * M);
+    let goals = [
+        Vec3::new(c.x - 4 * M, 0, c.z - 300_000),
+        Vec3::new(c.x - 4 * M, 0, c.z + 300_000),
+        Vec3::new(c.x + 4 * M, 0, c.z - 300_000),
+        Vec3::new(c.x + 4 * M, 0, c.z + 300_000),
+    ];
+    let starts = [goals[2], goals[3], goals[0], goals[1]];
+    for (k, p) in starts.iter().enumerate() {
+        souls[k].send("eden:walk", ground, point(*p)).await;
+    }
+    for s in souls.iter_mut() {
+        let _ = s.answer().await;
+    }
+    for (k, p) in goals.iter().enumerate() {
+        souls[k].send("eden:walk", ground, point(*p)).await;
+    }
+    for (k, s) in souls.iter_mut().enumerate() {
+        let got = s.answer().await;
+        let gap = off(bodies[k], goals[k]);
+        println!("crossing walker {k}: {got:?}, {} mm off its goal", gap / 1000);
+        match got {
+            Ok(_) => assert!(gap <= 400_000, "done within 0.4 m: {gap} µm"),
+            Err(name) => assert!(name == "walk.stopped-short" || !name.is_empty(), "{name}"),
+        }
+    }
+    drop(served);
+}
