@@ -5,7 +5,7 @@
 // the world carries a frame standing, its native hand contacts at its foot's middle, out of its carriers' reach.
 import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, appendFileSync, fsyncSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, appendFileSync, fsyncSync, renameSync, copyFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { PAIR, pairArgs, lastJson, seatOf, seatEnv } from '../../playtest/arena/new-engine/seat.mjs';
 import { contactTools } from '../../playtest/carry-contact/oracle.mjs';
@@ -76,6 +76,14 @@ const SCENES = {
       beam: ['deck-beam-1', 'ed', 'fi', '-25.022,23.372', 'beam_low_l'], more: [['deck-beam-2', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_low_r'],
         ['deck-beam-3', ['-25.022,23.372'], 'beam_high_l'], ['deck-beam-4', ['-27,17', '-22.978,17', '-22.978,23.372'], 'beam_high_r']],
       climb: { who: 'bo', frame: 'deck-frame-1' } } },
+  // The deck walk (B5, attempt 24; CARRY_SCENE=deckwalk; #5284's creator-placed ways): the world's creator places the
+  // finished deck bay in one `souls-god.mjs batch`, a part of each slot's kind into each of deck_bay's slots in the
+  // entry's order (frames, four beams, five joists, two sheets, the stair); then Ada walks up the stair onto the first
+  // sheet's deck, across to the second's and back onto the ground (`act <place id>`, `act <ground id>`), and Bo climbs
+  // built frame a by its own object's first climb offer and comes back down. Both bodies' drawn positions are sampled.
+  deckwalk: { who: ['ada', 'bo'], kind: 'mars:deck_bay', entry: 'content/kinds/construction/deck_bay.json',
+    view: 'post=0&hour=12:00&eye=-17.5,5.2,31&at=-25,1.2,22',
+    deckwalk: { bay: 'deck-bay', walker: 'ada', climber: 'bo' } },
 };
 const SCENE = SCENES[process.env.CARRY_SCENE ?? 'beam'];
 if (!SCENE) throw Error('carry-proof.scene');
@@ -131,6 +139,41 @@ async function pair(state, who) {
   if ((await post('/v1/account/souls/profile', { soul: key, name: who[0].toUpperCase() + who.slice(1) })).status !== 200) throw Error('carry-proof.name');
   return seatOf({ label: who, folder, home, soul, env: seatEnv(home, state.recipe.pkg), log: join(folder, 'commands.jsonl') });
 }
+/** The world's creator through the ordinary interface (rack-bay.mjs `pairCreator`): paired with --creator and approved
+ *  as the seeded creator, its daemon started and registered like a Soul's, and `souls-god.mjs` asked as a command. */
+async function creatorOf(state) {
+  const { recipe, paths, signal } = state, folder = join(paths.data, 'seats', 'creator'), home = join(folder, '.souls'), worldDir = join(paths.data, 'world');
+  mkdirSync(folder, { recursive: true });
+  const env = seatEnv(home, recipe.pkg); let text = '', approve;
+  const asking = new Promise((ok, no) => {
+    const child = execFile(process.execPath, [PAIR, ...pairArgs(recipe.world, 'creator'), '--creator', `creator-${readFileSync(join(worldDir, 'creator'), 'utf8').trim()}`],
+      { cwd: folder, env, signal, timeout: 20000, maxBuffer: 1 << 20 },
+      (error, stdout, stderr) => { save(state, 'command-carry-pair-creator.json', { code: child.exitCode, signal: child.signalCode, stdout, stderr }); error ? no(error) : ok(lastJson(stdout)); });
+    recipe.registerCommand(child);
+    child.stdout.on('data', chunk => { text += chunk; approve ??= text.split('\n').map(lastJson).find(row => row?.step === 'approve'); });
+  });
+  const settled = asking.then(answer => ({ answer }), error => ({ error }));
+  const until = Date.now() + 10000;
+  while (!approve) { signal.throwIfAborted(); if (Date.now() > until) throw Error('carry-proof.creator-pair-code'); await delay(20, signal); }
+  const approval = await fetch(new URL('/v1/pair/approve', recipe.world.directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: approve.code, confirm: true, test_person: 'Ada' }), signal });
+  if (approval.status !== 200) throw Error('carry-proof.creator-approval');
+  const result = await settled; if (result.error) throw result.error;
+  if (result.answer?.ok !== true) throw Error('carry-proof.creator-pair-result');
+  mkdirSync(join(home, 'kinds'), { recursive: true });
+  copyFileSync(join(worldDir, 'world/world.kinds'), join(home, 'kinds', `${recipe.world.world}.kinds`));
+  const id = readdirSync(join(home, 'souls')).find(n => n.startsWith('c_')); if (!id) throw Error('carry-proof.creator-id');
+  const fd = openSync(join(paths.dir, 'client-creator.log'), 'wx', 0o600);
+  let daemon;
+  try { daemon = spawn(process.execPath, [join(recipe.checkout, 'v2/client/src/daemon/daemon.mjs'), '--home', home, '--soul', id, '--pkg', recipe.pkg, '--ready-fd', '3'], { cwd: folder, env, detached: true, stdio: ['ignore', fd, fd, 'pipe'] }); }
+  finally { closeSync(fd); }
+  recipe.registerClient(daemon);
+  await new Promise((ok, no) => { const timer = setTimeout(() => no(Error('carry-proof.creator-ready')), 10000); daemon.stdio[3].once('data', data => { clearTimeout(timer); String(data).trim() === 'ready' ? ok() : no(Error('carry-proof.creator-ready')); }); daemon.once('error', no); daemon.once('exit', () => no(Error('carry-proof.creator-exited'))); });
+  return (...words) => new Promise((ok, no) => {
+    const child = execFile(process.execPath, [join(recipe.checkout, 'v2/client/src/creator/souls-god.mjs'), ...words], { cwd: folder, env, signal: state.signal, timeout: 60000, maxBuffer: 4 << 20 },
+      (error, stdout, stderr) => { save(state, `command-carry-${++state.ordinal}.json`, { who: 'creator', words, stdout, stderr, code: child.exitCode, signal: child.signalCode }); const a = lastJson(stdout); a ? ok(a) : no(error ?? Error('carry-proof.creator-answer')); });
+    recipe.registerCommand(child);
+  });
+}
 export async function prepare({ paths, recipe, signal }) {
   if (recipe?.kind !== 'native-page' || !recipe.world || !recipe.registerClient) throw Error('carry-proof.recipe');
   const state = { paths, recipe, signal, seats: {}, bodies: {}, ordinal: 0, loaded: {}, pending: [], pageErrors: [] };
@@ -153,6 +196,7 @@ export async function prepare({ paths, recipe, signal }) {
   // Each carrier comes to its end along the load's own line (first 2.2 m out, then in): the page draws a body facing
   // the way it last walked, and the world does not turn a carrier to its load (attempt 8: Ada lifted with her back to it).
   if (SCENE.build) state.frames = standFrames(state).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
+  if (SCENE.deckwalk) state.god = await creatorOf(state);
   state.grips = SCENE.build || SCENE.raise || SCENE.third || SCENE.carry ? Promise.resolve({ ok: true }) : Promise.all([['ada', 'front'], ['bo', 'back']].map(async ([who, end]) => { await cli(state, who, 'carry', 'grip', SCENE.load, end, '--from', '2.2'); await cli(state, who, 'carry', 'grip', SCENE.load, end); })).then(() => ({ ok: true }), error => ({ error: String(error.stack ?? error) }));
   return { dir: paths.dir };
 }
@@ -545,6 +589,49 @@ async function firstThird({ state, page, paths, signal, check, arm, root }) {
       shortWalks: state.shortWalks ?? [], puts, joistPuts: state.joistPuts ?? [], beam2Put: put2 && { ok: put2.ok === true, code: put2.code ?? null, detail: put2.detail ?? null }, leaves: leaves.map(l => ({ who: l.who, ok: l.ok === true, code: l.code ?? null, detail: l.detail ?? null })), raises: state.raises ?? [], climbs: state.climbs ?? [] });
   } finally { save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] }); }
 }
+/** `who` walks to `target` (`act <id> --wait`), four shots on the way, its drawn position sampled; where it ends. */
+async function walked(state, page, who, target, tag) {
+  const wait = ms => delay(ms, state.signal), shot = async step => { await page.screenshot({ path: join(state.paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
+  const record = { who, target };
+  const going = (async () => { const a = await asked(state, who, 'act', target, '--wait'); record.phase = a.phase ?? null; record.code = a.code ?? null; })();
+  const shots = (async () => { for (let i = 1; i <= 4; i++) { await wait(1500); await shot(`${tag}-${i}`); } })();
+  record.samples = await sampled(state, page, who, going); await shots;
+  record.room = (await asked(state, who, 'look')).room ?? null; record.step = biggestStep(record.samples);
+  await wait(1500); await shot(`${tag}-there`);
+  return record;
+}
+/** The deck walk on the page (all of it after the setup gate). Its checks: the creator's batch accepted, no page error;
+ *  each move's answer and the bodies' drawn positions are measured. */
+async function deckWalk({ state, page, paths, signal, check, arm }) {
+  const D = SCENE.deckwalk, wait = ms => delay(ms, signal);
+  const shot = async step => { await page.screenshot({ path: join(paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
+  check('candidate-arm', arm === 'candidate');
+  await verifyAssets(state, check);
+  const bay = (await find(state, D.bay)).id, entry = JSON.parse(readFileSync(join(state.recipe.checkout, SCENE.entry)));
+  await setupGate(state, page, signal);
+  check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  const out = { batch: null, moves: [] };
+  try {
+    const slots = Object.entries(entry.slots);
+    const ops = slots.map(([name, slot], k) => ({ op: 'place', name: k + 1, kind: slot.kinds[0], in: bay, slot: k + 1, title: `built ${name.replace(/_/g, ' ')}` }));
+    const placed = await state.god('batch', JSON.stringify(ops));
+    out.batch = { ok: placed.ok === true, code: placed.code ?? null, detail: placed.detail ?? null, slots: slots.map(([name]) => name) };
+    check('creator-batch-accepted', placed.ok === true, JSON.stringify(out.batch));
+    await wait(3000); await shot('creator-placed-the-deck-bay');
+    const part = name => placed.names[String(slots.findIndex(([n]) => n === name) + 1)];
+    const ground = (await cli(state, D.walker, 'object', bay)).parent;
+    const places = async id => { const o = await cli(state, D.walker, 'object', id); return { name: o.name, places: o.places ?? [], ways_up: o.ways_up ?? null }; };
+    out.stair = await places(part('stair')); out.sheets = [await places(part('s1')), await places(part('s2'))];
+    out.moves.push(await walked(state, page, D.walker, out.sheets[0].places[0].id, 'up-the-stair-onto-sheet-1'));
+    out.moves.push(await walked(state, page, D.walker, out.sheets[1].places[0].id, 'across-to-sheet-2'));
+    out.moves.push(await walked(state, page, D.walker, ground, 'back-down-onto-the-ground'));
+    out.climb = await climbed(state, page, D.climber, part('upright_a'), bay, 'climb');
+    check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  } finally {
+    save(state, 'survey-measurement.json', { note: 'The deck walk on a creator-placed bay: each move\'s answer and the bodies\' drawn positions, measurements.', ...out });
+    save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: [] });
+  }
+}
 /** A load carried by two as a survey: taken, walked its legs, set down. Its checks: every command accepted, no page error;
  *  the contact oracle on its crew is a measurement. */
 async function carrySurvey({ state, page, paths, signal, check, arm, root }) {
@@ -597,6 +684,7 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   if (SCENE.raise) return raiseSurvey({ state, page, paths, signal, check, arm, root });
   if (SCENE.third) return firstThird({ state, page, paths, signal, check, arm, root });
   if (SCENE.carry) return carrySurvey({ state, page, paths, signal, check, arm, root });
+  if (SCENE.deckwalk) return deckWalk({ state, page, paths, signal, check, arm });
   await offer(state);
   if (arm === 'baseline') {
     const manifest = await verifyAssets(state, check);
