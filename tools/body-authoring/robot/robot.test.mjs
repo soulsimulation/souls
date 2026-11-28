@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {execFileSync} from 'node:child_process';import {createRequire} from 'node:module';import {pathToFileURL} from 'node:url';
-import {admitBodyGLB} from '../../../apps/server/src/edge/body/admission.ts';
+import {admitBodyGLB} from '../admit/admission.ts';
 import {templateFromGltf} from '../../../mars/viewer/app/engine-view/people.ts';import {HumanViews} from '../../../mars/viewer/app/engine-view/humans.ts';
 const require=createRequire(new URL('../../../mars/viewer/package.json',import.meta.url));const moduleRoot=require.resolve('three').replace('/build/three.cjs','');const T=await import(pathToFileURL(moduleRoot+'/build/three.module.js').href);const {GLTFLoader}=await import(pathToFileURL(moduleRoot+'/examples/jsm/loaders/GLTFLoader.js').href);
 const dir=mkdtempSync(join(tmpdir(),'soul-robot-'));execFileSync(process.execPath,['tools/body-authoring/robot/author.mjs','mars/viewer/public/modular/environment/animated-casual.glb',dir],{cwd:resolve('.')});

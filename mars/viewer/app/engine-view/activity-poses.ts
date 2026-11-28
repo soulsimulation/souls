@@ -3,6 +3,7 @@ import { FLUTE_FADE, PIANO_FADE, PIANO_STEP, drumHands, pianoHands, pianoLanes, 
 import {gameContact,type RecordedGame} from './recorded-games.ts';
 import {rowingStroke} from './rowing-motion.ts';
 import {seesawAngle, swingAngle} from './play-motion.ts';
+import {storytellingPose} from './storytelling-pose.ts';
 // Body activities (ACTIVITIES-v1, Core `mars:pose_v1`) as a cosmetic, random-access renderer layer: hand goals
 // relative to each shoulder, whole-body layouts (sitting on the ground, lying on the back), procedural cycles for
 // exercise/dance ids, and small hand props. Pure function of (activity, base, prop, seconds, id): canonical
@@ -200,10 +201,7 @@ export function activityFrame(activity: string, base: string, seconds: number, i
     // with the head propped, or flat on the grass with the hands behind the head, looking up
     // cycling (engine gait 'cycle'): hands on the bars, leaning forward a little; humans.ts puts the feet on the pedals
     case 'cycle': f.hands = [[0.34, 0.06, -0.36], [0.34, 0.06, -0.36]]; f.lean = 0.32; f.look = -0.12; return f;
-    // R5: a storyteller talks with the hands — now one hand opens out, now both shape something, now a pause; turning to the circle
-    case 'tell-story': { const k = (t * 0.23) % 3, a = S(tri(t * 0.9)), b = S(tri(t * 0.7 + 0.5));
-      f.hands = k < 1 ? [[0.12, -0.06, -0.62], [0.3 + 0.12 * a, 0.12 + 0.18 * a, -0.28 + 0.12 * a]] : k < 2 ? [[0.32 + 0.06 * b, 0.02 + 0.1 * b, -0.22 + 0.06 * a], [0.32 + 0.06 * a, 0.02 + 0.1 * a, -0.22 + 0.06 * b]] : [[0.18, -0.04, -0.4], [0.18, -0.04, -0.4]];
-      f.side = 0.12 * Math.sin(t * 0.17); f.look = -0.08; return f; }
+    case 'tell-story': return Object.assign(f, storytellingPose(t));
     case 'swing': { const angle = swingAngle(t), v = Math.cos((t * 2 * Math.PI) / 2.7);
       f.hands = [[0.02, 0.03, 0.14], [0.02, 0.03, 0.14]]; f.lean = -0.1 * v; f.look = -0.05 - 0.08 * v; f.ride = { kind: 'swing', angle }; return f; }
     case 'seesaw': { const angle = seesawAngle(seconds);

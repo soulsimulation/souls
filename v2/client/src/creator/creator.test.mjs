@@ -877,7 +877,7 @@ test('#3697 gap 2: a Soul finds a creator\'s kind, its inspect lists the form, a
   // The creator defines a bell with one form, ring, which sets its field rung, and places one in the Soul's room.
   const record = join(dir, 'chime.json');
   writeFileSync(record, JSON.stringify({ format: 'souls-entry/1', kind: 'garden:chime', owner: 'thing',
-    state: { rung: { n: 1, type: 'bool', default: false, audience: { rule: 'everyone' } } },
+    state: { rung: { n: 28, type: 'bool', default: false, audience: { rule: 'everyone' } } },
     geometry: { bounds_mm: [300, 400, 300] },
     forms: { ring: { who: 'anyone', starts: 'act', needs: [{ need: 'state', field: 'rung', is: false }], effects: [{ change: 'set', field: 'rung', to: true, event: 'rang' }] } },
     text: { name: 'chime', description: 'a garden chime' } }));

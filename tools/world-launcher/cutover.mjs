@@ -469,9 +469,10 @@ function oneFence(binding, edge = { seen: () => false, appSet: () => null }) {
       // architecture, which a moved world keeps (its ground and buildings are the old twin's), so they pass through.
       const mutating = (!read && !(req.method === 'POST' && path === '/v1/world/context/views')) || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
       const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
+      const bodyAsset = bodiesDir && read && !url.search ? /^\/v1\/edge\/body\/assets\/body_([a-f0-9]{64})\.glb$/.exec(path)?.[1] ?? null : null;
       const capture = mutating ? null : /^\/v1\/scenes\/([a-f0-9]{64})$/.exec(path)?.[1] ?? null;
       const versioned = mutating ? null : /^\/v2\/replica\/([0-9a-f]{16})\/(replica\.js|replica_bg\.wasm)$/.exec(path);
-      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && capture === null && !versioned) return false;
+      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null && bodyAsset === null && capture === null && !versioned) return false;
       let on;
       try { on = active(); } catch {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -481,6 +482,19 @@ function oneFence(binding, edge = { seen: () => false, appSet: () => null }) {
       if (!on) {
         if (read && path === '/v1/config') res.setHeader('x-souls-engine', 'old');
         return false;
+      }
+      if (bodyAsset !== null) {
+        // The catalogue's legacy look uses the admitted upload URL. Its bound package contains the SAME bytes.
+        // Unknown hashes still belong to the old upload handler; a present but damaged package is never substituted.
+        let bytes;
+        try { bytes = readBounded(join(bodiesDir, 'models', `${bodyAsset}.glb`), 64 * 1024 * 1024); }
+        catch (error) { if (error.code === 'ENOENT') return false; }
+        if (!bytes || createHash('sha256').update(bytes).digest('hex') !== bodyAsset) {
+          res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'cutover.body-asset-invalid' }));
+          return true;
+        }
+        res.writeHead(200, { 'content-type': 'model/gltf-binary', 'content-length': bytes.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : bytes);
+        return true;
       }
       if (body !== null) {
         // B3-1: the routed page's body catalogue, from the binding's bodiesDir; a name outside the catalogue's is not here

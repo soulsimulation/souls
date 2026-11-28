@@ -7,7 +7,7 @@ import { openLauncher } from './launcher.mjs';
 import { bindingId, cutoverFence, searchPlaces, snapshotPlaces, withV2Stream } from './cutover.mjs';
 import { newEngineClock } from './page-meta.mjs';
 import { originCacheClass, originCacheProblem } from '../cdn/origin-cache.mjs';
-import { testPort } from '../../apps/server/test/test-port.ts';
+import { testPort } from '../lib/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
 mkdirSync(scratch, { recursive: true });
@@ -623,4 +623,23 @@ test('#4986: the routed page is told of the replica on the asset CDN only once t
     assert.equal(cdn(), undefined); await settle(); assert.equal(cdn(), undefined);
     assert.notEqual(fence.v2Fields(w).v2Replica, `/w/eden/v2/replica/${version}/replica.js`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('bound body assets preserve admitted URLs, exact bytes and the world/upload fences', t => {
+  const dir=mkdtempSync(new URL('bound-body-',scratch)), routesFile=join(dir,'routes.json'), bodiesDir=join(dir,'bodies');
+  t.after(()=>rmSync(dir,{recursive:true,force:true})); mkdirSync(join(bodiesDir,'models'),{recursive:true});
+  const route=canonical=>writeFileSync(routesFile,JSON.stringify({schema:'souls/world-routes/1',worlds:{lab:{canonical,stream:'/s/lab/'}}})); route(true);
+  const bytes=Buffer.from('exact previously admitted model bytes'), hash=createHash('sha256').update(bytes).digest('hex'), file=join(bodiesDir,'models',hash+'.glb');writeFileSync(file,bytes);
+  const fence=cutoverFence({binding:{oldWorldId:'lab-1',canonicalSlug:'lab',routesFile,clientDir:join(dir,'client'),bodiesDir}}), world={slug:'lab',worldId:'lab-1'};
+  const path=`/v1/edge/body/assets/body_${hash}.glb`;
+  const ask=(path,method='GET',w=world)=>{let result;const res={writeHead(status,headers){result={status,headers};return this;},end(body){result.body=body;return this;},setHeader(){}};
+    return fence.handle({method},res,w,new URL('http://x/w/lab'+path))?result:null;};
+  const got=ask(path);assert.equal(got.status,200);assert.deepEqual(got.body,bytes);assert.equal(got.headers['content-type'],'model/gltf-binary');
+  const head=ask(path,'HEAD');assert.equal(head.status,200);assert.equal(head.body,undefined);assert.equal(head.headers['content-length'],bytes.length);
+  assert.equal(ask(path,'GET',{slug:'other',worldId:'other-1'}),null);
+  route(false);assert.equal(ask(path),null);route(true);
+  assert.equal(ask(path,'POST').status,409,'existing new-engine mutation fence stays authoritative');
+  for(const [p,m] of [[path+'?x=1','GET'],[path.replace(hash,'f'.repeat(64)),'GET'],[path.replace(hash,'INVALID'),'GET'],['/v1/edge/body/assets/../secret.glb','GET']])assert.equal(ask(p,m),null);
+  writeFileSync(file,'damaged');assert.equal(ask(path).status,503,'present corrupted bytes cannot fall back to a different model');
+  rmSync(file);assert.equal(ask(path),null,'missing package model preserves ordinary upload handling');
 });

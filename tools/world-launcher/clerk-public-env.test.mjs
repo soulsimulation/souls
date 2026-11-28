@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../apps/server/test/clerk-fixture.ts';
+import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../lib/clerk-fixture.ts';
 import { verifiedCreator } from './creator-auth.mjs';
 const root = resolve(new URL('../..', import.meta.url).pathname);
 test('creator verifier accepts explicit new and retained origins, refuses unknown, preserves account identity', async t => {
@@ -12,7 +12,7 @@ test('creator verifier accepts explicit new and retained origins, refuses unknow
   const keys=await clerkKeys(canonical);
   writeFileSync(join(dir,'jwks.json'), JSON.stringify({keys:[keys.jwk]}));
   const envFile=join(dir,'fixture.env');
-  const preload=new URL('../../apps/server/test/clerk-jwks-preload.mjs',import.meta.url).pathname;
+  const preload=new URL('../../tools/lib/clerk-jwks-preload.mjs',import.meta.url).pathname;
   writeFileSync(envFile,`CLERK_PUBLISHABLE_KEY=${PUBLISHABLE_KEY}\nCLERK_ISSUER_URL=${ISSUER}\nCLERK_AUTHORIZED_PARTIES=${old}\nSIM_TEST_JWKS_FILE=${join(dir,'jwks.json')}\nNODE_OPTIONS=--import=${preload}\n`);
   const auth={envFile,registryPath:join(dir,'accounts.sqlite'),authorizedParties:[canonical,old,primary].join(',')};
   let id;

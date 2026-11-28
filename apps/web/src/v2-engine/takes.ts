@@ -85,18 +85,23 @@ export function positionAt(s: readonly WorldSample[], t: number): [number, numbe
   return [a.p[0] + (b.p[0] - a.p[0]) * f, a.p[1] + (b.p[1] - a.p[1]) * f, a.p[2] + (b.p[2] - a.p[2]) * f];
 }
 
-/** Ground speed (m/s) and heading at t: of the segment around t; heading of the last segment that moved before it. */
-export function motionAt(s: readonly WorldSample[], t: number, heading: number, turns: readonly Turn[] = []): { speed: number; heading: number } {
+import { carryHeading } from './carry-heading.ts'; // a native carry's facing; here, beside its one use
+
+/** Ground speed (m/s) and heading at t: of the segment around t; heading of the last segment that moved before it.
+ *  `carried`: the world's own turn for a body holding a native carry (carry-heading.ts). It is the heading, walking or
+ *  standing: the world keeps a carrier turned to its hold, so a carrier drawn facing its travel lets go of the load. */
+export function motionAt(s: readonly WorldSample[], t: number, heading: number, turns: readonly Turn[] = [], carried: number | null = null): { speed: number; heading: number } {
   // seated, it faces out of its seat: never the way it walked up to it (its back to the seat's back)
   const sat = seatAt(s, t)?.heading;
   if (sat !== undefined) return { speed: 0, heading: sat };
-  if (s.length < 2 || t < s[0].at || t >= s[s.length - 1].at) return { speed: 0, heading: turnedAt(turns, t, lastHeading(s, s.length - 1, t, heading)) };
+  if (s.length < 2 || t < s[0].at || t >= s[s.length - 1].at) return { speed: 0, heading: carried ?? turnedAt(turns, t, lastHeading(s, s.length - 1, t, heading)) };
   let i = 0;
   while (s[i + 1].at <= t) i++;
   const a = s[i], b = s[i + 1];
   if (a.seat || b.seat) return { speed: 0, heading: lastHeading(s, i, t, heading).heading };
   const d = Math.hypot(b.p[0] - a.p[0], b.p[2] - a.p[2]) / POS_Q, secs = (b.at - a.at) / 1e6;
   const speed = secs > 0 ? d / secs : 0;
+  if (carried !== null) return { speed, heading: carried };
   const h = lastHeading(s, i + 1, t, heading);
   return { speed, heading: speed < WALKING ? turnedAt(turns, t, h) : h.heading };
 }
@@ -205,7 +210,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
     for (let k = 0; k <= ticks; k++) {
       const t = (fromTick + k) * TICK_US;
       p = positionAt(b.samples, t)!;
-      const m = motionAt(b.samples, t, heading, b.turns);
+      const m = motionAt(b.samples, t, heading, b.turns, carryHeading(b.entity, t));
       heading = m.heading;
       const walking = m.speed >= WALKING;
       // 0.134 B4: a gesture aimed at another body faces it and names it the partner (the old paired poses meet it); a

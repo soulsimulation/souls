@@ -256,15 +256,11 @@ which runs everything before a release. Until 18 Nov a push covered by a full me
 `merge-group-covered` instead; `ci.yml` no longer has it, and readers accept the marker only on those older runs
 (`.github/scripts/ci-main.mjs`).
 
-**Soul Action tests.** `tools/soul-actions/*.test.mjs` runs in four parallel CI legs, `soul-actions-0` to `-3`, about
-10 minutes each on hosted runners (one file, `shared-bay.test.mjs`, has a leg to itself). The launcher's unit tests
-(V3-launcher-unit) run the same way in three legs, `launcher-0` to `-2`, each file one at a time as before.
-`.github/scripts/test-legs.mjs` splits each directory listing by the seconds per file measured on one hosted run
-(`test-leg-durations.json`); a missing or stale entry only unbalances the legs, never drops or repeats a file. The
-Soul Action job is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
-`packages/engine-*`) and by every full-scope run, but it is a `heavy: true` leg, so since 18 Nov it runs only in the
-daily run on main and in manual runs. It is not a gate step, so the remote gate doesn't run it, and the gate's suite
-tree and cached baseline don't change.
+**Launcher test legs.** The launcher's unit tests (V3-launcher-unit) run in three parallel CI legs, `launcher-0` to
+`-2`, each file one at a time. `.github/scripts/test-legs.mjs` splits the directory listing by the seconds per file
+measured on one hosted run (`test-leg-durations.json`); a missing or stale entry only unbalances the legs, never drops
+or repeats a file. The old engine's Soul Action tests (`tools/soul-actions`, legs `soul-actions-0` to `-3`) were
+removed with the old engine (#2839).
 
 **Soul runtime and trace tests.** `tools/soul-runtime/*.test.mjs` and `tools/soul-trace/*.test.mjs` run as the CI job
 `soul-tools`, about 17 s measured on a loaded laptop. It is picked by its own paths (`tools/soul-runtime`,

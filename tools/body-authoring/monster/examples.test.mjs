@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {admitBodyGLB,BODY_LIMITS} from '../../../apps/server/src/edge/body/admission.ts';
+import {admitBodyGLB,BODY_LIMITS} from '../admit/admission.ts';
 import {authorMonster} from './author.mjs';import {authorGhost} from '../ghost/author.mjs';
 
 test('monster and ghost pass unchanged owner admission inside ordinary budgets, reproducibly',()=>{
