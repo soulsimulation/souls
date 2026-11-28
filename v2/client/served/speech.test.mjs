@@ -113,12 +113,29 @@ test('served speech: joined nearby Souls hear say once and whisper stays with it
         if(value.has(25)||value.has(21)){copy.onHashes(bytes);active=true;}
         else if(value.has(22)){assert.ok(active,'record reply belongs to an active actual sync');copy.onRecords(bytes);}
         else return; // Existing metadata replies do not alter canonical Copy records.
-        if(!copy.next(0n).length){copy.finish();active=false;}
+        // N12: the daemon keeps many requests out; the mirror takes each answer under the request it saw go up.
+        if(copy.done()){copy.finish();active=false;}
       }
       if(value.has(31)){
         const item=decode(value.get(31)),line=wire.wireHeard(bytes);
         if(item.get(2) instanceof Uint8Array){const scan=v=>{if(v instanceof Map){const ref=v.get(21);if(Array.isArray(ref)&&ref[0] instanceof Uint8Array&&ref[0].length===16&&Number.isSafeInteger(ref[1]))references.add(idText(ref));for(const x of v.values())scan(x);}else if(Array.isArray(v))for(const x of v)scan(x);};scan(decode(item.get(2)));assert.ok(references.size<=100000,'finite delivered reference set');}
         if(line){const entry=decode(item.get(2)),said=(entry.get(8)??[]).find(e=>e.get(1)==='souls:said');items.push({line,words:item.get(3)??null,reference:said?.get(2)?.get(1)?.get(21)??null});assert.ok(items.length<=64,'finite observer event ledger');reports.observed=seats.map(x=>x.observer?.items??[]);save();}
+      }
+    };
+    // The daemon's own records requests (masked client frames), so each answer is taken under the request it answers.
+    let sent=Buffer.alloc(0);
+    const asking=chunk=>{
+      sent=Buffer.concat([sent,chunk]);assert.ok(sent.length<=16*1024*1024,'bounded request buffer');
+      while(sent.length>=2){
+        const tag=sent[1]&127;let size=tag,at=2;
+        assert.equal(sent[1]&128,128,'client frames are masked');assert.equal(sent[0]&128,128,'unfragmented request');
+        if(tag===126){if(sent.length<4)return;size=sent.readUInt16BE(2);at=4;}else if(tag===127){if(sent.length<10)return;size=Number(sent.readBigUInt64BE(2));at=10;}
+        if(sent.length<at+4+size)return;
+        const mask=sent.subarray(at,at+4),payload=Buffer.from(sent.subarray(at+4,at+4+size)),opcode=sent[0]&15;sent=sent.subarray(at+4+size);
+        for(let i=0;i<payload.length;i++)payload[i]^=mask[i&3];
+        if(opcode!==2)continue;
+        const value=decode(payload);
+        if(value instanceof Map&&value.has(20)&&value.has(22)&&!value.has(21)){assert.ok(active,'records request belongs to an active actual sync');copy.expect(payload);}
       }
     };
     const inspect=chunk=>{
@@ -143,6 +160,7 @@ test('served speech: joined nearby Souls hear say once and whisper stays with it
       if(first.subarray(0,15).toString('latin1')==='GET /v2/entries'){sockets.add(down);sockets.add(up);down.pipe(up);up.pipe(down);for(const socket of[down,up])socket.on('error',()=>{});return;}
       connections++;sockets.add(down);sockets.add(up);
       down.pipe(up);up.pipe(down); // Forward original bytes even when an observer fails; teardown is owned elsewhere.
+      down.on('data',chunk=>{if(!failure)try{asking(chunk);}catch(e){fail(e);}});
       if(connections!==1)fail(Error('unexpected daemon reconnection'));
       up.on('data',chunk=>{if(!failure)try{inspect(chunk);}catch(e){fail(e);}});
       for(const socket of[down,up]){socket.on('error',()=>{if(!closed)fail(Error('owned transport error'));});socket.on('close',()=>{sockets.delete(socket);if(!closed)fail(Error('owned transport closed'));});}

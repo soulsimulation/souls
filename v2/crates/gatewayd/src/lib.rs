@@ -744,11 +744,26 @@ impl Gateway {
     }
 
     /// A frame for the socket signed in as `session` for `key` alone, not kept for a resume (a sync answer, to the
-    /// socket that asked). Dropped if it has gone, or its queue is full; the client asks again.
+    /// socket that asked). Dropped if it has gone. A full queue lets the socket go as [`AGENT_BEHIND`], as a stream
+    /// frame does (#4979): a sync answer dropped in silence left its client waiting for it while other frames kept
+    /// arriving (N12: up to 16 are out at once). The client signs in again and its sync resumes.
     pub fn reply(&self, key: &[u8], session: u64, frame: Vec<u8>) {
-        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(live) = hub.grants.get(key).and_then(|h| h.sessions.get(&session)) {
-            let _ = live.frames.try_send(frame);
+        let mut hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(held) = hub.grants.get_mut(key) else {
+            return;
+        };
+        let full = match held.sessions.get(&session) {
+            Some(live) => matches!(
+                live.frames.try_send(frame),
+                Err(mpsc::error::TrySendError::Full(_))
+            ),
+            None => false,
+        };
+        if full && let Some(live) = held.sessions.remove(&session) {
+            live.behind.notify_one();
+            (self.log)(
+                "a socket's outbound queue was full for a sync answer; it was let go as agent.behind and may resume",
+            );
         }
     }
 

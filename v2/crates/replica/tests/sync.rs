@@ -1130,3 +1130,43 @@ fn many_rounds_in_flight_with_a_connection_dropped_mid_way_resume_and_copy_each_
     assert!(one.rounds > 60, "one at a time: {} rounds", one.rounds);
     assert_eq!(one.in_flight, 1);
 }
+
+/// N12: in flight, a record answered withheld is not asked for again in the same sync however often it is named, and an
+/// answer to records nobody asked for is refused by name.
+#[test]
+fn in_flight_a_withheld_record_is_asked_once_and_an_unasked_answer_is_refused() {
+    // Two rooms that both hold the same withheld thing, among others.
+    let rooms: Vec<Node> = (0..2u64)
+        .map(|r| {
+            Node(
+                1_000_000 + r,
+                (0..100)
+                    .map(|t| Node(if t == 0 { 5_000 } else { r * 1000 + t }, Vec::new()))
+                    .collect(),
+            )
+        })
+        .collect();
+    let mut w = Made::default();
+    w.set(&Node(9_999_999, rooms));
+    w.withhold(5_000);
+    let mut answered = std::collections::BTreeMap::new();
+    let mut copy = Copy::default();
+    let s = windowed(&mut copy, &mut w, 16, 9, None, &mut answered).unwrap();
+    assert!(answered.values().all(|n| *n == 1), "nothing asked twice");
+    assert_eq!(s.fetched, s.held);
+    whole(&copy, s.held);
+
+    let mut fresh = Copy::default();
+    let now = w.hashes(&[world_id(0)]).unwrap();
+    let mut d = fresh.compare(
+        &[world_id(0)],
+        now.into_iter().map(|h| h.map(Hash::to_bytes)).collect(),
+    );
+    let root = w.root.unwrap().to_bytes();
+    let got = w.records(std::slice::from_ref(&root)).unwrap();
+    assert_eq!(
+        fresh.take(&mut d, &[root], got).map_err(|e| e.name),
+        Err("sync-record"),
+        "an answer to a request not asked"
+    );
+}

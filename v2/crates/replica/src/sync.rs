@@ -272,6 +272,8 @@ pub struct Descent {
     /// Asked and not yet answered, and the requests they are in.
     pending: BTreeSet<Vec<u8>>,
     requests: usize,
+    /// Answered withheld in this sync: held empty, never asked for again in it however often they are named.
+    withheld: BTreeSet<Vec<u8>>,
     s: Synced,
     roots: BTreeMap<Id, Vec<u8>>,
     taken: Vec<Vec<u8>>,
@@ -438,6 +440,7 @@ impl Copy {
             next: want,
             pending: BTreeSet::new(),
             requests: 0,
+            withheld: BTreeSet::new(),
             s,
             roots,
             taken: Vec::new(),
@@ -454,7 +457,9 @@ impl Copy {
             if d.want.is_empty() {
                 // A child named twice, or asked for already, is fetched once.
                 d.want = std::mem::take(&mut d.next);
-                d.want.retain(|c| !self.holds(c) && !d.pending.contains(c));
+                d.want.retain(|c| {
+                    !self.holds(c) && !d.pending.contains(c) && !d.withheld.contains(c)
+                });
                 d.want.sort();
                 d.want.dedup();
                 d.want.reverse(); // taken from the end, in order
@@ -463,7 +468,7 @@ impl Copy {
                 }
             }
             let Some(h) = d.want.pop() else { break };
-            if self.holds(&h) || d.pending.contains(&h) {
+            if self.holds(&h) || d.pending.contains(&h) || d.withheld.contains(&h) {
                 continue;
             }
             if let Some((bytes, below)) = self.loose.remove(&h) {
@@ -479,6 +484,23 @@ impl Copy {
             d.s.in_flight = d.s.in_flight.max(d.requests);
         }
         out
+    }
+
+    /// Records asked for by someone else's [`Copy::ask`], whose answer this copy will take: a mirror of another
+    /// client's sync, which sees its requests and their answers go by (`v2/client/served`'s relays).
+    pub fn expect(&mut self, d: &mut Descent, asked: &[Vec<u8>]) {
+        d.pending.extend(asked.iter().cloned());
+        d.requests += 1;
+        d.s.in_flight = d.s.in_flight.max(d.requests);
+    }
+
+    /// Whether the descent is done: nothing in flight, and every record it knows of held or answered withheld.
+    pub fn done(&self, d: &Descent) -> bool {
+        d.requests == 0
+            && d.want
+                .iter()
+                .chain(&d.next)
+                .all(|h| self.holds(h) || d.withheld.contains(h))
     }
 
     /// A record checked against its hash, kept, and what it names below asked for next if not held.
@@ -518,6 +540,9 @@ impl Copy {
         for (h, bytes) in asked.iter().zip(got) {
             let below = check(h, &bytes)?;
             d.pending.remove(h);
+            if bytes.is_empty() {
+                d.withheld.insert(h.clone());
+            }
             d.s.got += bytes.len() as u64;
             d.s.fetched += 1;
             self.keep(d, h.clone(), bytes, below);

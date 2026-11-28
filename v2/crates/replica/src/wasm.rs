@@ -1883,10 +1883,37 @@ impl WasmCopy {
         Ok(frame)
     }
 
-    /// Records requests sent and not yet answered.
-    #[wasm_bindgen(js_name = inFlight)]
-    pub fn in_flight(&self) -> u32 {
-        self.descent.as_ref().map_or(0, |d| d.in_flight() as u32)
+    /// Another client's records request `{20: n, 22: [hashes]}`, seen on its way: its answer, under the same number,
+    /// is taken by [`WasmCopy::on_records`]. For a copy that mirrors a client's sync from its frames.
+    pub fn expect(&mut self, frame: &[u8]) -> Result<(), JsError> {
+        let m = match decode(frame).map_err(js)?.value {
+            Value::Map(m) => m,
+            _ => return Err(JsError::new("frame-not-a-record")),
+        };
+        let (Some(Value::Uint(n)), Some(Value::Array(hs))) =
+            (m.get(&wire::ASK), m.get(&wire::RECORDS))
+        else {
+            return Err(JsError::new("sync-ask"));
+        };
+        let hs = hs
+            .iter()
+            .map(|h| match h {
+                Value::Bytes(b) => Ok(b.clone()),
+                _ => Err(JsError::new("sync-ask")),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let d = self
+            .descent
+            .as_mut()
+            .ok_or_else(|| JsError::new("sync-not-started"))?;
+        self.copy.expect(d, &hs);
+        self.asked.insert(*n, hs);
+        Ok(())
+    }
+
+    /// Whether the sync under way is done: nothing in flight and nothing more to ask for ([`WasmCopy::finish`] next).
+    pub fn done(&self) -> bool {
+        self.descent.as_ref().is_some_and(|d| self.copy.done(d))
     }
 
     /// A records answer, to the request its key 20 numbers: each record checked against the hash that named it, and
