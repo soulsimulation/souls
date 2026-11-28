@@ -302,7 +302,7 @@ try {
         const A = sh.AT, xz = (p) => p.join(',');
         const crewOf = async (a, others, on = null) => { const { crew } = await r2.run(a, 'carry', 'offer', ...others.map((o) => bodiesE[o]), ...(on ? ['--on', on] : [])); for (const o of others) await r2.run(o, 'carry', 'accept', crew); return crew; };
         const raise = async (bent, slot, a, b) => { await r2.both([a, 'carry', 'grip', bent, 'back'], [b, 'carry', 'grip', bent, 'front']); const c = await crewOf(a, [b]); await r2.run(a, 'part', 'take', c, bent); await r2.both([a, 'carry', 'to', c, ids.site, slot], [b, 'carry', 'to', c, ids.site, slot]); await r2.run(a, 'part', 'put', c, ids.site, slot); await r2.run(a, 'carry', 'leave', c); return c; };
-        const rail = async (rl, slot, stop, a, b, c = null) => { await r2.both([a, 'carry', 'grip', rl, 'back', '--from', '2.2'], [b, 'carry', 'grip', rl, 'front', '--from', '2.2']); c ??= await crewOf(a, [b]); await r2.run(a, 'part', 'take', c, rl); await r2.both([a, 'carry', 'to', c, xz(stop)], [b, 'carry', 'to', c, xz(stop)]); await r2.run(a, 'part', 'put', c, ids.site, slot); return c; };
+        const rail = async (rl, slot, stop, a, b, c = null) => { await r2.both([a, 'carry', 'grip', rl, 'back'], [b, 'carry', 'grip', rl, 'front']); c ??= await crewOf(a, [b]); await r2.run(a, 'part', 'take', c, rl); await r2.both([a, 'carry', 'to', c, xz(stop)], [b, 'carry', 'to', c, xz(stop)]); await r2.run(a, 'part', 'put', c, ids.site, slot); return c; };
         sc.marks.start4 = at(); log('shade: four raise the frame');
         const holdA = await raise(ids.bents[0], 'bent_a', 'ada', 'bo');
         const holdB = await raise(ids.bents[1], 'bent_b', 'ada', 'cy');
@@ -312,7 +312,7 @@ try {
         await r2.both(['ada', 'carry', 'leave', rc], ['di', 'carry', 'leave', rc]);
         sc.marks.frame4 = at(); save(); log('shade: six lift the cloth');
         const who = ['ada', 'bo', 'cy', 'di', 'eve', 'fay'], [a, b, ...sides] = who;
-        await Promise.all([r2.run(a, 'carry', 'grip', ids.cloth, 'back', '--from', '2.2'), r2.run(b, 'carry', 'grip', ids.cloth, 'front', '--from', '2.2'), ...sides.map((x, k) => r2.run(x, 'carry', 'grip', ids.cloth, k % 2 ? 'left' : 'right', '--from', '1.3'))]);
+        await Promise.all([r2.run(a, 'carry', 'grip', ids.cloth, 'back'), r2.run(b, 'carry', 'grip', ids.cloth, 'front'), ...sides.map((x, k) => r2.run(x, 'carry', 'grip', ids.cloth, k % 2 ? 'left' : 'right', '--from', '1.3'))]);
         const cc = await crewOf(a, [b, ...sides]);
         sc.marks.cloth6 = at();
         await r2.run(a, 'part', 'take', cc, ids.cloth);

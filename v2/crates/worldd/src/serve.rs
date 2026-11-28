@@ -7667,9 +7667,12 @@ mod s10c_lockstep {
             assert_eq!(got.kind, 1, "joined: {got:?}");
         }
         let v3 = |x, z| Vec3::new(x, 0, z);
-        let ends = |at: Vec3| (v3(at.x, at.z - 2_200_000), v3(at.x, at.z + 2_200_000));
+        // A standing frame's carriers stand beside its edges, 0.98 m either side of its middle along x, each within
+        // reach of its hold (#5067; `frame_ends` in tests/edit_served.rs).
+        let ends = |at: Vec3| (v3(at.x + 980_000, at.z), v3(at.x - 980_000, at.z));
         // The crew to frame A's ends, the third Soul beside beam 3.
-        let (p, q) = ends(w.at(fa));
+        let at_a = w.at(fa);
+        let (p, q) = ends(at_a);
         let beam = w.at(b3);
         let walks = vec![
             w.walk(souls[0], p),
@@ -7706,6 +7709,13 @@ mod s10c_lockstep {
         let hand = w.soul(souls[2], "mars:take", Some(b3), BTreeMap::new());
         for got in w.answers(vec![take, hand]) {
             assert_eq!(got.kind, 1, "taken: {got:?}");
+        }
+        // The crew carries frame A 2 m south first, clear of the stand and of beam 3 (#5067: they stand beside its
+        // edges, in file along x, so straight east from the stand the load meets it).
+        let (p, q) = ends(v3(at_a.x, at_a.z - 2_000_000));
+        let walks = vec![w.walk(souls[0], p), w.walk(souls[1], q)];
+        for got in w.answers(walks) {
+            assert_eq!(got.kind, 1, "carried clear: {got:?}");
         }
         // The crew to the slot; the beam set down; the creator's upright on the open ground.
         let ua = {
