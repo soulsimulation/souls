@@ -116,7 +116,8 @@ test('simultaneous journey and collector failures retain both causes and keep cl
   const state={rows:[{answer:'ordinary leave retained'}],stages:[],observerInstalled:true};
   partyFinalization({evaluate:async()=>{throw secondary;}},{dir},state);
   await assert.rejects(partyJourney(state,async()=>{throw primary;}),error=>{
-    assert(error instanceof AggregateError);assert.deepEqual(error.errors,[primary,secondary]);assert.equal(error.cause,primary);return true;
+    assert(error instanceof AggregateError);assert.deepEqual(error.errors,[primary,secondary]);assert.equal(error.cause,primary);
+    for(const text of [String(error),error.stack]){assert.match(text,/departure draw observation stale/);assert.match(text,/collector ownership changed/);}return true;
   });
   const sequence=JSON.parse(readFileSync(join(dir,'command-party-sequence.json')));
   const finalization=JSON.parse(readFileSync(join(dir,'command-party-finalization.json')));

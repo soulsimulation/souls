@@ -141,7 +141,8 @@ export async function partyJourney(state, journey) {
   finally {
     try { await state.finalize(); }
     catch (secondary) {
-      if (primary) throw new AggregateError([primary, secondary], 'party journey and finalization both failed', { cause: primary });
+      if (primary) throw new AggregateError([primary, secondary],
+        `party journey failed: ${String(primary)}; finalization failed: ${String(secondary)}`, { cause: primary });
       throw secondary;
     }
   }
