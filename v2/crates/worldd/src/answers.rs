@@ -1954,10 +1954,12 @@ pub const TIMED_OUT: &str = "act.timed-out";
 pub const STOPPED: &str = "act.stopped";
 /// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done.
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
-/// A walk done at a place moved off the point it was sent to, that point in a doorway's or a stair's clearance (moved
-/// only as far as clears the passage itself) or off the ground a body stands on, as near as stands clear (#5254): said
-/// as its end's word, with how far (field 7, mm) and, for a passage, the thing it belongs to (field 9) and its kind
-/// (field 10: `doorway`, `stairs`, `ramp`, `ladder` or `step`).
+/// A walk done at a place moved off the point it was sent to (#5254): that point in a doorway's or a stair's clearance,
+/// moved out to a walker's clearance of it ([`sim::spots::CLEAR`], 0.7 m off the passage: A3), however far that is; or
+/// off the ground a body stands on, within a walker's goal tolerance of it ([`crate::bodies::STOPPED_SHORT_MM`]). A walk
+/// held off its point by a crowd is [`DONE_SHORT`] (A2-4) instead. Said as its end's word, with how far (field 7, mm)
+/// and, for a passage, the thing it belongs to (field 9) and its kind (field 10: `doorway`, `stairs`, `ramp`, `ladder`
+/// or `step`).
 pub const GOAL_MOVED: &str = "walk.goal-moved";
 
 /// A passage's kind as a walk's end names it (field 10, [`GOAL_MOVED`]).
