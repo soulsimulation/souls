@@ -5260,7 +5260,8 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
     };
     // Lifted from beside its ends, along its length.
     let mid = Vec3::new(pos.x + len.x * spec.height / 2 / M, 0, pos.z + len.z * spec.height / 2 / M);
-    let reach = 1_130_000;
+    // Beyond its ends (its grips 0.78 m from its middle), off the ground it lay on.
+    let reach = 1_300_000;
     both(&mut hands, [v3(mid.x + reach, 0, mid.z), v3(mid.x - reach, 0, mid.z)], "to its ends");
     let body = body_of(&w, w.souls[1]);
     let got = hands[0].act(
