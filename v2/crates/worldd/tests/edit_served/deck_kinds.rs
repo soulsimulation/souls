@@ -154,8 +154,14 @@ struct Yard {
 
 impl Yard {
     fn serve(tag: &str, souls: u64) -> Yard {
+        Yard::serve_edited(tag, souls, |_, f| f)
+    }
+
+    /// [`Yard::serve`] with the deck world's facts and entries changed first by `edit` (the scratch folder, the facts).
+    fn serve_edited(tag: &str, souls: u64, edit: impl FnOnce(&Path, String) -> String) -> Yard {
         let d = scratch(tag);
         let (facts, slots) = deck_world(&d);
+        let facts = edit(&d, facts);
         let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
         let w = seed_entries(
             &d,
@@ -650,5 +656,83 @@ fn deck_five_joists_seated_across_the_high_beams_from_where_their_put_is_admitte
         assert_eq!(y.joined(j), both, "{slot}: one joint to each 1.8 m beam");
         y.leave(0, c);
         y.leave(5, c);
+    }
+}
+
+/// The slot `node` is in, and the turn of its own pose there.
+fn yaw_in_slot(w: &Seeded, node: Id) -> (Option<u64>, Quat) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let n = t.node(t.handle(node).unwrap()).unwrap();
+    (n.slot(), n.place().unwrap().orientation)
+}
+
+/// Whether two turns are the same (a unit quaternion and its negation are one turn).
+fn same_turn(a: Quat, b: Quat) -> bool {
+    let (p, q) = (a.parts(), b.parts());
+    let d = |s: i64| (0..4).map(|k| (p[k] - s * q[k]).abs()).max().unwrap();
+    d(1).min(d(-1)) <= Quat::IDENTITY.parts()[0] / 10_000
+}
+
+/// FOR-FABLE 10, slots that declare a turn, in a served world by Souls' intents: the deck bay's two upright slots
+/// declare `turn_mdeg: 90000` (its entry, changed for this test). Frame 1 stands loose on `upright_a`'s place turned
+/// 90°, frame 2 on `upright_b`'s turned 270° (the half turn from it; a 12 ft frame is the same either way,
+/// `symmetry` `front_back`). Two take each frame from beside its edges and put it in its slot: frame 1 is seated turned
+/// 90° in it, frame 2 at the half turn, 270°, the nearer to how it is held, as a slot with no turn seats at 0 and 180.
+#[test]
+fn deck_slots_that_declare_a_turn_seat_their_frames_turned_90_and_the_half_turn_270() {
+    let turns = [("deck-frame-1", 90_000), ("deck-frame-2", 270_000)];
+    let mut y = Yard::serve_edited("deckturn", 5, |d, facts| {
+        let path = d.join("entries/deck_bay.json");
+        let mut bay = json::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let json::Value::Obj(top) = &mut bay else {
+            panic!("an entry")
+        };
+        let (_, json::Value::Obj(slots)) = top.iter_mut().find(|(k, _)| k == "slots").unwrap() else {
+            panic!("its slots")
+        };
+        for (name, s) in slots.iter_mut() {
+            if let (true, json::Value::Obj(s)) = (name.starts_with("upright_"), s) {
+                s.push(("turn_mdeg".into(), json::Value::Int(90_000)));
+            }
+        }
+        std::fs::write(&path, bay.to_json()).unwrap();
+        let mut f = json::parse(&facts).unwrap();
+        let json::Value::Obj(top) = &mut f else {
+            panic!("facts")
+        };
+        let (_, json::Value::Arr(things)) = top.iter_mut().find(|(k, _)| k == "things").unwrap() else {
+            panic!("things")
+        };
+        for t in things.iter_mut() {
+            let json::Value::Obj(t) = t else { continue };
+            let id = t.iter().find(|(k, _)| k == "id").and_then(|(_, v)| v.str()).map(str::to_owned);
+            if let Some((_, yaw)) = turns.iter().find(|(n, _)| Some(*n) == id.as_deref())
+                && let Some((_, json::Value::Arr(pose))) = t.iter_mut().find(|(k, _)| k == "pose")
+            {
+                pose[3] = json::Value::Int(i128::from(*yaw));
+            }
+        }
+        f.to_json()
+    });
+    for ((frame, yaw), (dz, (a, b), slot)) in turns
+        .into_iter()
+        .zip([(-1_448, (1, 2), "upright_a"), (1_448, (3, 4), "upright_b")])
+    {
+        // Beside its edges: 1.06 m either side of its middle along its own x, turned as it stands.
+        let q = Quat::from_yaw_mdeg(yaw).unwrap();
+        let e = q.rotate(v3(1_060_000, 0, 0)).unwrap();
+        let (ex, ez) = (e.x / 1000, e.z / 1000);
+        y.walk(&[(a, (ex, dz + ez)), (b, (-ex, dz - ez))], "beside a turned frame's edges");
+        let hold = y.crew(a, &[b]);
+        let f = y.id(frame);
+        assert!(same_turn(yaw_in_slot(&y.w, f).1, q), "{frame} stands turned {yaw} mdeg");
+        y.ok(a, "part:take", hold, Yard::part(f), "a turned 12 ft frame taken");
+        let p = y.slot_in(slot, &[]);
+        y.ok(a, "part:put", hold, p, slot);
+        let (in_slot, turn) = yaw_in_slot(&y.w, f);
+        println!("{frame} in slot {in_slot:?} turned {:?}", turn.parts());
+        assert_eq!(in_slot, Some(y.slots[slot]), "{frame} in {slot}");
+        assert!(same_turn(turn, q), "{frame} seated turned {yaw} mdeg in {slot}: {:?}", turn.parts());
     }
 }

@@ -209,6 +209,8 @@ pub struct Assembly {
     seating: Seating,
     /// The kinds a slot seats turned either way ([`symmetric_kinds`]).
     pub symmetric: std::collections::BTreeSet<String>,
+    /// The turn each slot that declares one seats its part at ([`slot_turns`]).
+    pub slot_turns: BTreeMap<(String, u64), i64>,
     /// The part each crew holds in its slot, taken and committed (or waiting to be).
     pub held: BTreeMap<Id, Id>,
     setting: BTreeMap<Id, Setting>,
@@ -599,10 +601,43 @@ pub fn symmetric_kinds(
         .collect()
 }
 
+/// Each slot whose entry declares `turn_mdeg` (FOR-FABLE 10), by its kind's plain name and its number (1, 2, ... in
+/// the entry's order, as the import numbers them): the turn about the vertical a part is seated at in it, from the
+/// thing's own axes, millidegrees. A slot that declares none seats its part unturned, as before.
+pub fn slot_turns(entries: &replica::rules::json::Value) -> BTreeMap<(String, u64), i64> {
+    use replica::rules::json::Value as Json;
+    let mut out = BTreeMap::new();
+    for (_, e) in entries.obj().unwrap_or(&[]) {
+        let (Some(kind), Some(slots)) = (e.get("kind").and_then(Json::str), e.get("slots").and_then(Json::obj))
+        else {
+            continue;
+        };
+        for (n, (_, s)) in (1u64..).zip(slots) {
+            if let Some(Json::Int(t)) = s.get("turn_mdeg")
+                && let Ok(t) = i64::try_from(*t)
+            {
+                out.insert((kind.to_owned(), n), t);
+            }
+        }
+    }
+    out
+}
+
+/// The turn slot `slot` of a thing of kind `kind` seats its part at (`turns`, [`slot_turns`]): unturned when it declares
+/// none.
+pub fn slot_turn(turns: &BTreeMap<(String, u64), i64>, kind: &str, slot: u64) -> R<Quat> {
+    let mdeg = turns
+        .get(&(replica::world_model::plain(kind).to_owned(), slot))
+        .copied()
+        .unwrap_or(0);
+    Quat::from_yaw_mdeg(mdeg).map_err(|e| refusal("part-pose", format!("{e:?}")))
+}
+
 impl Assembly {
     pub fn new(header: Header, rules: Rules, structure: Structure) -> Assembly {
         Assembly {
             symmetric: std::collections::BTreeSet::new(),
+            slot_turns: BTreeMap::new(),
             // The ground and audience are each crew's own, set as it acts ([`Assembly::aim`]).
             seating: Seating::new(
                 header.clone(),
@@ -1111,6 +1146,12 @@ impl Assembly {
         // A part the same turned a half turn about its upright is seated turned the nearer way to how it is held now
         // (#5067: `symmetry` `front_back`).
         let half = Quat::from_yaw_mdeg(180_000).map_err(pose)?;
+        // FOR-FABLE 10: a slot that declares a turn seats its part at it (and a part the same either way at it or a
+        // half turn from it); one that declares none, unturned.
+        let turned = match slot {
+            Some(k) => slot_turn(&self.slot_turns, tk.as_str(), k)?,
+            None => Quat::IDENTITY,
+        };
         let seat_turn = match slot.is_some()
             && self
                 .symmetric
@@ -1119,14 +1160,14 @@ impl Assembly {
             true => {
                 let now = from.1.then(held.orientation).map_err(pose)?;
                 let ax = |q: Quat| q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose);
-                let (a, b) = (ax(now)?, ax(x.rot)?);
+                let (a, b) = (ax(now)?, ax(x.rot.then(turned).map_err(pose)?)?);
                 if i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z) < 0 {
-                    half
+                    turned.then(half).map_err(pose)?
                 } else {
-                    Quat::IDENTITY
+                    turned
                 }
             }
-            false => Quat::IDENTITY,
+            false => turned,
         };
         let end = {
             let q = x

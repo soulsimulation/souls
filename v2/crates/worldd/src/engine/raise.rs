@@ -368,7 +368,7 @@ impl Engine {
     }
 
     /// Slot `k` of `bay` on `ground` for a part whose raise is `geo` (#5067): its pose on the ground (the slot's point,
-    /// the bay's turn), when the part's foot is within [`INTO_NEAR`] of it on the plan and the part stands turned as
+    /// the bay's turn and the slot's own, FOR-FABLE 10), when the part's foot is within [`INTO_NEAR`] of it on the plan and the part stands turned as
     /// the slot within [`INTO_COS`]; refused `raise.not-at-slot` naming how far, or `slot.occupied`.
     fn raise_slot(
         &self,
@@ -389,9 +389,20 @@ impl Engine {
             .find(|(n, _)| *n == k)
             .map(|(_, p)| p)
             .ok_or_else(|| refusal("slot.unknown", format!("{} has no slot {k}", show(bay))))?;
+        // FOR-FABLE 10: the bay's turn, then its slot's own when it declares one.
+        let kind = tree
+            .node(bh)
+            .map(|n| n.kind().as_str().to_owned())
+            .unwrap_or_default();
+        let slot_turn = match self.asm.as_ref() {
+            Some(a) => crate::assembly::slot_turn(&a.slot_turns, &kind, k)?,
+            None => Quat::IDENTITY,
+        };
         let turn = xform_to(tree, bh, gh)
             .map_err(|e| refusal("part-pose", e))?
-            .rot;
+            .rot
+            .then(slot_turn)
+            .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         if let Some(other) = tree
             .children(bh)
             .unwrap_or(&[])

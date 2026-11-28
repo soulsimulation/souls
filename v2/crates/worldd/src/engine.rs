@@ -995,6 +995,7 @@ impl Engine {
             structure(entries),
         );
         asm.symmetric = crate::assembly::symmetric_kinds(entries);
+        asm.slot_turns = crate::assembly::slot_turns(entries);
         if asm.any() {
             self.activities.structure = structure(entries);
             self.asm = Some(asm);
