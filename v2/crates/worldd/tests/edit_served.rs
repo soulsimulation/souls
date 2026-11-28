@@ -2357,6 +2357,9 @@ mod six_beam;
 #[path = "edit_served/slow_edit.rs"]
 mod slow_edit;
 
+#[path = "edit_served/teardown.rs"]
+mod teardown;
+
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
     let mut out = std::collections::BTreeSet::new();
