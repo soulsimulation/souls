@@ -7,7 +7,8 @@ import type { ViewportInsets, WorldViewerHandle, WorldViewerState } from './Worl
 import { requestBroadcast } from './follow-soul-request.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { earlyArrival } from './early-arrival.ts';
-import { arrivalCatching, arrivalFraction, heldLabel, initialPending, reasonDelayMs } from './viewer-arrival.ts';
+import { arrivalFraction, heldLabel, initialPending, reasonDelayMs } from './viewer-arrival.ts';
+import { arrivalCatching } from './arrival-catching.ts';
 import { ArrivalLight } from './ArrivalLight.tsx';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 import { assetBytes } from './asset-bytes.ts';

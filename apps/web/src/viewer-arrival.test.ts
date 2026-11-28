@@ -1,7 +1,8 @@
 // node --test apps/web/src/viewer-arrival.test.ts — #1266: one arrival progress for the bar and the light.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ARRIVAL_CATCH_MS, ARRIVAL_NOW_MS, ARRIVAL_STALE_MS, BYTES_SHARE, FIRST_FRAME, STARTED, WORLD_DATA, arrivalCatching, arrivalFraction, reasonDelayMs } from './viewer-arrival.ts';
+import { BYTES_SHARE, FIRST_FRAME, STARTED, WORLD_DATA, arrivalFraction, reasonDelayMs } from './viewer-arrival.ts';
+import { ARRIVAL_CATCH_MS, ARRIVAL_NOW_MS, ARRIVAL_STALE_MS, arrivalCatching } from './arrival-catching.ts';
 import { STREAM_CATCHING, STREAM_NOTICE } from './v2-engine/stream-health.ts';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 
