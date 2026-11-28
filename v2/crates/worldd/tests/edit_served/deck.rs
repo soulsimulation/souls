@@ -544,150 +544,6 @@ fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
     at.expect("a body row")
 }
 
-/// Racks T9 and T10's engine half, in a served world by Souls' intents, each on its own connection:
-///
-/// - the frame, the joists and the sheet are seated; the sheet holds a floor of its own, so seated it is a floor 2 m
-///   up, and the ground under it is still walked (its carriers stand there);
-/// - two take the stair flight and set it in its slot, its top hooked onto a rail;
-/// - a fifth Soul walks from the open ground up the flight onto the deck and across it: its body rows end on the
-///   sheet's floor, at the sheet's top;
-/// - a crew unseating the sheet under it is refused `part.stood-on`, naming the body; a crew unseating a joist under
-///   the sheet is refused `support.none`; the body is where it was;
-/// - the Soul walks down again, and the sheet comes off.
-#[test]
-fn deck_a_seated_sheet_is_a_floor_a_soul_walks_up_the_flight_onto_and_nothing_under_it_leaves() {
-    let mut k = Deck::serve("deck-floor", 5);
-    dump(&k.w, &[k.sheet, k.deck, k.flight]);
-    k.frame();
-    dump(&k.w, &[k.sheet, k.deck, k.flight]);
-    let g = k.w.ground;
-    let (sheet, flight, deck) = (k.sheet, k.flight, k.deck);
-    let [jb, jf] = k.joists;
-    let rails = k.rails;
-    for (j, slot, dz) in [(jb, "joist_back", -900), (jf, "joist_front", 900)] {
-        let c = k.crew_at((2, 3), (1_250, dz), "Souls 3 and 4 to a joist's ends");
-        done(k.take(2, c, j), "a joist taken");
-        done(k.put(2, c, slot, None), slot);
-        done(k.leave(2, c), "Soul 3 leaves");
-        done(k.leave(3, c), "Soul 4 leaves");
-    }
-    let c = k.crew_at((0, 1), SHEET_ENDS, "Souls 1 and 2 to the sheet's ends");
-    done(k.take(0, c, sheet), "Souls 1 and 2 take the sheet");
-    dump(&k.w, &[k.sheet, k.deck]);
-    let named = format!("{:?}", k.deck);
-    for p in logged(&k.w) {
-        for e in &p.effects {
-            let text = format!("{:?}", e.body);
-            if text.contains(&named) {
-                println!("names the deck: {:?} by {:?}: {}", e.envelope.cause, e.envelope.actor, &text[..text.len().min(600)]);
-            }
-        }
-    }
-    done(
-        k.put(0, c, "sheet", Some(&[jb, jf])),
-        "the sheet on both joists",
-    );
-    dump(&k.w, &[k.sheet, k.deck]);
-    done(k.leave(0, c), "Soul 1 leaves");
-    done(k.leave(1, c), "Soul 2 leaves");
-
-    // The flight: Souls 1 and 2 at its ends (each 350 mm beyond its grip), set in its slot 0.5 m aside, hooked onto
-    // the right rail.
-    k.walk(
-        &[(0, Deck::at(6_750, 500)), (1, Deck::at(250, 500))],
-        "Souls 1 and 2 to the flight's ends",
-    );
-    let c = k.crew(0, &[1]);
-    done(k.take(0, c, flight), "Souls 1 and 2 take the flight");
-    let got = k.put(0, c, "flight", Some(&[rails[1]]));
-    k.ok(got, "the flight set, hooked onto the right rail");
-    assert_eq!(where_is(&k.w, flight).0, Some(k.site), "the flight seated");
-    done(k.leave(0, c), "Soul 1 leaves");
-    done(k.leave(1, c), "Soul 2 leaves");
-    k.walk(
-        &[(0, Deck::at(6_000, -3_000)), (1, Deck::at(5_000, -3_000))],
-        "Souls 1 and 2 step away",
-    );
-
-    // Soul 5 walks up onto the deck, to a place in the sheet's own frame, then across it. Its first walk gives it its
-    // body.
-    k.walk(&[(4, Deck::at(6_000, 3_000))], "Soul 5 to the flight's foot");
-    let walker = body_of(&k.w, k.w.souls[4]);
-    dump(&k.w, &[k.site, sheet, flight, deck]);
-    println!("Soul 5 before: {:?}", body_on(&k.w, walker));
-    let up = |k: &mut Deck, node: Id, p: Vec3, what: &str| {
-        let to = BTreeMap::from([(1, Value::Array(vec![int(p.x), int(p.y), int(p.z)]))]);
-        k.hands[4].send("eden:walk", node, to);
-        let got = socket_end(&mut k.hands[4].s);
-        println!("{what}: {got:?}");
-        assert_eq!(got.kind, 1, "{what}");
-        let at = body_on(&k.w, walker);
-        println!("{what}: the body on {} at {:?}", show(at.0), at.1);
-        at
-    };
-    let (on, at) = up(&mut k, deck, v3(-400_000, 18_000, 0), "Soul 5 up onto the deck");
-    assert_eq!(on, deck, "the body stands on the sheet's floor");
-    assert_eq!(at.y, 18_000, "at the sheet's top");
-    assert!((at.x + 400_000).abs() < 300_000 && at.z.abs() < 300_000);
-    let (on, at) = up(&mut k, deck, v3(400_000, 18_000, 200_000), "Soul 5 across the deck");
-    assert_eq!((on, at.y), (deck, 18_000), "still on the deck");
-    assert!((at.x - 400_000).abs() < 300_000, "across it: {at:?}");
-
-    // Nothing under it leaves.
-    let under = k.crew_at((2, 3), SHEET_ENDS, "Souls 3 and 4 under the sheet's ends");
-    let got = k.unseat(2, under, sheet);
-    refused_as(&got, "part.stood-on", "the sheet out from under Soul 5");
-    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
-    assert_eq!(where_is(&k.w, sheet).0, Some(k.site), "the sheet stays");
-    done(k.leave(2, under), "Soul 3 leaves");
-    done(k.leave(3, under), "Soul 4 leaves");
-    let under = k.crew_at(
-        (2, 3),
-        (1_250, -900),
-        "Souls 3 and 4 under the back joist's ends",
-    );
-    let got = k.unseat(2, under, jb);
-    refused_as(&got, "support.none", "a joist out from under the deck");
-    assert_eq!(body_on(&k.w, walker).0, deck, "the body where it was");
-    done(k.leave(2, under), "Soul 3 leaves");
-    done(k.leave(3, under), "Soul 4 leaves");
-
-    // Down again, and the sheet comes off.
-    let (on, at) = up(&mut k, g, Deck::at(6_000, 3_000), "Soul 5 down to the ground");
-    assert_eq!((on, at.y), (g, 0), "on the open ground");
-    let c = k.crew_at((2, 3), SHEET_ENDS, "Souls 3 and 4 under the sheet's ends");
-    done(k.unseat(2, c, sheet), "the sheet off, nobody on it");
-    assert_eq!(where_is(&k.w, sheet).0, Some(c), "the sheet rides its crew");
-}
-
-/// What the served world holds under each of `ids`: kind, parent, slot and children, for a failing step's print.
-fn dump(w: &Seeded, ids: &[Id]) {
-    let (copy, _) = served_copy(w);
-    let t = copy.tree();
-    for &id in ids {
-        let Some(h) = t.handle(id) else {
-            println!("dump {}: not in the tree", show(id));
-            continue;
-        };
-        let n = t.node(h).unwrap();
-        let kids: Vec<String> = t
-            .children(h)
-            .unwrap_or(&[])
-            .iter()
-            .filter_map(|c| t.node(*c))
-            .map(|c| format!("{} {} slot {:?}", show(c.id()), c.kind().as_str(), c.slot()))
-            .collect();
-        let fields: Vec<String> = n.fields().keys().map(|k| format!("{k:?}")).collect();
-        println!(
-            "dump {} {} parent {:?} slot {:?} fields {fields:?} kids {kids:?}",
-            show(id),
-            n.kind().as_str(),
-            n.parent().map(show),
-            n.slot()
-        );
-    }
-}
-
 /// Every row of body `body` in the log, in order: the node it was on and its place there.
 fn body_rows(w: &Seeded, body: Id) -> Vec<(Id, Vec3)> {
     let mut out = Vec::new();
@@ -776,4 +632,452 @@ fn deck_a_soul_climbs_the_frame_to_a_standing_place_on_the_rail_and_the_rail_sta
     println!("Soul 5 climbs down: {got:?}");
     assert_eq!(got.kind, 1, "the climb down ends on the ground");
     assert_eq!(body_on(&k.w, walker).0, g, "on the open ground");
+}
+
+// --- The deck bay (racks T9, the brief's task 3): the scripted build's bay at #5258's sizes, in test kinds. ----------
+
+/// Where each 2x4 in the bay sits, mm from the bay's middle along z: `j2`, `j3`, `j4`.
+const JOISTS_Z: [i64; 3] = [-572, -2, 578];
+/// Where each sheet sits, mm from the bay's middle along z: `s1`, `s2`.
+const SHEETS_Z: [i64; 2] = [-612, 607];
+/// A seated sheet's top above the ground, mm: its slot's 1991 and its own 19.
+const BAY_DECK_TOP: i64 = 2_010;
+/// The stair slot's place in the bay, mm: its top at the sheets' west edge (x = -914), over `s1`, on `j2`'s line.
+const STAIR_AT: [i64; 2] = [-2_164, -572];
+
+/// N2's test world with a deck bay's parts at the site, in the test kinds `test_deck_*` (`#5258`'s sizes, with a
+/// `stair` slot and a flight that hooks onto a 2x4): the bay at the site's centre, its two 12 ft frames standing loose
+/// on their slots' places, its four beams lying outside their columns (the low ones 0.5 m out, the high ones 1 m),
+/// the three 2x4s lying under their slots, each sheet under its own, and the flight standing 0.5 m west of its slot.
+/// Each sheet holds a floor of its own, its top (19 mm up in its frame); the flight a stair from the ground to the
+/// deck's top and a landing beyond its top too small to stand on, as a roof stair's is (a thing's `floors` and
+/// `stairs`). Returns the facts and the bay's slot numbers, by name.
+fn bay_world(d: &Path) -> (String, BTreeMap<String, u64>) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    for dir in [root.join("construction"), fixtures()] {
+        for f in std::fs::read_dir(dir).unwrap() {
+            let p = f.unwrap().path();
+            if p.extension().is_some_and(|x| x == "json") {
+                std::fs::copy(&p, entries.join(p.file_name().unwrap())).unwrap();
+            }
+        }
+    }
+    std::fs::copy(
+        root.join("body/humanoid.json"),
+        entries.join("humanoid.json"),
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(fixtures().join("test_deck_bay.json")).unwrap();
+    let kind = replica::kinds::entry::entry_to_kind(&text).unwrap();
+    let mut kinds = replica::kinds::Kinds::default();
+    kinds.load(&[("test_deck_bay", kind.as_str())]);
+    let def = kinds
+        .admits()
+        .into_keys()
+        .find_map(|k| {
+            kinds
+                .get(&k)
+                .filter(|d| d.name.as_str().starts_with("mars:test_deck_bay@"))
+        })
+        .expect("the bay's kind");
+    let slots: Vec<(u64, String, [i64; 3])> = def
+        .slots
+        .iter()
+        .map(|(n, s)| {
+            (
+                *n,
+                s.name.as_ref().unwrap().as_str().to_owned(),
+                s.at_mm.unwrap_or([0, 0, 0]),
+            )
+        })
+        .collect();
+    let numbers = slots.iter().map(|s| (s.1.clone(), s.0)).collect();
+    let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    let ints = |v: &[i64]| json::Value::Arr(v.iter().map(|&x| num(x)).collect());
+    let refs = [
+        ("testworld-test-deck-bay@1", "mars:test_deck_bay"),
+        ("testworld-test-deck-frame@1", "mars:test_deck_frame"),
+        ("testworld-test-deck-beam@1", "mars:test_deck_beam"),
+        ("testworld-test-two-by-four@1", "mars:test_two_by_four"),
+        ("testworld-test-plywood@1", "mars:test_plywood"),
+        ("testworld-test-stair-flight@1", "mars:test_stair_flight"),
+    ];
+    let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+    let mut things: Vec<(String, usize, [i64; 4])> = vec![
+        ("bay".into(), 0, [x, 0, z, 0]),
+        ("frame-1".into(), 1, [x, 0, z - 1_448, 0]),
+        ("frame-2".into(), 1, [x, 0, z + 1_448, 0]),
+        ("beam-low-l".into(), 2, [x - 1_072, 0, z, 0]),
+        ("beam-low-r".into(), 2, [x + 1_072, 0, z, 0]),
+        ("beam-high-l".into(), 2, [x - 1_572, 0, z, 0]),
+        ("beam-high-r".into(), 2, [x + 1_572, 0, z, 0]),
+        (
+            "flight".into(),
+            5,
+            [x + STAIR_AT[0] - 500, 0, z + STAIR_AT[1], 0],
+        ),
+    ];
+    for (k, jz) in JOISTS_Z.iter().enumerate() {
+        things.push((format!("joist-{}", k + 2), 3, [x, 0, z + jz, 0]));
+    }
+    for (k, sz) in SHEETS_Z.iter().enumerate() {
+        things.push((format!("sheet-{}", k + 1), 4, [x, 0, z + sz, 0]));
+    }
+    let quad = |x0: i64, x1: i64, z0: i64, z1: i64| {
+        json::Value::Arr(vec![
+            ints(&[x0, z0]),
+            ints(&[x1, z0]),
+            ints(&[x1, z1]),
+            ints(&[x0, z1]),
+        ])
+    };
+    let floor = |y: i64, polygon: json::Value| {
+        json::Value::Arr(vec![json::Value::Obj(vec![
+            ("level".into(), num(1)),
+            ("y".into(), num(y)),
+            ("polygon".into(), polygon),
+        ])])
+    };
+    for (k, v) in top.iter_mut() {
+        match (k.as_str(), v) {
+            ("kinds", json::Value::Arr(a)) => {
+                for (r, name) in refs {
+                    a.push(json::Value::Obj(vec![
+                        ("ref".into(), json::Value::s(r)),
+                        (
+                            "hash".into(),
+                            json::Value::s(&replica::encode::to_hex(&replica::ids::sha256(
+                                format!("souls/testworld/{r}").as_bytes(),
+                            ))),
+                        ),
+                        ("name".into(), json::Value::s(name)),
+                        ("form".into(), json::Value::s("point")),
+                    ]));
+                }
+            }
+            ("things", json::Value::Arr(a)) => {
+                for (id, r, pose) in &things {
+                    let mut t = vec![
+                        ("id".into(), json::Value::s(id)),
+                        ("def".into(), json::Value::s(refs[*r].0)),
+                        ("ref".into(), json::Value::s(refs[*r].0)),
+                        ("parent".into(), json::Value::Null),
+                        ("pose".into(), ints(pose)),
+                        ("scale_ppm".into(), num(1_000_000)),
+                        ("name".into(), json::Value::s(id)),
+                    ];
+                    if *r == 4 {
+                        // The sheet's top, 19 mm up, in its own frame: 1829 mm by 1219.
+                        t.push(("floors".into(), floor(19, quad(-914, 914, -609, 609))));
+                    }
+                    if *r == 5 {
+                        // The flight: its stair from its foot (x -1250) up to its top (x 1250) at the deck's top, and
+                        // a landing 0.5 m beyond, over the deck.
+                        t.push((
+                            "floors".into(),
+                            floor(BAY_DECK_TOP, quad(1_250, 1_750, -450, 450)),
+                        ));
+                        let stair = json::Value::Obj(vec![
+                            ("id".into(), json::Value::s("bay-flight")),
+                            ("kind".into(), json::Value::s("stairs")),
+                            ("from".into(), num(0)),
+                            ("to".into(), num(1)),
+                            (
+                                "path".into(),
+                                json::Value::Arr(vec![ints(&[-1_250, 0]), ints(&[1_250, 0])]),
+                            ),
+                            ("width".into(), num(900)),
+                            ("y0".into(), num(0)),
+                            ("y1".into(), num(BAY_DECK_TOP)),
+                        ]);
+                        t.push(("stairs".into(), json::Value::Arr(vec![stair])));
+                    }
+                    if *r == 0 {
+                        let rows = slots
+                            .iter()
+                            .map(|(n, _, at)| {
+                                json::Value::Obj(vec![
+                                    ("n".into(), num(*n as i64)),
+                                    ("at".into(), ints(at)),
+                                    ("yaw".into(), num(0)),
+                                    ("capacity".into(), num(1)),
+                                ])
+                            })
+                            .collect();
+                        t.push(("slots".into(), json::Value::Arr(rows)));
+                    }
+                    a.push(json::Value::Obj(t));
+                }
+            }
+            _ => {}
+        }
+    }
+    (f.to_json(), numbers)
+}
+
+/// The deck bay's world served, its Souls each on its own connection, and its parts.
+struct Bay {
+    w: Seeded,
+    _s: Served,
+    hands: Vec<Hand>,
+    slots: BTreeMap<String, u64>,
+    bay: Id,
+    frames: [Id; 2],
+    low: [Id; 2],
+    high: [Id; 2],
+    joists: [Id; 3],
+    sheets: [Id; 2],
+    flight: Id,
+    /// The floor each sheet holds: its top.
+    decks: [Id; 2],
+}
+
+impl Bay {
+    fn at(dx: i64, dz: i64) -> Vec3 {
+        Deck::at(dx, dz)
+    }
+
+    fn serve(tag: &str, souls: u64) -> Bay {
+        let d = scratch(tag);
+        let (facts, slots) = bay_world(&d);
+        let (x, z) = (testworld::SITE_X, testworld::YARD_Z);
+        let w = seed_entries(
+            &d,
+            &facts,
+            souls,
+            ((x - 4_000) / 1000, (z - 5_000) / 1000),
+            Some(&d.join("entries")),
+        );
+        let socket = d.join("s");
+        let s = serve_with(&w, &socket, None);
+        s.line("listening ", 120);
+        let im = import_eden::load(&facts).unwrap();
+        let hands = w.souls.iter().map(|s| Hand::new(&socket, &w, *s)).collect();
+        let n = |k: &str| im.nodes[k];
+        Bay {
+            bay: n("bay"),
+            frames: [n("frame-1"), n("frame-2")],
+            low: [n("beam-low-l"), n("beam-low-r")],
+            high: [n("beam-high-l"), n("beam-high-r")],
+            joists: [n("joist-2"), n("joist-3"), n("joist-4")],
+            sheets: [n("sheet-1"), n("sheet-2")],
+            flight: n("flight"),
+            decks: [n("sheet-1/floor-1"), n("sheet-2/floor-1")],
+            w,
+            _s: s,
+            hands,
+            slots,
+        }
+    }
+
+    fn ok(&self, got: Got, what: &str) {
+        println!("{what}: {got:?}");
+        if got.kind != 1 {
+            for l in self._s.lines.try_iter().filter(|l| l.starts_with("worldd:")) {
+                println!("  {l}");
+            }
+            panic!("{what}: {got:?}");
+        }
+    }
+
+    fn walk(&mut self, to: &[(usize, Vec3)], what: &str) {
+        walk_all(&mut self.hands, self.w.ground, to, what);
+    }
+
+    fn crew(&mut self, a: usize, others: &[usize]) -> Id {
+        crew_of_all(&self.w, &mut self.hands, a, others)
+    }
+
+    fn act(&mut self, k: usize, form: &str, c: Id, p: Id) -> Got {
+        self.hands[k].act(form, c, BTreeMap::from([(1, p.to_value())]))
+    }
+
+    fn leave(&mut self, k: usize, c: Id) {
+        let got = self.hands[k].act("activity:leave", c, BTreeMap::new());
+        self.ok(got, &format!("Soul {} leaves", k + 1));
+    }
+
+    /// `part:put` into the bay's `slot`, joined to `joins` when given.
+    fn put(&mut self, k: usize, c: Id, slot: &str, joins: Option<&[Id]>) -> Got {
+        let mut p = BTreeMap::from([(1, self.bay.to_value()), (2, Value::Uint(self.slots[slot]))]);
+        if let Some(j) = joins {
+            p.insert(4, Value::Array(j.iter().map(|i| i.to_value()).collect()));
+        }
+        self.hands[k].act("part:put", c, p)
+    }
+
+    /// Souls `a` and `b` at the ends of a part lying or seated at `dz` from the bay's middle, each `dx` from it along
+    /// x, as a crew.
+    fn crew_at(&mut self, (a, b): (usize, usize), (dx, dz): (i64, i64), what: &str) -> Id {
+        self.walk(&[(a, Bay::at(-dx, dz)), (b, Bay::at(dx, dz))], what);
+        self.crew(a, &[b])
+    }
+
+    /// The frame as #5258's test builds it: each frame taken where it stands and put in its slot, one of its crew
+    /// staying to hold it; the four beams seated (the 0.5 m ones from where they lie, the 1.8 m ones carried in from
+    /// 1 m outside); the holders let go, and the frames stand on two levels of beams. Souls 1 to 4.
+    fn frame(&mut self) {
+        let mut holds = Vec::new();
+        for (k, (dz, holder, slot)) in [(-1_448, 1, "upright_a"), (1_448, 2, "upright_b")]
+            .into_iter()
+            .enumerate()
+        {
+            self.walk(
+                &[(0, Bay::at(1_060, dz)), (holder, Bay::at(-1_060, dz))],
+                "beside a frame's edges",
+            );
+            let hold = self.crew(0, &[holder]);
+            let got = self.act(0, "part:take", hold, self.frames[k]);
+            self.ok(got, "a 12 ft frame taken");
+            let got = self.put(0, hold, slot, None);
+            self.ok(got, slot);
+            self.leave(0, hold);
+            holds.push((holder, hold));
+        }
+        let mut crew = None;
+        for (beam, (dx, from, slot)) in [
+            (self.low[0], (-1_072, -1_072, "beam_low_l")),
+            (self.low[1], (1_072, 1_072, "beam_low_r")),
+            (self.high[0], (-1_072, -1_572, "beam_high_l")),
+            (self.high[1], (1_072, 1_572, "beam_high_r")),
+        ] {
+            self.walk(
+                &[(0, Bay::at(from, -1_547)), (3, Bay::at(from, 1_547))],
+                "Souls 1 and 4 to a beam's ends",
+            );
+            let c = match crew {
+                Some(c) => c,
+                None => self.crew(0, &[3]),
+            };
+            crew = Some(c);
+            let got = self.act(0, "part:take", c, beam);
+            self.ok(got, "a beam taken");
+            if from != dx {
+                self.walk(
+                    &[(0, Bay::at(dx, -1_547)), (3, Bay::at(dx, 1_547))],
+                    "the beam carried to 0.5 m outside its slot",
+                );
+            }
+            let got = self.put(0, c, slot, None);
+            self.ok(got, slot);
+            assert_eq!(joints_at(&self.w, beam), 2, "{slot} joins both frames");
+        }
+        for (holder, hold) in holds {
+            self.leave(holder, hold);
+        }
+        let c = crew.unwrap();
+        self.leave(0, c);
+        self.leave(3, c);
+    }
+
+    /// The deck: each 2x4 seated across the two 1.8 m beams by Souls 3 and 4 from where it lies, then each sheet on
+    /// its two 2x4s by Souls 1 and 2 (`s1` on `j2` and `j3`, `s2` on `j3` and `j4`).
+    fn deck(&mut self) {
+        let high = self.high;
+        for (k, (j, slot)) in self.joists.into_iter().zip(["j2", "j3", "j4"]).enumerate() {
+            let c = self.crew_at((2, 3), (1_082, JOISTS_Z[k]), "Souls 3 and 4 to a 2x4's ends");
+            let got = self.act(2, "part:take", c, j);
+            self.ok(got, "a 2x4 taken");
+            let got = self.put(2, c, slot, Some(&high));
+            self.ok(got, slot);
+            assert_eq!(joints_at(&self.w, j), 2, "{slot} rests on both 1.8 m beams");
+            self.leave(2, c);
+            self.leave(3, c);
+        }
+        let [j2, j3, j4] = self.joists;
+        for (k, (slot, on)) in [("s1", [j2, j3]), ("s2", [j3, j4])].into_iter().enumerate() {
+            let c = self.crew_at((0, 1), (1_264, SHEETS_Z[k]), "Souls 1 and 2 to a sheet's ends");
+            let got = self.act(0, "part:take", c, self.sheets[k]);
+            self.ok(got, "a sheet taken");
+            let got = self.put(0, c, slot, Some(&on));
+            self.ok(got, slot);
+            assert_eq!(joints_at(&self.w, self.sheets[k]), 2, "{slot}: its two joints");
+            self.leave(0, c);
+            self.leave(1, c);
+        }
+    }
+}
+
+/// Racks T9, the brief's task 3, in a served world by Souls' intents, each on its own connection:
+///
+/// - the bay's frames stand on four beams; three 2x4s rest on the 1.8 m beams and two plywood sheets on them, seated
+///   at 1.8 m, each sheet a floor at its top, 2.01 m up;
+/// - two take the stair flight (one part: its treads are part of it) and seat it in the bay's `stair` slot, its top at
+///   the first sheet's edge, hooked onto a 2x4: the declared way up;
+/// - a fifth Soul walks from the open ground up the flight onto the first sheet and across to the second: its body rows
+///   end on each sheet's floor, at its top;
+/// - a crew unseating the sheet under it is refused `part.stood-on`, naming the body;
+/// - the Soul walks down to the ground, and the sheet comes out.
+#[test]
+fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both() {
+    let mut k = Bay::serve("deck-bay", 5);
+    k.frame();
+    k.deck();
+    let g = k.w.ground;
+    let (flight, decks, sheets) = (k.flight, k.decks, k.sheets);
+
+    // The flight: Souls 1 and 2 at its ends (its grips 1 m from its middle, 0.35 m beyond), set in the stair slot
+    // 0.5 m east of where it stands, hooked onto j2.
+    let (fx, fz) = (STAIR_AT[0] - 500, STAIR_AT[1]);
+    k.walk(
+        &[(0, Bay::at(fx - 1_350, fz)), (1, Bay::at(fx + 1_350, fz))],
+        "Souls 1 and 2 to the flight's ends",
+    );
+    let c = k.crew(0, &[1]);
+    let got = k.act(0, "part:take", c, flight);
+    k.ok(got, "Souls 1 and 2 take the flight");
+    let got = k.put(0, c, "stair", Some(&[k.joists[0]]));
+    k.ok(got, "the flight in the stair slot, hooked onto j2");
+    assert_eq!(where_is(&k.w, flight).0, Some(k.bay), "the flight seated");
+    k.leave(0, c);
+    k.leave(1, c);
+    k.walk(
+        &[(0, Bay::at(-5_000, -3_500)), (1, Bay::at(-6_000, -3_500))],
+        "Souls 1 and 2 step away",
+    );
+
+    // Soul 5 walks up onto the first sheet, then across onto the second.
+    k.walk(&[(4, Bay::at(-4_500, STAIR_AT[1]))], "Soul 5 to the flight's foot");
+    let walker = body_of(&k.w, k.w.souls[4]);
+    let up = |k: &mut Bay, node: Id, p: Vec3, what: &str| {
+        let to = BTreeMap::from([(1, Value::Array(vec![int(p.x), int(p.y), int(p.z)]))]);
+        k.hands[4].send("eden:walk", node, to);
+        let got = socket_end(&mut k.hands[4].s);
+        println!("{what}: {got:?}");
+        assert_eq!(got.kind, 1, "{what}");
+        let at = body_on(&k.w, walker);
+        println!("{what}: the body on {} at {:?}", show(at.0), at.1);
+        at
+    };
+    let (on, at) = up(&mut k, decks[0], v3(0, 19_000, 0), "Soul 5 up onto the first sheet");
+    assert_eq!((on, at.y), (decks[0], 19_000), "on the first sheet's top");
+    let (on, at) = up(&mut k, decks[1], v3(0, 19_000, 200_000), "Soul 5 across to the second sheet");
+    assert_eq!((on, at.y), (decks[1], 19_000), "on the second sheet's top");
+
+    // Nothing under it leaves.
+    let under = {
+        k.walk(
+            &[(2, Bay::at(-1_264, SHEETS_Z[1])), (3, Bay::at(1_264, SHEETS_Z[1]))],
+            "Souls 3 and 4 under the second sheet's ends",
+        );
+        k.crew(2, &[3])
+    };
+    let got = k.act(2, "part:unseat", under, sheets[1]);
+    refused_as(&got, "part.stood-on", "the second sheet out from under Soul 5");
+    assert!(got.detail.contains(&show(walker)), "names the body: {got:?}");
+    assert_eq!(where_is(&k.w, sheets[1]).0, Some(k.bay), "the sheet stays");
+    assert_eq!(body_on(&k.w, walker).0, decks[1], "the body where it was");
+
+    // Down again, and the sheet comes out.
+    let (on, at) = up(&mut k, g, Bay::at(-5_000, 3_000), "Soul 5 down to the ground");
+    assert_eq!((on, at.y), (g, 0), "on the open ground");
+    let got = k.act(2, "part:unseat", under, sheets[1]);
+    k.ok(got, "the second sheet out, nobody on it");
+    assert_eq!(where_is(&k.w, sheets[1]).0, Some(under), "the sheet rides its crew");
 }
