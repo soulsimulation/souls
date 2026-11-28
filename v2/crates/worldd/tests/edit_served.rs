@@ -3123,21 +3123,22 @@ fn a2_parts_rest_at_the_grounds_height() {
     // A crew of Souls `ab` takes frame A from where it lies, puts it in upright_a, and Soul `ab.0` retires (it leaves
     // the world): Soul `ab.1` keeps the hold alone (a seated frame's holder may not just let go).
     let seat = |hands: &mut [Hand], ab: (usize, usize), fa: Id, what: &str| {
-        let (p, q) = frame_ends_of(&w, fa);
-        if what.contains("again") {
-            for (k, s) in w.souls.iter().enumerate() {
-                let (copy, _) = served_copy(&w);
-                let t = copy.tree();
-                let b = t
-                    .links_at(*s)
-                    .iter()
-                    .filter(|e| t.ty(e).as_str() == "souls:body-of")
-                    .find_map(|e| Some(t.link(e.link)?.1[0]));
-                drop(copy);
-                println!("{what}: Soul {} body {b:?} at {:?}", k + 1, b.map(|b| body_at(&w, b)));
-            }
-            println!("{what}: its ends {p:?} {q:?}");
-        }
+        // A frame standing loose is taken from beside its edges; one left standing in its slot from where its holders
+        // stand, behind its posts outside the bay (`grips::stance`: its posts 571.5 mm either side of its middle, 0.35 m
+        // off its 38 mm back face): its edges' places are in the bay its seated parts cut.
+        let (p, q) = if where_is(&w, fa).0 == Some(bay) {
+            let (copy, _) = served_copy(&w);
+            let t = copy.tree();
+            let x = sim::ground::scene::xform_to(t, t.handle(fa).unwrap(), t.handle(g).unwrap())
+                .unwrap();
+            let at = |dx: i64| {
+                let p = x.point(v3(dx, 0, -388_000)).unwrap();
+                v3(p.x, 0, p.z)
+            };
+            (at(571_500), at(-571_500))
+        } else {
+            frame_ends_of(&w, fa)
+        };
         both(hands, ab, p, q, what);
         let c = crew(hands, ab);
         let got = hands[ab.0].act("part:take", c, part(fa));
