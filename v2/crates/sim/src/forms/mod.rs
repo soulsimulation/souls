@@ -114,7 +114,7 @@ use replica::encode::{Name, Value};
 use replica::host::{Progress, Skill};
 use replica::ids::{Id, Minter};
 use replica::moves::Move;
-use replica::pose::{Frame, Vec3};
+use replica::pose::Vec3;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::who_may::{self, Answer, Who};
@@ -1493,23 +1493,19 @@ impl Forms {
             _ => body,
         };
         // A take of a thing in another body's hand is refused before any step, naming the holder (#5275): nothing
-        // walks or reaches for it. Its effect asks again at contact (`amounts`), as every take into a hand does.
+        // walks or reaches for it. Where the thing is counts this tick's entries (a take earlier in the tick). Its
+        // effect asks again at contact (`amounts`), as every take into a hand does.
         for e in &effects {
             if let form_runner::Effect::Take { what } = e {
                 let thing = match what {
                     form_runner::Of::This => node,
                     form_runner::Of::Node(id) => *id,
                 };
-                let at = w
-                    .tree
-                    .handle(thing)
-                    .and_then(|h| w.tree.node(h))
-                    .and_then(|n| {
-                        Some(Frame {
-                            node: n.parent()?,
-                            slot: n.slot(),
-                        })
-                    });
+                let at = amounts::View {
+                    tree: w.tree,
+                    out: &self.out,
+                }
+                .at(thing);
                 hands::not_held_by_another(w.controller, at, body, thing)?;
             }
         }

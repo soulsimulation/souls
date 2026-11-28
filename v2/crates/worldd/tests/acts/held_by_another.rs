@@ -33,19 +33,15 @@ fn i5275_a_take_of_a_thing_in_another_souls_hand_is_refused_by_name_until_it_is_
     a.act("test:take", Some(vessel()), BTreeMap::new())
         .expect("a takes the vessel");
     assert_eq!(parent(&run.replay(), vessel()).0, Some(w1()), "in a's hand");
-    // b comes beside a, within reach of the vessel and of a give.
-    b.act(
-        "test:walk",
-        Some(ground()),
-        point(Vec3::new(-40_500_000, 0, 30_000_000)),
-    )
-    .expect("b walks beside a");
+    // b asks from where it stands, 2.7 m away, out of reach: refused at once, so it neither walks nor reaches.
     let before = run.replay();
-    let at_b = before
-        .tree()
-        .node(before.tree().handle(w2()).unwrap())
-        .and_then(|n| n.place())
-        .map(|p| p.position);
+    let at_b = |r: &Replica| {
+        r.tree()
+            .node(r.tree().handle(w2()).unwrap())
+            .and_then(|n| n.place())
+            .map(|p| p.position)
+    };
+    let ended = endings(&run).len();
     let took = b.act("test:take", Some(vessel()), BTreeMap::new());
     let detail = b.detail();
     println!("#5275 b's take: {took:?} {detail:?}");
@@ -62,15 +58,19 @@ fn i5275_a_take_of_a_thing_in_another_souls_hand_is_refused_by_name_until_it_is_
         parent(&before, vessel()),
         "still in a's hand"
     );
+    assert_eq!(at_b(&after), at_b(&before), "b did not walk for it");
     assert_eq!(
-        after
-            .tree()
-            .node(after.tree().handle(w2()).unwrap())
-            .and_then(|n| n.place())
-            .map(|p| p.position),
-        at_b,
-        "b did not move for it"
+        endings(&run).len(),
+        ended,
+        "a take refused at its start writes no run's end: it never ran"
     );
+    // b comes beside a, within a give's reach.
+    b.act(
+        "test:walk",
+        Some(ground()),
+        point(Vec3::new(-40_500_000, 0, 30_000_000)),
+    )
+    .expect("b walks beside a");
     // a gives it; b accepts, and holds it.
     let give = a
         .act(
