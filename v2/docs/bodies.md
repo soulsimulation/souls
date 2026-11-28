@@ -103,8 +103,8 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    with no ground within 0.4 m is refused at the start, below). **A point on the open ground
    (FOR-FABLE 14, the client's `walk x,z`).** A walk to a point of the open ground, its height not read, goes to the
    ground a body may stand on at that point on the plan, the open ground's own (at its terrain's height) or a floor's
-   (a deck's top, a frame's standing place, a room), whichever is nearest the walker's own level of those its walk
-   may reach: a Soul on a frame's standing place sent to a
+   (a deck's top, a frame's standing place, a room), whichever is nearest the walker's own level, those its walk
+   may reach first: a Soul on a frame's standing place sent to a
    point beside the frame's foot climbs down to it; one on a deck sent to a point on it stays up. A point with no such
    ground under it and none within 0.4 m is refused `walk.no-ground-there`, naming the nearest point the walker may
    stand on and reach on the spot tables' rings out to 7 m, or that there is none; a point in a doorway's or a

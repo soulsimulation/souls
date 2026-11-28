@@ -384,7 +384,9 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             "its back: {h:?}"
         );
     }
-    // Each holder walks round to behind its post, 0.35 m off the frame's back.
+    // Each holder walks round to behind its post, 0.35 m off the frame's back (`grips::stance`). The lowering waits for
+    // the world to have each one at its stance (within 30 mm, where the world counts it arrived): while the world
+    // still carries the lifter there the lowering is refused `raise.way-blocked`, a load race on a busy runner.
     let end = Instant::now() + Duration::from_secs(20);
     loop {
         let feet = stood(&dir);
@@ -392,28 +394,63 @@ async fn raise_and_lower(tag: &str, restart: bool) {
             .holds
             .iter()
             .map(|h| {
-                let st = dir_of(
-                    stands.orientation,
-                    Vec3::new(h.hands[0].x, 0, -spec.half_thick - 350_000),
-                );
+                let st = dir_of(stands.orientation, grips::stance(h, Vec3::ZERO).0);
                 let p = Vec3::new(stands.position.x + st.x, 0, stands.position.z + st.z);
                 let f = feet[&h.body];
                 (i128::from(f.x - p.x).pow(2) + i128::from(f.z - p.z).pow(2)).isqrt()
             })
             .collect();
-        if offs.iter().all(|o| *o <= 100_000) {
+        if offs.iter().all(|o| *o <= 30_000) {
             println!("the holders stand behind its posts, {offs:?} µm off");
             break;
         }
         assert!(Instant::now() < end, "behind its posts: {offs:?} µm off");
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+    // And their walks there are over (a holder still walking to its stance has no way to walk the lowering yet, and a
+    // lowering asked then is refused `raise.way-blocked`): the holders stand where they stood half a second ago.
+    let mut last = stood(&dir);
+    loop {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let now = stood(&dir);
+        if held
+            .holds
+            .iter()
+            .all(|h| now.get(&h.body) == last.get(&h.body))
+        {
+            break;
+        }
+        assert!(Instant::now() < end, "the holders still walking");
+        last = now;
+    }
     // Lowered again by the same crew: laid down about the same foot, and let go.
     let before = samples(&dir, carry).len();
-    souls[0]
-        .act("part:lower", carry, BTreeMap::new())
-        .await
-        .expect("the lowering begins");
+    // At its last tick there the world may still carry it: refused `raise.way-blocked`, the lowering is asked once more
+    // when the lifter's body has moved no more (its stance reached), as an agent would on that refusal.
+    let lowered = souls[0].act("part:lower", carry, BTreeMap::new()).await;
+    if lowered.as_ref().err().map(String::as_str) == Some("raise.way-blocked") {
+        println!(
+            "the lowering refused raise.way-blocked while the lifter reached its stance: asked again"
+        );
+        let lifter = bodies[0];
+        let end = Instant::now() + Duration::from_secs(10);
+        let mut last = stood(&dir)[&lifter];
+        loop {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let now = stood(&dir)[&lifter];
+            if now == last {
+                break;
+            }
+            assert!(Instant::now() < end, "the lifter still moving: {now:?}");
+            last = now;
+        }
+        souls[0]
+            .act("part:lower", carry, BTreeMap::new())
+            .await
+            .expect("the lowering begins");
+    } else {
+        lowered.expect("the lowering begins");
+    }
     said(&dir, &served, carry, "souls:lowered", 1, 30).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     let all = samples(&dir, carry);

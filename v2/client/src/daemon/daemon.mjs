@@ -172,6 +172,7 @@ import { stats, transcriptOf } from '../stats/stats.mjs';
 import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, metresFrom, query } from './reads.mjs';
+import { climbNamed, climbOffers, placeAt, placesIn, rowsWithPlaces, waysOf } from '../view/ways.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { aboardOf, aboardWords } from '../check/aboard.mjs';
 import { otherSlot, wireArgs } from '../check/other-slot.mjs';
@@ -1996,7 +1997,7 @@ async function answer(req, conn = null) {
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
       const heard = named(rows, heardSince.splice(0)), mn = meNow(rows);
-      const b = brief(rows, { me: ME, changes, heard, doing: doingLines(rows, mineIn(rows)), ...mn, souls: soulsAround(rows, mn.metres), work: groupWork(rows, mn.metres), ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const b = brief(rows, { me: ME, places: placesIn(rows, heldKinds()), changes, heard, doing: doingLines(rows, mineIn(rows)), ...mn, souls: soulsAround(rows, mn.metres), work: groupWork(rows, mn.metres), ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       // Plainly, while this Soul has no body here: what it sees is the world without it, and what happens next.
       const away = (arrive(), arrival());
@@ -2009,7 +2010,7 @@ async function answer(req, conn = null) {
       // knows now (waiting for them, every find past a world's restart answered stale, `public-names-timeout`, in 2 s+).
       if (!age.stale && ws) publicNames.hydrate(ws, performance.now() + SYNC_WITHIN).catch((e) => log(`public names: ${String(e.message ?? e).slice(0, 160)}`));
       // Nearest first among equal matches, each with its metres from this Soul's body: anywhere in the world, no radius.
-      return closing({ ok: true }, (rows) => find(rows, req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
+      return closing({ ok: true }, (rows) => find(rowsWithPlaces(rows, heldKinds()), req.words, { limit: Math.min(Number(req.limit ?? 8), 50),
         metres: metresFrom(rows, [...rows.values()].find((r) => r.soul === ME)?.id, { placed: true }) ?? undefined, kinds: heldKinds() }), { age });
     }
     case 'wait': {
@@ -2128,6 +2129,10 @@ async function answer(req, conn = null) {
       const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
+      // A part's place (`../view/ways.mjs`): the walk goes to its floor node with the place's own point, as the engine's
+      // climb test sends it.
+      const place = keep.length === 1 && keep[0].verb === `${NS}:walk` && !keep[0].form && req.params?.[1] === undefined ? placeAt(rowsOf(copy), heldKinds(), keep[0].this) : null;
+      if (place) req.params = { ...(req.params ?? {}), 1: place.point };
       const lasts = repeatsFor(keep[0]);
       const { args, params } = wireArgs(keep[0].args, heldKinds(), rowsOf(copy), req.params);
       // A plain `act life:join`: while the client's own arrival join is on its way it is that join (one birth), and
@@ -2165,7 +2170,7 @@ async function answer(req, conn = null) {
     case 'upload': return upload(req);
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
-    case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
+    case 'query': { const rows = rowsWithPlaces(rowsOf(copy), heldKinds()), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
     case 'catalog': return closing(catalog(rowsOf(copy), kindsHeld(join(home, 'kinds'), copy)), null, { now: true });
     case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
     case 'batch': {
@@ -2187,7 +2192,10 @@ async function answer(req, conn = null) {
       if (req.action === undefined) return inspect(req);
       const seen = thingOf(req.this);
       if (!seen.ok) return closing(seen, null, { now: true });
-      const offer = offerNamed(seen.offers, req.action);
+      // `object <frame> climb to <place id | its name>` (`../view/ways.mjs`): a walk to that standing place.
+      const climb = climbNamed(seen.offers, req.action, req.args);
+      if (climb !== undefined) req.args = [];
+      const offer = climb !== undefined ? climb : offerNamed(seen.offers, req.action);
       if (!offer) {
         return closing({ ok: false, code: 'object.unknown-offer', detail: `${req.this} offers no ${req.action}`, did_you_mean: nearestOffers(seen.offers, req.action), offers: seen.offers.map((o) => o.name) }, null, { now: true });
       }
@@ -2495,7 +2503,9 @@ function thingOf(id) {
   }
   // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
   const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
-  return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: heldState(kinds).nodes[row.id]?.fields };
+  // A part's ways (`../view/ways.mjs`): its places that exist now, the ways up to them, and a climb to each standing place.
+  const ways = waysOf(rows, row, entry);
+  return { ok: true, row, entry, ways, offers: [...offersOf(row.id, entry, { moving: Boolean(row.moving) }), ...climbOffers(ways)], fields: heldState(kinds).nodes[row.id]?.fields };
 }
 
 /** A field the copy holds as bytes (hex), shown as its text when that is plain printable text. */
@@ -2515,14 +2525,16 @@ async function inspect(req) {
   const age = live ? await ageAfter() : null;
   if (live) seen = thingOf(req.this);
   if (!seen.ok) return closing(seen, null, { age });
-  const { row, entry, offers, fields } = seen;
+  const { row, entry, offers, fields, ways } = seen;
   const rows = rowsOf(copy), poses = posesOf(copy);
   const activity = activityCard(rows, row, mineIn(rows)), slots = slotsCard(rows, row, entry, (id) => poses.get(id)?.slot ?? null);
   return closing({
     ok: true, id: row.id, name: row.name, kind: row.kind, ...(row.parent ? { parent: row.parent } : {}), ...activity, ...slots,
     ...(row.path?.length ? { in: row.path.slice().reverse().join(', ') } : {}),
     ...(typeof entry?.text?.[entry?.card?.text] === 'string' ? { card: entry.text[entry.card.text] } : {}),
-    ...(fields ? { state: readable(fields) } : {}), ...(row.hours ? { hours: row.hours } : {}), offers,
+    ...(fields ? { state: readable(fields) } : {}), ...(row.hours ? { hours: row.hours } : {}),
+    ...(ways?.places.length ? { places: ways.places.map((p) => ({ id: p.id, name: p.name, walk: `act ${p.id}` })) } : {}),
+    ...(ways?.ways.length ? { ways_up: ways.ways.map((w) => ({ name: w.name, to: w.to })) } : {}), offers,
     ...(entry || activity ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
   }, null, live ? { age } : { now: true });
 }
