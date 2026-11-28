@@ -394,10 +394,14 @@ impl Engine {
             .node(bh)
             .map(|n| n.kind().as_str().to_owned())
             .unwrap_or_default();
-        let slot_turn = match self.asm.as_ref() {
-            Some(a) => crate::assembly::slot_turn(&a.slot_turns, &kind, k)?,
-            None => Quat::IDENTITY,
-        };
+        let turn_mdeg = self.asm.as_ref().map_or(0, |a| {
+            a.slot_turns
+                .get(&(plain(&kind).to_owned(), k))
+                .copied()
+                .unwrap_or(0)
+        });
+        let slot_turn =
+            Quat::from_yaw_mdeg(turn_mdeg).map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         let turn = xform_to(tree, bh, gh)
             .map_err(|e| refusal("part-pose", e))?
             .rot
@@ -435,12 +439,18 @@ impl Engine {
                 "raise.not-at-slot",
                 format!(
                     "{}'s foot is {} mm from slot {k} of {} (at most {} mm), turned {} thousandths from its turn \
-                     (at least {INTO_COS}); next: lay it with its foot at the slot, its face as the bay's frames face",
+                     (at least {INTO_COS}); next: lay it with its foot at the slot, {}",
                     show(part),
                     off / 1000,
                     show(bay),
                     INTO_NEAR / 1000,
-                    cos
+                    cos,
+                    match turn_mdeg {
+                        0 => "its face as the bay's frames face".to_owned(),
+                        t => format!(
+                            "its face as the slot faces: turned {t} millidegrees from the bay's frames"
+                        ),
+                    }
                 ),
             ));
         }
