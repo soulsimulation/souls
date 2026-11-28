@@ -143,6 +143,10 @@ test('64 read ahead are played in their order, and a refused read backs off to o
   await polls[0]();
   assert.deepEqual(posted.filter((m) => m.t === 'error'), []);
   assert.equal(Math.max(...posted.filter((m) => m.t === 'part').map((m) => m.p!.number)), 200, 'all played, in order (a gap would have thrown)');
+  // A part's words file that is not there (404) is asked for once, not again with every later part's read ahead
+  const asked = new Map<string, number>();
+  for (const p of reads) if (p.endsWith('.text')) asked.set(p, (asked.get(p) ?? 0) + 1);
+  assert.ok(asked.size > 0 && Math.max(...asked.values()) === 1, `each missing words file read once (${Math.max(...asked.values())} at most)`);
 
   // The pointer names 100 more parts, which the edge refuses: the poll that finds it out has asked for 64, but from then
   // on no poll asks for more than one.

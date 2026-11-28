@@ -240,7 +240,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const day = shownMs !== null ? momentDay(shownMs, zone) : worldTime?.includes(' · ') ? worldTime.split(' · ')[0] : '';
   const ago = recorded && shownMs !== null ? momentAgo(shownMs, Date.now()) : '';
   // 27 Nov: a cold arrival's first picture is the stream's checkpoint, up to an hour back: Catching up until it is at
-  // now, once (viewer-arrival.ts arrivalCatching); later lags say why through the reasons above, as before
+  // now, once (arrival-catching.ts); later lags say why through the reasons above, as before
   const drawnAt = useRef<number | null>(null), reachedNow = useRef(false);
   if (shownMs !== null && !state?.loading) drawnAt.current ??= performance.now();
   const catchingUp = v2 && !recorded && !arriving && shownMs !== null && !reachedNow.current

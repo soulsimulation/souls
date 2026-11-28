@@ -55,9 +55,9 @@ let refused = false;
 let fails = 0;
 
 /** `timed`: given up after READ_MS. Baselines are not: a slow viewer's 9 MB baseline may well take longer. */
-async function get(url: URL, timed = false): Promise<Uint8Array | null> {
-  const res = await fetch(url, { cache: 'no-store', ...(timed ? { signal: AbortSignal.timeout(READ_MS) } : {}) }).catch((e) => { refused = true; throw e; });
-  if (!res.ok && res.status !== 404) refused = true;
+async function get(url: URL, timed = false, onRefused?: () => void): Promise<Uint8Array | null> {
+  const res = await fetch(url, { cache: 'no-store', ...(timed ? { signal: AbortSignal.timeout(READ_MS) } : {}) }).catch((e) => { refused = true; onRefused?.(); throw e; });
+  if (!res.ok && res.status !== 404) { refused = true; onRefused?.(); }
   return res.ok ? new Uint8Array(await res.arrayBuffer()) : null;
 }
 
@@ -183,17 +183,19 @@ async function run(stream: URL) {
   // A part's file (`suffix` '') or its words ('.text'), with the next AHEAD the pointer names already asked for.
   const fetching = new Map<string, Promise<Uint8Array | null>>();
   // While reads are refused (#5068 item 13), and after they were until a part is read again, only the part played is asked
-  // for, never AHEAD at once; and a read ahead that failed is not kept for its part's turn, which reads it again (it used
-  // to leave one part a poll after an outage).
+  // for, never AHEAD at once; and a read ahead that was refused is not kept for its part's turn, which reads it again (it
+  // used to leave one part a poll after an outage). A file that is not there (404: a part with no words) is kept, as
+  // before, so it is asked for once, not again with every later part's read ahead.
   let partRead = false;
   const partFile = (p: StreamPointer, n: number, suffix: string): Promise<Uint8Array | null> => {
     const ahead = refused || (fails > 0 && !partRead) ? 1 : AHEAD;
     for (let k = n; k < n + ahead && k <= (p.newest ?? n); k++) {
       const file = path(p, `${k}${suffix}`);
       if (fetching.has(file)) continue;
-      const read = get(new URL(file, stream), true).catch(() => null);
+      let lost = false;
+      const read = get(new URL(file, stream), true, () => { lost = true; }).catch(() => null);
       fetching.set(file, read);
-      void read.then((b) => { if (b) partRead = true; else if (fetching.get(file) === read) fetching.delete(file); });
+      void read.then((b) => { if (b) partRead = true; else if (lost && fetching.get(file) === read) fetching.delete(file); });
     }
     const file = path(p, `${n}${suffix}`);
     const bytes = fetching.get(file) ?? get(new URL(file, stream), true);
