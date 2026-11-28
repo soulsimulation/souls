@@ -771,6 +771,13 @@ export class WorldEntityLayer {
   private overrideYaw = new Map<string, number>();
   /** PC13 (#692): a loose part a crew raises turns about its own z; the recording owns that too, while their hands are on it. */
   private overrideRoll = new Map<string, number>();
+  private nativeEuler=new THREE.Euler(0,0,0,'YXZ');
+  private nativeTransports=new Map<string,{p:readonly number[];q:readonly number[]}>();
+  /** Complete native world poses, sampled on the same clock as bodies; no world-edit easing. */
+  nativeTransportPoses(poses:Record<string,{p:readonly number[];q:readonly number[]}>){
+    for(const id of this.nativeTransports.keys())if(!poses[id]){this.live.add(id);const d=this.drawn.get(id);if(d)d.settled=false;}
+    this.nativeTransports=new Map(Object.entries(poses));for(const id of this.nativeTransports.keys())this.live.add(id);
+  }
   private recordedItems = new Set<string>();
   private missingItemAt = new Map<string,number>();
   private lightMoves = new Set<string>();
@@ -952,8 +959,8 @@ export class WorldEntityLayer {
       // P1: a settled, still thing (eased in, no motion, not ridden or held) keeps its pose: only its interior visibility can
       // change. On the freeze tiers a lamp whose only motion is its glow counts as still too (glowPass keeps its level).
       // PERF-EVENTLOOP: either leaves `live` after this still pass and is not visited again until an event wakes it.
-      const stillInst = !!d.inst && !!d.settled && !d.motion && !d.removing && d.obj.userData.cupShown === undefined && !this.overrides.has(id) && !this.held.has(id) && !this.pours.has(id);
-      if (stillInst || (d.settled && !d.inst && (!d.motion || (this.freezeSettled && d.motion.glowOnly)) && !d.removing && !this.overrides.has(id) && !this.held.has(id))) { this.stillPass(id, d, nowMs); this.live.delete(id); continue; }
+      const stillInst = !!d.inst && !!d.settled && !d.motion && !d.removing && d.obj.userData.cupShown === undefined && !this.overrides.has(id) && !this.nativeTransports.has(id) && !this.held.has(id) && !this.pours.has(id);
+      if (stillInst || (d.settled && !d.inst && (!d.motion || (this.freezeSettled && d.motion.glowOnly)) && !d.removing && !this.overrides.has(id) && !this.nativeTransports.has(id) && !this.held.has(id))) { this.stillPass(id, d, nowMs); this.live.delete(id); continue; }
       if (d.frozen) this.thaw(d);
       const t = easeOut((nowMs - d.t0) / 1000 / d.dur);
       d.obj.position.lerpVectors(d.from.p, d.to.p, t);
@@ -961,15 +968,16 @@ export class WorldEntityLayer {
       // the engine's mug is the same timeline resolved on a 1.75 m body, the drawn one on this rig's own lips
       const cupHand = !d.removing && this.held.has(id) && !d.obj.userData.handleGrip && this.cupHeld(id, d);
       const ride = cupHand ? undefined : this.overrides.get(id); if (ride) { d.obj.position.copy(ride); const yaw = this.overrideYaw.get(id); if (yaw !== undefined) d.obj.rotation.y = -yaw; const roll = this.overrideRoll.get(id); if (roll !== undefined) d.obj.rotation.z = roll; }
+      const native=this.nativeTransports.get(id);if(native){d.obj.position.fromArray(native.p);d.obj.quaternion.set(native.q[1],native.q[2],native.q[3],native.q[0]);}
       const s = d.from.s + (d.to.s - d.from.s) * t;
       d.obj.scale.setScalar(s);
       const shown = this.interiorVisible(id, d) && !this.juggled?.has(id);
-      const inHand = cupHand || (!ride && !d.removing && this.held.has(id) && (d.obj.userData.handleGrip ? this.handleHeld(id, d) : this.handPoint(this.held.get(id)!, d.obj.position)));
+      const inHand = !native && (cupHand || (!ride && !d.removing && this.held.has(id) && (d.obj.userData.handleGrip ? this.handleHeld(id, d) : this.handPoint(this.held.get(id)!, d.obj.position))));
       if (!inHand || !d.obj.userData.cupShown) this.cupWater(id, null);
       if (!inHand && this.pours.has(id)) this.pours.get(id)!.visible = false;
       if (d.inst) {
         if (d.removing && t >= 1) { this.instancer.remove(d.inst, id); this.drawn.delete(id); continue; }
-        if (inHand || ride || !d.settled || shown !== (d.shown ?? true) || d.obj.userData.cupShown !== undefined) { if (d.obj.userData.cupShown === false) d.obj.userData.cupShown = undefined; this.instancer.set(d.inst, id, d.obj.position, d.obj.rotation.y, shown ? d.obj.scale.x : 0, [d.obj.rotation.x, d.obj.rotation.z]); d.shown = shown; if (t >= 1) d.settled = true; }
+        if (native || inHand || ride || !d.settled || shown !== (d.shown ?? true) || d.obj.userData.cupShown !== undefined) { if (d.obj.userData.cupShown === false) d.obj.userData.cupShown = undefined; const r=this.nativeTransports.has(id)?this.nativeEuler.setFromQuaternion(d.obj.quaternion,'YXZ'):d.obj.rotation; this.instancer.set(d.inst, id, d.obj.position, r.y, shown ? d.obj.scale.x : 0, [r.x, r.z]); d.shown = shown; if (t >= 1) d.settled = true; }
         continue;
       }
       d.obj.visible = shown;
@@ -981,8 +989,8 @@ export class WorldEntityLayer {
       // PERF-PASSES: a motion thing wholly outside the view (a conservative sphere measured once it settled) is animated every
       // 2nd frame when it moves about (a route, a creature's rig), every 4th otherwise: motion is a function of world time,
       // so it is exactly where it would be when it comes into view. In view, held or ridden: every frame, as before.
-      if (d.motion && t >= 1 && !inHand && shown && moving && (!view || ride || this.motionInView(d, view, d.k! + frame))) animate(d.obj, d.motion.entity, d.motion.def, nowMs / 1000, { y: ride ? ride.y : d.to.p.y, yaw: ride && this.overrideYaw.has(id) ? -this.overrideYaw.get(id)! : d.motion.yaw });
-      if (ride) { d.obj.position.x = ride.x; d.obj.position.z = ride.z; }
+      if (!native && d.motion && t >= 1 && !inHand && shown && moving && (!view || ride || this.motionInView(d, view, d.k! + frame))) animate(d.obj, d.motion.entity, d.motion.def, nowMs / 1000, { y: ride ? ride.y : d.to.p.y, yaw: ride && this.overrideYaw.has(id) ? -this.overrideYaw.get(id)! : d.motion.yaw });
+      if (ride&&!native) { d.obj.position.x = ride.x; d.obj.position.z = ride.z; }
     }
     void dt;
   }
@@ -1004,7 +1012,7 @@ export class WorldEntityLayer {
    *  that changed; a drawn one shows or hides (its batch re-prepares); a steady lamp seen with a stale glow syncs. */
   private refreshVisibility(id: string, d: Drawn, nowMs: number) {
     const shown = this.interiorVisible(id, d);
-    if (d.inst) { if (shown !== (d.shown ?? true)) { this.instancer.set(d.inst, id, d.obj.position, d.obj.rotation.y, shown ? d.obj.scale.x : 0, [d.obj.rotation.x, d.obj.rotation.z]); d.shown = shown; } return; }
+    if (d.inst) { if (shown !== (d.shown ?? true)) { const r=this.nativeTransports.has(id)?this.nativeEuler.setFromQuaternion(d.obj.quaternion,'YXZ'):d.obj.rotation; this.instancer.set(d.inst, id, d.obj.position, r.y, shown ? d.obj.scale.x : 0, [r.x, r.z]); d.shown = shown; } return; }
     if (shown !== d.obj.visible) { d.obj.visible = shown; if (d.frozen) this.staticRevision++; }
     if (shown && d.glowStale && this.glowSteady.has(id) && !this.immutable) this.syncGlow(d, nowMs);
   }
