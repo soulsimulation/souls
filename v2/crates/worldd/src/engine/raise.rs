@@ -410,12 +410,16 @@ impl Engine {
         carry: Carry,
         now: Micros,
     ) -> Option<Carry> {
-        let node = tree.handle(load).and_then(|h| tree.node(h));
-        let spec = node.and_then(|n| self.raise_specs.get(plain(n.kind().as_str())).copied());
         // As a raise's take holds it: at its foot, unturned in the slot.
-        let at_foot = node.and_then(|n| n.place()).is_some_and(|p| {
-            p.position == Vec3::ZERO && p.orientation == replica::pose::Quat::IDENTITY
-        });
+        let (spec, at_foot) = match tree.handle(load).and_then(|h| tree.node(h)) {
+            Some(n) => (
+                self.raise_specs.get(plain(n.kind().as_str())).copied(),
+                n.place().is_some_and(|p| {
+                    p.position == Vec3::ZERO && p.orientation == replica::pose::Quat::IDENTITY
+                }),
+            ),
+            None => (None, false),
+        };
         let found = match spec.filter(|_| at_foot) {
             Some(spec) => Raise::resume(spec, here.0, here.1).ok().flatten(),
             None => None,
