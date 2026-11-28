@@ -5279,9 +5279,6 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
     let got = hands[0].act("carry:lift", crew, BTreeMap::from([(1, frame.to_value())]));
     assert_eq!(got.kind, 1, "lifted: {got:?}");
     std::thread::sleep(Duration::from_secs(2));
-    // Turned in their hands so its length points outward from the bay (-z): a quarter turn.
-    // A node's pose on the ground; one riding the crew's slot (which is no slot of its fields), the crew's node's pose
-    // times its place there.
     let pose_of = |id: Id| {
         let (copy, _) = served_copy(&w);
         let t = copy.tree();
@@ -5289,6 +5286,7 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
         if let Ok(x) = sim::ground::scene::xform_to(t, h, t.handle(g).unwrap()) {
             return (x.pos, x.rot);
         }
+        // Riding the crew's slot (no slot of its fields): the crew's node's pose times its place there.
         let n = t.node(h).unwrap();
         let place = n.place().unwrap();
         let ph = t.handle(n.parent().unwrap()).unwrap();
@@ -5296,35 +5294,13 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
         let o = x.rot.rotate(place.position).unwrap();
         (Vec3::new(x.pos.x + o.x, x.pos.y + o.y, x.pos.z + o.z), x.rot.then(place.orientation).unwrap())
     };
-    let (_, rot) = pose_of(frame);
-    let len = rot.rotate(Vec3::new(0, M, 0)).unwrap();
-    let (n0, nq) = pose_of(crew);
-    let h0 = nq.rotate(Vec3::new(M, 0, 0)).unwrap();
-    // The turn that takes its length to -z, applied to the carry's heading.
-    let a = (-(len.z as f64)).atan2(len.x as f64);
-    let want = std::f64::consts::FRAC_PI_2;
-    // The shorter way round (the world takes it so too).
-    let turn = (want - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
-    let (c, sn) = (turn.cos(), turn.sin());
-    let heading = [(h0.x as f64 * c + h0.z as f64 * sn) as i64, (-(h0.x as f64) * sn + h0.z as f64 * c) as i64];
-    let got = hands[1].act(
-        "carry:turn",
-        crew,
-        BTreeMap::from([(3, Value::Array(vec![int(heading[0]), int(0), int(heading[1])]))]),
-    );
-    println!("turned {} degrees: {got:?}", (turn.to_degrees()).round());
-    assert_eq!(got.kind, 1, "the turn: {got:?}");
-    std::thread::sleep(Duration::from_secs(5));
-    let (fpos, rot) = pose_of(frame);
-    let len = rot.rotate(Vec3::new(0, M, 0)).unwrap();
-    let (n1, _) = pose_of(crew);
-    println!("turned: its length {len:?}, the crew's node from {n0:?} to {n1:?}");
-    assert!(len.z < -990_000, "its length outward, along -z: {len:?}");
-    // Carried so its foot comes down at upright_a: the whole crew moved by the foot's way there, led by its front, its
-    // heading kept ([`heading_walk`]: the world keeps the back in its place); again for what a walk's end leaves.
-    let mut fpos = fpos;
+    // Carried along its length to the bay, led by its front, its heading kept ([`heading_walk`]: the world keeps the
+    // back in its place), its middle to where it is to turn: its foot will come down at upright_a once its length
+    // points outward (-z), half its length south of there. Again for what a walk's end leaves.
+    let target = v3(ua.x, 0, ua.z - spec.height / 2);
     for leg in 0..3 {
-        let (dx, dz) = (ua.x - fpos.x, ua.z - fpos.z);
+        let (n, _) = pose_of(crew);
+        let (dx, dz) = (target.x - n.x, target.z - n.z);
         if leg > 0 && (dx.abs() + dz.abs()) <= 60_000 {
             break;
         }
@@ -5338,9 +5314,32 @@ fn a_frame_carried_from_the_pile_is_turned_set_down_at_its_slot_and_raised_into_
         let e = socket_end(&mut hands[1].s);
         assert_eq!(e.kind, 1, "the back to the bay: {e:?}");
         std::thread::sleep(Duration::from_millis(500));
-        fpos = pose_of(frame).0;
-        println!("leg {leg}: its foot {} mm from upright_a", apart_mm(fpos, ua));
+        println!("leg {leg}: its middle {} mm from where it turns", apart_mm(pose_of(crew).0, target));
     }
+    // Turned in their hands so its length points outward from the bay (-z): a quarter turn.
+    let (_, rot) = pose_of(frame);
+    let len = rot.rotate(Vec3::new(0, M, 0)).unwrap();
+    let (n0, nq) = pose_of(crew);
+    let h0 = nq.rotate(Vec3::new(M, 0, 0)).unwrap();
+    // The turn that takes its length to -z, applied to the carry's heading, the shorter way round.
+    let a = (-(len.z as f64)).atan2(len.x as f64);
+    let want = std::f64::consts::FRAC_PI_2;
+    let turn = (want - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    let (c, sn) = (turn.cos(), turn.sin());
+    let heading = [(h0.x as f64 * c + h0.z as f64 * sn) as i64, (-(h0.x as f64) * sn + h0.z as f64 * c) as i64];
+    let got = hands[1].act(
+        "carry:turn",
+        crew,
+        BTreeMap::from([(3, Value::Array(vec![int(heading[0]), int(0), int(heading[1])]))]),
+    );
+    println!("turned {} degrees: {got:?}", (turn.to_degrees()).round());
+    assert_eq!(got.kind, 1, "the turn: {got:?}");
+    std::thread::sleep(Duration::from_secs(5));
+    let (_, rot) = pose_of(frame);
+    let len = rot.rotate(Vec3::new(0, M, 0)).unwrap();
+    let (n1, _) = pose_of(crew);
+    println!("turned: its length {len:?}, the crew's node from {n0:?} to {n1:?}");
+    assert!(len.z < -990_000, "its length outward, along -z: {len:?}");
     let got = hands[0].act("carry:set-down", crew, BTreeMap::new());
     assert_eq!(got.kind, 1, "set down: {got:?}");
     std::thread::sleep(Duration::from_secs(2));
