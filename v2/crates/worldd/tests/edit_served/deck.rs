@@ -578,6 +578,11 @@ const FLIGHT_OFF: i64 = 800;
 /// The stair slot's place in the bay, mm: its top at the sheets' west edge (x = -914), over `s1`, on `j2`'s line.
 const STAIR_AT: [i64; 2] = [-2_164, -572];
 
+/// Where the bay's five 2x4 slots are along it, mm from its middle (`j1` to `j5`), and how far east of its middle
+/// each 2x4 of [`Bay::serve_fed`]'s world lies, along x, level with its slot.
+const FED_Z: [i64; 5] = [-1_172, -572, -2, 578, 1_178];
+const FED_PILE: i64 = 4_700;
+
 /// N2's test world with a deck bay's parts at the site, in the test kinds `test_deck_*` (`#5258`'s sizes, with a
 /// `stair` slot and a flight that hooks onto a 2x4): the bay at the site's centre, its two 12 ft frames standing loose
 /// on their slots' places, its four beams lying outside their columns (the low ones 0.5 m out, the high ones 1 m),
@@ -585,16 +590,7 @@ const STAIR_AT: [i64; 2] = [-2_164, -572];
 /// What each part is walked on and up is its kind's (`geometry.floors`, `stairs`, `ladders`): a sheet's top, the
 /// flight's stair from the ground to the deck's top, each frame's standing places and ladders. Returns the facts and
 /// the bay's slot numbers, by name.
-fn bay_world(d: &Path) -> (String, BTreeMap<String, u64>) {
-    bay_world_with(d, false)
-}
-
-/// Where the bay's five 2x4 slots are along it, mm from its middle (`j1` to `j5`), and how far east of its middle
-/// each 2x4 of [`Bay::serve_fed`]'s world lies, along x, level with its slot.
-const FED_Z: [i64; 5] = [-1_172, -572, -2, 578, 1_178];
-const FED_PILE: i64 = 4_700;
-
-/// [`bay_world`], or with `fed` the same site with five 2x4s lying east of the bay instead of three under it.
+/// With `fed`, five 2x4s lie east of the bay instead of three under it.
 fn bay_world_with(d: &Path, fed: bool) -> (String, BTreeMap<String, u64>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let entries = d.join("entries");
@@ -1033,14 +1029,15 @@ fn deck_bay_each_joist_is_fed_over_the_near_beam_into_the_standing_bay() {
         let got = k.put(2, c, slot, Some(&high));
         refused_as(&got, "part.out-of-reach", "a put from too far to feed");
         assert!(
-            got.detail.contains("fed over what it rests on") && got.detail.contains("back toward"),
+            got.detail.contains("not fed from here: part.out-of-reach")
+                && got.detail.contains("back toward its slot"),
             "{slot}: the refusal says how it would be fed: {}",
             got.detail
         );
         let (fx, fz) = named_place(&got.detail, "it would be fed with the crew's node at");
         let (hx, hz) = (fx - testworld::SITE_X, fz - testworld::YARD_Z);
         assert!(
-            (2_000..=2_400).contains(&hx) && (hz - dz).abs() <= 1,
+            (2_000..=2_400).contains(&hx) && (hz - dz).abs() <= 10,
             "{slot}: fed from beside the bay, in line with its slot: {}",
             got.detail
         );

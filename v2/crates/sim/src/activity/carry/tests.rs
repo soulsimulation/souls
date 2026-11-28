@@ -1108,7 +1108,7 @@ mod from_entry {
 mod each_step {
     use replica::rules::json::parse;
 
-    use super::super::{Fixed, Load, Quad, SWEEP_STEP, outline, way};
+    use super::super::{Fixed, Load, Quad, SWEEP_STEP, node_bears, node_way, outline, way};
 
     const M: i64 = 1_000_000;
 

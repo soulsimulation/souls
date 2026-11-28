@@ -646,8 +646,8 @@ pub struct OnTrack<'a> {
     pub let_go: Vec<Id>,
 }
 
-/// The words a put's refusal ends with, then `x=<mm> z=<mm> mm` and which end goes first, when the part would be
-/// admitted fed from there ([`Feed`]).
+/// The words a put's refusal starts with, then `x=<mm> z=<mm> mm` and which of its crew is toward the slot, when the
+/// part would be admitted fed from there ([`Feed`]).
 pub const FED_FROM: &str = "it would be fed with the crew's node at";
 
 /// What a put needs to feed its part over what it rests on (FOR-FABLE 6; the engine's, from the crew's carry and its
@@ -1509,9 +1509,10 @@ impl Assembly {
                     w
                 }
                 Err(why) => {
+                    // Where it would work comes first: a refusal's detail is cut short where it is long.
                     let whence = match fed_from(end, from.0.y, feed) {
                         Some((p, front)) => format!(
-                            "{FED_FROM} x={} z={} mm, the part along its slot, its crew's {} toward it",
+                            "{FED_FROM} x={} z={} mm, its crew's {} toward its slot",
                             p.x / 1000,
                             p.z / 1000,
                             if front { "front" } else { "back" }
@@ -1519,8 +1520,8 @@ impl Assembly {
                         None => "no place beside it is clear to feed it from".to_owned(),
                     };
                     r.detail = format!(
-                        "{}; fed over what it rests on: {} ({}); {whence}",
-                        r.detail, why.name, why.detail
+                        "{whence}; not fed from here: {} ({}); not set in: {}",
+                        why.name, why.detail, r.detail
                     );
                     return Err(r);
                 }

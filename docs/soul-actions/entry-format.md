@@ -213,8 +213,8 @@ standing reach above its feet. No carrier is exempt, at any step:
   (`souls:carry-grips` is said again without it), which is admitted only when the part rests on a fixed part from
   then on and another carrier holds it to the end (`part.feed-unborne`, `part.feed-unheld`). A part held across its
   slot's line is not swung in (`part.feed-turned`), and a feed slides at most the part's length and 1 m. A put that
-  can be neither set in nor fed keeps the straight set-in's name and adds why the feed fails and where it would work:
-  `it would be fed with the crew's node at x=<mm> z=<mm> mm, the part along its slot, its crew's front|back toward it`.
+  can be neither set in nor fed keeps the straight set-in's name; its detail starts with where it would work, then why
+  not from here: `it would be fed with the crew's node at x=<mm> z=<mm> mm, its crew's front|back toward its slot`.
   A fed set-in that is stopped goes back the way it came, and the carrier who let go takes its hold again. Not fed
   yet: a part that needs someone on the far side to receive it (a sheet, a beam into a closed bay).
 - Not checked yet: where the part is before a take. It still goes to its carriers' middle in one change of parent.
