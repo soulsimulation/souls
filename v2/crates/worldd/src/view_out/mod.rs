@@ -1491,6 +1491,45 @@ fn stream_effect(header: &Header, value: Value) -> R<Effect> {
         .pop()
         .ok_or_else(|| fault("stream-frame", "missing effect"))
 }
+/// A public record's sequence and world time (its envelope's fields 1 and 2), read in place (#5282): [`stream_effect`]
+/// encodes the record, reads it back whole and checks its names, a part of the stream's core at 1,000 agents for two
+/// numbers. A record whose two fields are not plain integers is read whole, refused as before. Every record is still
+/// read whole, names checked, when the writer's player plays its part, before any of its files is named.
+fn seq_at(header: &Header, record: &Value) -> R<(u64, i64)> {
+    if let Value::Map(m) = record
+        && let Some(Value::Uint(seq)) = m.get(&1)
+        && let Some(at) = match m.get(&2) {
+            Some(Value::Uint(n)) => i64::try_from(*n).ok(),
+            Some(Value::Nint(n)) => i64::try_from(*n).ok().map(|n| -1 - n),
+            _ => None,
+        }
+    {
+        return Ok((*seq, at));
+    }
+    let e = stream_effect(header, record.clone())?;
+    Ok((e.envelope.sequence, e.envelope.at))
+}
+/// Adds every reference in `v` to `out`: the set `replica::audience::references` finds, read in place (#5282). That
+/// walk rebuilds a copy of the value it reads, and the words of each part read the whole public state's references.
+fn refs_into(v: &Value, out: &mut std::collections::BTreeSet<Id>) {
+    let mut todo = vec![v];
+    while let Some(v) = todo.pop() {
+        if let Some(r) = replica::audience::reference(v) {
+            out.insert(r);
+            continue;
+        }
+        match v {
+            Value::Array(a) => todo.extend(a.iter()),
+            Value::Map(m) => todo.extend(m.values()),
+            _ => {}
+        }
+    }
+}
+fn refs_of(v: &Value) -> std::collections::BTreeSet<Id> {
+    let mut out = std::collections::BTreeSet::new();
+    refs_into(v, &mut out);
+    out
+}
 fn int(n: i64) -> Value {
     u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
 }
@@ -2395,7 +2434,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             Ok((
                 id,
                 p.get(1)
-                    .map(replica::audience::references)
+                    .map(refs_of)
                     .unwrap_or_default(),
             ))
         };
@@ -2430,7 +2469,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 };
                 let id = replica::effects::read_id(&p[0])?;
                 let r = match p.get(1) {
-                    Some(v) => replica::audience::references(v),
+                    Some(v) => refs_of(v),
                     None => Default::default(),
                 };
                 if r.is_empty() {
@@ -2439,28 +2478,34 @@ impl<S: ObjectStore> PublicWriter<S> {
                     rows.insert(id, r);
                 }
             }
-            *rest = a
-                .iter()
-                .filter(|(k, _)| **k != 2)
-                .flat_map(|(_, v)| replica::audience::references(v))
-                .collect();
+            rest.clear();
+            for (_, v) in a.iter().filter(|(k, _)| **k != 2) {
+                refs_into(v, rest);
+            }
             *at = version(after);
         } else if after.is_some() || stale {
             let whole = after.unwrap_or(self.player.state());
             let at = version(whole);
-            let Value::Map(mut m) = whole.clone() else {
+            let Value::Map(m) = whole else {
                 return Err(fault("stream-words", "a state is a map"));
             };
-            let mut rows = BTreeMap::new();
-            if let Some(Value::Array(nodes)) = m.remove(&2) {
-                for row in &nodes {
-                    let (id, r) = row_refs(row)?;
-                    if !r.is_empty() {
-                        rows.insert(id, r);
+            // Read in place (#5282): the node rows' references by node, the rest's together.
+            let (mut rows, mut rest) = (BTreeMap::new(), std::collections::BTreeSet::new());
+            for (k, v) in m {
+                match (k, v) {
+                    (2, Value::Array(nodes)) => {
+                        for row in nodes {
+                            let (id, r) = row_refs(row)?;
+                            if !r.is_empty() {
+                                rows.insert(id, r);
+                            }
+                        }
                     }
+                    (2, _) => {}
+                    (_, v) => refs_into(v, &mut rest),
                 }
             }
-            self.refs = Some((at, rows, replica::audience::references(&Value::Map(m))));
+            self.refs = Some((at, rows, rest));
         }
         if after.is_none()
             && let (Some((at, rows, rest)), Some(d)) = (&mut self.refs, delta)
@@ -2475,32 +2520,33 @@ impl<S: ObjectStore> PublicWriter<S> {
                 let Value::Map(st) = self.player.state() else {
                     return Err(fault("stream-words", "a state is a map"));
                 };
-                let mut m: BTreeMap<u64, Value> = st
-                    .iter()
-                    .filter(|(k, _)| **k != 2)
-                    .map(|(k, v)| (*k, v.clone()))
-                    .collect();
-                for k in [3, 6] {
-                    let (Some(Value::Array(rows)), Some(Value::Array(old))) =
-                        (d.get(&k), m.get(&k))
-                    else {
+                // Read in place (#5282), never copying the state: each key but the node rows as it is, and the links
+                // and timers with the delta's rows in place of theirs (a row with no value is gone).
+                rest.clear();
+                for (k, v) in st.iter().filter(|(k, _)| **k != 2) {
+                    let (Some(Value::Array(rows)), Value::Array(old), 3 | 6) = (d.get(k), v, *k) else {
+                        refs_into(v, rest);
                         continue;
                     };
                     // The order of the rows does not matter to a set of references.
-                    let mut by = BTreeMap::new();
+                    let mut by: BTreeMap<Id, (&Value, Option<&Value>)> = BTreeMap::new();
                     for r in old.iter().chain(rows) {
                         let Value::Array(p) = r else {
                             return Err(fault("stream-words", "a row is a pair"));
                         };
                         let id = replica::effects::read_id(&p[0])?;
                         match p.get(1) {
-                            Some(v) => by.insert(id, Value::Array(vec![p[0].clone(), v.clone()])),
+                            Some(v) => by.insert(id, (&p[0], Some(v))),
                             None => by.remove(&id),
                         };
                     }
-                    m.insert(k, Value::Array(by.into_values().collect()));
+                    for (id, v) in by.values() {
+                        refs_into(id, rest);
+                        if let Some(v) = v {
+                            refs_into(v, rest);
+                        }
+                    }
                 }
-                *rest = replica::audience::references(&Value::Map(m));
             }
             let changed: &[Value] = match d.get(&2) {
                 Some(Value::Array(c)) => c,
@@ -2520,11 +2566,18 @@ impl<S: ObjectStore> PublicWriter<S> {
         };
         let mut all = rest.clone();
         all.extend(rows.values().flatten().copied());
-        all.extend(replica::audience::references(&Value::Array(
-            self.records.clone(),
-        )));
-        // A part's names are those its own records create; the baseline's text holds the rest (#3574).
-        self.words_of(all, &Value::Array(self.records.clone()))
+        for r in &self.records {
+            refs_into(r, &mut all);
+        }
+        // A part's names are those its own records create; the baseline's text holds the rest (#3574). The records
+        // are lent to the value the names are read from, never copied (#5282).
+        let records = Value::Array(std::mem::take(&mut self.records));
+        let words = self.words_of(all, &records);
+        let Value::Array(records) = records else {
+            unreachable!("made above")
+        };
+        self.records = records;
+        words
     }
     fn words(&self, value: &Value, named: &Value) -> R<Vec<u8>> {
         self.words_of(replica::audience::references(value), named)
@@ -3502,9 +3555,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     if Carried::read(&record)?.is_none()
                         && (kept.is_empty()
                             || !kept.contains(
-                                &stream_effect(&self.header, record.clone())?
-                                    .envelope
-                                    .sequence,
+                                &seq_at(&self.header, &record)?.0,
                             ))
                     {
                         self.records.push(record)
@@ -3557,9 +3608,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
                 for (_, record) in self.view.take() {
                     if Carried::read(&record)?.is_none() {
-                        let seq = stream_effect(&self.header, record.clone())?
-                            .envelope
-                            .sequence;
+                        let seq = seq_at(&self.header, &record)?.0;
                         if self.migration_cut.is_none_or(|v| seq >= v) && !kept.contains(&seq) {
                             self.records.push(record)
                         }
@@ -3620,9 +3669,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
                 for (_, record) in self.view.take() {
                     if Carried::read(&record)?.is_none() {
-                        let seq = stream_effect(&self.header, record.clone())?
-                            .envelope
-                            .sequence;
+                        let seq = seq_at(&self.header, &record)?.0;
                         if self.migration_cut.is_none_or(|v| seq >= v) && !kept.contains(&seq) {
                             self.records.push(record)
                         }
@@ -3769,9 +3816,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             }
             for (_, record) in self.view.take() {
                 if Carried::read(&record)?.is_none() {
-                    let seq = stream_effect(&self.header, record.clone())?
-                        .envelope
-                        .sequence;
+                    let seq = seq_at(&self.header, &record)?.0;
                     if self.migration_cut.is_none_or(|v| seq >= v) && !kept.contains(&seq) {
                         self.records.push(record)
                     }
@@ -3820,9 +3865,8 @@ impl<S: ObjectStore> PublicWriter<S> {
         lap.mark(0);
         prof::count(1, 0, 0);
         if let (Some(before), Some(last)) = (window, self.records.last())
-            && stream_effect(&self.header, last.clone())?
-                .envelope
-                .at
+            && seq_at(&self.header, last)?
+                .1
                 .div_euclid(stream::PERIOD_US)
                 > before
         {
@@ -4087,8 +4131,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         let mut cursor = expected;
         let mut gaps = Vec::new();
         for record in &self.records {
-            let e = stream_effect(&self.header, record.clone())?;
-            let seq = e.envelope.sequence;
+            let seq = seq_at(&self.header, record)?.0;
             if seq < cursor {
                 return Err(fault("stream-sequence", "public entry order"));
             }
@@ -4102,10 +4145,18 @@ impl<S: ObjectStore> PublicWriter<S> {
         if cursor < version {
             gaps.push((cursor, version - cursor));
         }
-        let part = wire(Value::Map(BTreeMap::from([
+        // The records are lent to the part's value, never copied (#5282).
+        let value = Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.header.hash().to_bytes())),
-            (2, Value::Array(self.records.clone())),
-        ])))?;
+            (2, Value::Array(std::mem::take(&mut self.records))),
+        ]));
+        let part = encode(&value).map_err(|e| fault("encoding", e.to_string()));
+        if let Value::Map(mut m) = value
+            && let Some(Value::Array(records)) = m.remove(&2)
+        {
+            self.records = records;
+        }
+        let part = part?;
         let at = self
             .canonical
             .tree()
@@ -4150,7 +4201,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         if let Some(last) = self.records.last() {
             sp.to = sp
                 .to
-                .max(stream_effect(&self.header, last.clone())?.envelope.at);
+                .max(seq_at(&self.header, last)?.1);
         }
         // A returned public child can become live without being canonically touched by Return. Bind its
         // actual query version, including zero for an ordinary checkpoint's formerly flying child.
@@ -4248,29 +4299,26 @@ impl<S: ObjectStore> PublicWriter<S> {
             )?),
             None => None,
         };
-        let context = match (&after, &delta) {
-            // The digests are already worked out: the player's state's, and the cut's above (#4192). Hashing either
-            // state again was a sixth of the writer's core at 500 agents.
-            (Some(_), _) => replica::stream::public::context_with(
-                &self.baseline,
-                self.player.digest(),
-                &after_digest,
-                whole_delta.clone().expect("a whole cut has its delta"),
-                self.cursor,
-                &self.duplicates,
-                &changed,
-            )?,
-            (None, Some(delta)) => replica::stream::public::context_with(
-                &self.baseline,
-                self.player.digest(),
-                &after_digest,
-                delta.clone(),
-                self.cursor,
-                &self.duplicates,
-                &changed,
-            )?,
-            (None, None) => unreachable!("a cut is worked out whole or by rows"),
+        lap.mark(2);
+        // The part's words first, read from the deltas the context then takes, never copied (#5282).
+        let text = self.words_after(after.as_ref(), delta.as_ref(), whole_delta.as_ref())?;
+        lap.mark(5);
+        let cut_delta = match (after.is_some(), whole_delta, delta) {
+            (true, whole, _) => whole.expect("a whole cut has its delta"),
+            (false, _, Some(delta)) => delta,
+            (false, _, None) => unreachable!("a cut is worked out whole or by rows"),
         };
+        // The digests are already worked out: the player's state's, and the cut's above (#4192). Hashing either
+        // state again was a sixth of the writer's core at 500 agents.
+        let context = replica::stream::public::context_with(
+            &self.baseline,
+            self.player.digest(),
+            &after_digest,
+            cut_delta,
+            self.cursor,
+            &self.duplicates,
+            &changed,
+        )?;
         lap.mark(2);
         let mut value = object_map(&sp.to_bytes()?)?;
         value.insert(10, Value::Bytes(context));
@@ -4290,8 +4338,6 @@ impl<S: ObjectStore> PublicWriter<S> {
             ),
         ])))?;
         lap.mark(3);
-        let text = self.words_after(after.as_ref(), delta.as_ref(), whole_delta.as_ref())?;
-        lap.mark(5);
         let hash = |b: &[u8]| replica::ids::sha256(b).to_vec();
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
