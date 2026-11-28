@@ -829,12 +829,39 @@ impl Engine {
         }
         // Standing, raised into a slot: it slides there first, a sample a tick, at a set-in's pace (#5067).
         if let Some((bay, k, slot)) = ra.into {
+            let starts = ra.slide.is_none();
             let (from, to, t0, t1) = *ra.slide.get_or_insert_with(|| {
                 let d = |a: i64, b: i64| i128::from(a - b).pow(2);
                 let far = (d(p.x, slot.0.x) + d(p.y, slot.0.y) + d(p.z, slot.0.z)).isqrt();
                 let span = crate::assembly::set_in_time(i64::try_from(far).unwrap_or(i64::MAX));
                 ((p, q), slot, now, now + span)
             });
+            // Its crew steps with it, as far as it slides, each over ground its body stands on: they stand where they
+            // held it, beside its posts, when it is seated.
+            if starts {
+                let (dx, dz) = (to.0.x - from.0.x, to.0.z - from.0.z);
+                let far = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
+                let speed = i64::try_from(far * 1_000_000 / i128::from((t1 - t0).max(1)))
+                    .unwrap_or(PACE)
+                    .max(1);
+                for (b, at) in [(ra.lifter, lf), (ra.footer, ff)] {
+                    let Some(at) = at else { continue };
+                    let goal = Vec3::new(at.x + dx, at.y, at.z + dz);
+                    if far > 0 && way_is_ground(c, town, ra.ground, b, at, goal) {
+                        let track = Track {
+                            link: None,
+                            line: vec![goal],
+                            speed,
+                            to: ra.ground,
+                            arrive: None,
+                            hold: false,
+                        };
+                        if let Err(e) = c.carry_on(b, track) {
+                            eprintln!("worldd: {} did not step with its part: {e}", show(b));
+                        }
+                    }
+                }
+            }
             if now < t1 {
                 let (sp, sq) = sim::activity::carry::between(from, to, (t0, t1), now)?;
                 if let Some(carry) = ra.carry.as_mut() {
