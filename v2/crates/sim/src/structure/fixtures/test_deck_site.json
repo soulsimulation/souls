@@ -1,0 +1,122 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:test_deck_site",
+ "owner": "thing",
+ "slots": {
+  "bent_a": {
+   "admits": "thing",
+   "kinds": [
+    "mars:timber_bent"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    0,
+    -1500
+   ]
+  },
+  "bent_b": {
+   "admits": "thing",
+   "kinds": [
+    "mars:timber_bent"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    0,
+    1500
+   ]
+  },
+  "rail_l": {
+   "admits": "thing",
+   "kinds": [
+    "mars:timber_rail"
+   ],
+   "most": 1,
+   "at_mm": [
+    -850,
+    1900,
+    0
+   ]
+  },
+  "rail_r": {
+   "admits": "thing",
+   "kinds": [
+    "mars:timber_rail"
+   ],
+   "most": 1,
+   "at_mm": [
+    850,
+    1900,
+    0
+   ]
+  },
+  "joist_back": {
+   "admits": "thing",
+   "kinds": [
+    "mars:test_joist"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    2000,
+    -900
+   ]
+  },
+  "joist_front": {
+   "admits": "thing",
+   "kinds": [
+    "mars:test_joist"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    2000,
+    900
+   ]
+  },
+  "sheet": {
+   "admits": "thing",
+   "kinds": [
+    "mars:test_sheet"
+   ],
+   "most": 1,
+   "at_mm": [
+    0,
+    2038,
+    0
+   ]
+  },
+  "flight": {
+   "admits": "thing",
+   "kinds": [
+    "mars:test_flight"
+   ],
+   "most": 1,
+   "at_mm": [
+    3500,
+    0,
+    0
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   7200,
+   2060,
+   3100
+  ]
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A test deck site: two bents 3 m apart, a rail on each side, two joists across the rails, a sheet on the joists."
+ },
+ "card": {
+  "text": "card"
+ }
+}
