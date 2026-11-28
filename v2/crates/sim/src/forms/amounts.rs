@@ -712,7 +712,7 @@ impl Cx<'_> {
                     && tree
                         .links_at(f.node)
                         .iter()
-                        .any(|e| tree.ty(e).as_str() == "souls:body-of")
+                        .any(|e| tree.ty(e).as_str().split('@').next() == Some("souls:body-of"))
                 {
                     return refuse("in_hand", format!("{} is in another's hand", show(thing)));
                 }

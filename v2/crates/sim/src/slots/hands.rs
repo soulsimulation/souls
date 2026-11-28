@@ -320,9 +320,7 @@ impl Holding {
             .and_then(|h| t.node(h))
             .and_then(|n| n.parent())
             && p != body
-            && t.links_at(p)
-                .iter()
-                .any(|e| t.ty(e).as_str() == "souls:body-of")
+            && cx.c.claims(p).is_some()
         {
             return refuse("in_hand", format!("{} is in another's hand", show(thing)));
         }
