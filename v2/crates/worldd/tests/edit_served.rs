@@ -7460,11 +7460,6 @@ async fn walk_two(
     let legs = frame_legs(crew_now(s.w, a.soul, b.soul), (pa, pb));
     let led = legs.len() > 1;
     for (pa, pb) in legs {
-        println!(
-            "N9DBG {:?} {what}: to {pa:?} {pb:?} from {:?}",
-            std::time::SystemTime::now(),
-            crew_now(s.w, a.soul, b.soul)
-        );
         // A frame's crew is led by its front ([`heading_walk`]): the world keeps the other in its place, and its own
         // walk then closes on it.
         if led {
@@ -7654,20 +7649,12 @@ async fn frame_home(
     let got = a.act("part:unseat", c, part_of(f)).await;
     println!("{what}: {got:?}");
     assert_eq!(got.kind, 1, "{what}: out");
-    // As A3's hold crews carry theirs, straight from the bay to beside the frame's edges at its stand, each carrier on
-    // its own walk ([`frame_legs`] of a crew behind a frame's posts): the crew took it from behind its posts, 1.143 m
-    // apart, so a led walk to its carriers' places would keep the one behind on the stand.
-    let (pa, pb) = frame_ends(home);
-    a.send("eden:walk", s.g, to_point(pa)).await;
-    b.send("eden:walk", s.g, to_point(pb)).await;
-    let (x, y) = (a.end().await, b.end().await);
-    assert_eq!(
-        (x.kind, y.kind),
-        (1, 1),
-        "{what}: sent to {pa:?} and {pb:?}, at {:?} and {:?}: {x:?} {y:?}",
-        body_at(s.w, body_of(s.w, a.soul)),
-        body_at(s.w, body_of(s.w, b.soul))
-    );
+    // The crew took it from behind its posts, 1.143 m apart: each first steps to its edge where it stands (its own
+    // walk, a short one), and then the two carry it home as they brought it ([`frame_legs`]: out of its plane, across,
+    // and in at its stand). Walked straight to its stand, each on its own walk, the one that passes the stand goes
+    // round it and the two part (`souls:carriers-apart`); led there at their 1.143 m, the one behind stands on it.
+    walk_two(s, a, b, frame_ends(where_is(s.w, f).2), what).await;
+    walk_two(s, a, b, frame_ends(home), what).await;
     let got = put_part(a, c, into_slot(stand, k)).await;
     assert_eq!(got.kind, 1, "{what}: on its stand: {got:?}");
     leave_crew(a, c, what).await;
@@ -7750,7 +7737,7 @@ fn bay_holds(w: &Seeded, bay: Id) -> (usize, usize) {
 async fn a4_two_teams_build_three_bays_and_take_them_down() {
     let d = scratch("a4bays");
     let (facts, slots) = three_bays_world(&d);
-    let w = seed_entries(&d, &facts, 6, (59, -20), Some(&d.join("entries")));
+    let w = seed_entries(&d, &facts, 6, (59, -34), Some(&d.join("entries")));
     let socket = d.join("s");
     let served = serve_with(&w, &socket, None);
     served.line("listening ", 120);
