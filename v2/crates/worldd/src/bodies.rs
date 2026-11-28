@@ -1485,12 +1485,14 @@ impl Bodies {
         let Some(b) = self.runner.controller.body(body).cloned() else {
             return Ok(Target::new(ground, p));
         };
-        if self.town.passage_at(ground, p).is_some() {
-            return Ok(Target::new(ground, p));
-        }
+        // A point in a passage's clearance on the open ground (#5254) as before: the spot tables move it out. One on
+        // a floor above the ground goes to that floor (the top of a frame's ladder is in the ladder's clearance).
+        let passage = self.town.passage_at(ground, p).is_some();
         let view = self.town.view_for(body)?;
-        if let Some((node, at)) = view.level_under(&b, p) {
-            return Ok(Target::new(node, at));
+        match view.level_under(&b, p) {
+            Some((node, at)) if node != ground || !passage => return Ok(Target::new(node, at)),
+            _ if passage => return Ok(Target::new(ground, p)),
+            _ => {}
         }
         let near = i64::try_from(STOPPED_SHORT_MM).unwrap_or(0) * 1000;
         if view
