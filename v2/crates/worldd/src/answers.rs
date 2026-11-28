@@ -1432,6 +1432,8 @@ struct Clock {
     passage_next: Option<(Id, sim::links::Kind)>,
     /// [`Clock::form_ended`]'s words for the next note (#5063: a move made from afar), field 8.
     words_next: Option<String>,
+    /// The other body nearest a crowded walk's point, for the next note (field 11, A2-4).
+    held_next: Option<Id>,
     /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
     /// wear or its engine; and whether it takes edits.
     edits: Option<EditQueue>,
@@ -1952,7 +1954,8 @@ pub const MOVE_ENDED: &str = "souls:move-ended";
 pub const TIMED_OUT: &str = "act.timed-out";
 /// How an act its own Soul stopped ends (#3705, a `souls:cancel` naming it), and the walk it drove with it.
 pub const STOPPED: &str = "act.stopped";
-/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done.
+/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done. Its
+/// end says how far from its point it stood (field 7, mm) and the other body nearest that point there (field 11).
 pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
 /// A walk done at a place moved off the point it was sent to (#5254): that point in a doorway's or a stair's clearance,
 /// moved out to a walker's clearance of it (A3: [`sim::spots::CLEAR`], 0.7 m, round its ends, half that past its width
@@ -3133,13 +3136,14 @@ impl Clock {
             });
             // A part whose walkers' maps went stale before its commit is prepared again from the world as it is then
             // (0.135 A2: a retiring holder's set-down, its body leaving; #5067: a raise's or a seating's end, bodies
-            // walking meanwhile), never refused for it: at most `RETRIES` times.
+            // walking meanwhile), never refused for it: at most `RETRIES` times, a raise's or a set-in's end for the
+            // world's seat wait (`Engine::retry`, FOR-FABLE 15).
             if r.step != crate::assembly::Step::Taken
                 && done
                     .as_ref()
                     .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))
                 && let Some(e) = self.engine.as_mut()
-                && e.retry(r.clone())
+                && e.retry(r.clone(), now, self.replica.tree())
             {
                 continue;
             }
@@ -4314,6 +4318,9 @@ impl Clock {
         }
         if let Some(w) = self.words_next.take() {
             fields.insert(8, Value::Bytes(w.into_bytes()));
+        }
+        if let Some(by) = self.held_next.take() {
+            fields.insert(11, by.to_value());
         }
         if let Some((thing, kind)) = self.passage_next.take() {
             fields.insert(9, thing.to_value());
@@ -5821,6 +5828,7 @@ impl Clock {
             .and_then(|b| b.stopped_short.remove(&id));
         // #5254: one done at a place moved off its point (that point in a passage's clearance), within its tolerance.
         let moved = self.bodies.as_mut().and_then(|b| b.goal_moved.remove(&id));
+        let held = self.bodies.as_mut().and_then(|b| b.held_off_by.remove(&id));
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
@@ -5850,6 +5858,7 @@ impl Clock {
                     self.passage_next = why;
                     GOAL_MOVED
                 } else if short {
+                    self.held_next = held;
                     DONE_SHORT
                 } else {
                     "done"
@@ -7200,6 +7209,7 @@ pub fn start<S: Storage + 'static>(
         away_next: None,
         passage_next: None,
         words_next: None,
+        held_next: None,
         edits,
         editing,
         set_down: Vec::new(),

@@ -5,18 +5,18 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { resolve, join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageRecipe, nativePageBodyPackage } from './native-page-fixture.mjs';
+import { createNativePageArtifacts, verifyNativePageArtifacts, nativePagePorts, nativePageClientRegistration, nativePageExportArgs, nativePageStartupRegistration, nativePageRecipe, nativePageBodyPackage } from './native-page-fixture.mjs';
 import { fileURLToPath } from 'node:url';
 import { oldPageBodyArgs } from '../playtest/arena/new-engine/old-page.mjs';
 import { stopOwnedChild } from './owned-attempt.mjs';
 import { runOwnedCommand, runArgs, addresses, WORLD } from '../playtest/arena/new-engine/world.mjs';
 const parent = resolve('.local/native-page-fixture-tests'); mkdirSync(parent, { recursive: true });
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-function fixture(t) {
+function fixture(t, options = {}) {
   const root = mkdtempSync(join(parent, 'artifacts-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const write = (file, content = 'fixture') => { mkdirSync(dirname(join(root, file)), { recursive: true }); writeFileSync(join(root, file), content); };
-  for (const file of ['worlds/templates/hello-hamlet.json', 'apps/web/src/LiveWorld.tsx', 'tools/world-launcher/launcher.mjs', 'v2/tools/dev/run.sh']) write(file);
+  for (const file of ['worlds/templates/hello-hamlet.json', 'apps/web/src/LiveWorld.tsx', 'tools/world-launcher/launcher.mjs', 'v2/tools/dev/run.sh', 'content/worlds/mars/map.json']) write(file);
   execFileSync('git', ['init', '-q', root]); execFileSync('git', ['-C', root, 'add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', 'commit', '-qm', 'fixture']);
   // Synthetic source repository; ordinary configured commit hooks remain enabled.
@@ -24,7 +24,7 @@ function fixture(t) {
   for (const name of ['worldd', 'gatewayd', 'directoryd', 'testworld', 'assets-check', 'register-world']) write('v2/target/release/' + name);
   write('.gitignore', '.local/\n**/dist/\nv2/target/\n'); execFileSync('git', ['-C', root, 'add', '.gitignore']); execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', 'commit', '-qm', 'ignore outputs']);
   write('.local/caddy');
-  const manifest = createNativePageArtifacts(root, { caddy: join(root, '.local/caddy') });
+  const manifest = createNativePageArtifacts(root, { caddy: join(root, '.local/caddy'), ...options });
   write('.local/pin.json', JSON.stringify(manifest));
   return { root, write, manifest, pin: { file: '.local/pin.json', hash: hash(readFileSync(join(root, '.local/pin.json'))) } };
 }
@@ -81,7 +81,36 @@ test('owned group cleanup kills descendants even after its direct leader has exi
   } finally { try { process.kill(-leader.pid, 'SIGKILL'); } catch {} }
 });
 
+test('optional tracked map is pinned with template and cannot escape or borrow untracked bytes', t => {
+  const f = fixture(t, { map: 'content/worlds/mars/map.json' });
+  assert.equal(verifyNativePageArtifacts(f.root, f.pin).map, 'content/worlds/mars/map.json');
+  assert.equal(f.manifest.source['content/worlds/mars/map.json'], hash(Buffer.from('fixture')));
+  assert.throws(() => createNativePageArtifacts(f.root, { caddy: join(f.root, '.local/caddy'), map: '../map.json' }), /map-untracked/);
+  assert.throws(() => createNativePageArtifacts(f.root, { caddy: join(f.root, '.local/caddy'), map: 'content/worlds/mars/missing.json' }));
+  f.write('content/worlds/mars/map.json', 'changed');
+  assert.throws(() => verifyNativePageArtifacts(f.root, f.pin), /source-pin/);
+});
 
+test('foreground controllers and finite commands enter the existing owner with distinct lifetimes', () => {
+  const children = [], calls = [], recipe = nativePageClientRegistration(children, (child, mode) => calls.push({ child, mode }));
+  const controller = {}, command = {};
+  recipe.registerClient(controller); recipe.registerCommand(command);
+  assert.deepEqual(children, [controller]);
+  assert.deepEqual(calls, [{ child: controller, mode: { processGroup: true } }, { child: command, mode: { transient: true } }]);
+});
+
+test('tracked-map export uses the canonical exporter and fresh owned facts destination', t => {
+  const f = fixture(t, { map: 'content/worlds/mars/map.json' }), facts = join(f.root, '.local/run/data/template.facts.json');
+  assert.deepEqual(nativePageExportArgs(f.root, f.manifest, facts), [join(f.root, 'v2/tools/import-eden/export/export.ts'), '--template', join(f.root, f.manifest.template), '--out', facts, '--map', join(f.root, f.manifest.map)]);
+  assert.throws(() => nativePageExportArgs(f.root, { ...f.manifest, map: '../escape' }, facts), /artifact-path/);
+});
+
+test('startup output is observed before forwarding the same child and mode to its existing owner', async () => {
+  const { EventEmitter } = await import('node:events'), child = { stdout: new EventEmitter(), stderr: new EventEmitter() }, mode = { transient: true, processGroup: true }, output = [], calls = [];
+  const register = nativePageStartupRegistration((seen, flags) => { assert.equal(seen, child); assert.equal(flags, mode); calls.push(seen); seen.stderr.emit('data', Buffer.from('missing dependency')); }, text => output.push(text));
+  register(child, mode); child.stdout.emit('data', Buffer.from('export detail'));
+  assert.deepEqual(output, ['startup stderr: missing dependency', 'startup stdout: export detail']); assert.deepEqual(calls, [child]);
+});
 test('the existing page body option forwards one catalogue to native seed and launcher, with unchanged defaults', () => {
   const dir=resolve(parent,'declared-bodies'),option=oldPageBodyArgs(dir);
   assert.deepEqual(option,{world:{bodies:join(dir,'bodies.json')},launcher:['--bodies',dir]});
