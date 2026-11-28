@@ -135,7 +135,14 @@ standing) and a lifter with no ground to walk on are refused by name (`raise.cre
 foot, the part in its slot); `souls:carry-track` `souls:raise` or `souls:lower`; `souls:carry-grips` in that phase; one
 motion sample of the crew's node a tick, its position the foot, its turn about the base line; then `souls:raised`, the
 part's leave to the ground standing with the crew's node under it and `souls:carry-grips` `souls:held`, or
-`souls:lowered`, the part's leave to the ground lying and `souls:carry-grips` `souls:released`.
+`souls:lowered`, the part's leave to the ground lying and `souls:carry-grips` `souls:released`. A raise's end is
+tried again once a tick while the walkers' maps go stale (bodies moving near it), for up to 30 s of world time, and
+never turned back for it; past that the raise stops held where it stands: `souls:carry-track` `souls:raise-held` why
+`souls:map-busy`, then `souls:carry-grips` `souls:held`, the ask refused `raise.map-busy` if still open. Asked again
+(`part raise` by a member of the crew), it is seated as its end would have been; `part lower` lays it down from there
+(`souls:lower` why `souls:lower-asked`). Another slot named is refused `raise.not-at-slot`, a holder out of reach
+`part.grip-out-of-reach`; a leave is refused `raise.under-way` until it is seated or laid down; a world started again
+lays it down (`souls:world-restarted`), as any raise part way. A put's set-in waits the same 30 s, then is refused.
 
 Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
 width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
