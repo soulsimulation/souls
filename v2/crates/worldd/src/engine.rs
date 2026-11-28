@@ -229,6 +229,9 @@ pub struct Engine {
     riding: Vec<(Id, Id)>,
     /// How often each retiring holder's set-down has been checked again (0.135 A2): its maps go stale as its body goes.
     retried: BTreeMap<Id, u8>,
+    /// When each crew's seating at a track's end was first found stale (FOR-FABLE 15), and how long it may wait.
+    seat_since: BTreeMap<Id, Micros>,
+    seat_wait: Micros,
     /// Each carrying ground's fixed geometry, with what it was read at (0.135 C7): the walkers' ground versions and the
     /// carries on it then, each by its activity and when it began. A take, a lift or a set-down moves a load off or
     /// onto its ground without changing a walker's map (`crate::assembly::Ready::town_part`), so the versions alone
@@ -639,6 +642,9 @@ const LAY_OUT: i64 = 2_200_000;
 /// How often a retiring holder's set-down is checked again when its walkers' maps went stale (a body beside it moving,
 /// or its own body leaving): about one a tick, so some 5 s; then its hold stays kept.
 const RETRIES: u8 = 100;
+/// How long a seating at the end of a raise's or a set-in's track is tried again while the walkers' maps go stale, µs
+/// of world time (FOR-FABLE 15): about 30 s. A test world may shorten it (`WORLDD_SEAT_WAIT_S`, whole seconds).
+const SEAT_WAIT: Micros = 30_000_000;
 
 /// How far apart the points of a carrier's way beside its part are checked against the ground it stands on, µm (#5067).
 const WALK_STEP: i64 = 25_000;
@@ -868,6 +874,11 @@ impl Engine {
             walk_back: Vec::new(),
             riding: Vec::new(),
             retried: BTreeMap::new(),
+            seat_since: BTreeMap::new(),
+            seat_wait: std::env::var("WORLDD_SEAT_WAIT_S")
+                .ok()
+                .and_then(|s| s.parse::<i64>().ok())
+                .map_or(SEAT_WAIT, |s| s.clamp(0, 30).saturating_mul(1_000_000)),
             fixed: BTreeMap::new(),
             asked: Vec::new(),
             waiting: BTreeMap::new(),
@@ -1839,6 +1850,18 @@ impl Engine {
             return Ok(());
         }
         // #5067: a part on its way up or down hangs on both its carriers: the leave waits until it stands or lies.
+        if self.raise_parked(activity) {
+            return Err(refusal(
+                "raise.under-way",
+                format!(
+                    "{} holds its part standing, not seated (the ground's map stayed busy); next: part raise {} to set it in \
+                     its slot, or part lower {} to lay it down, then leave",
+                    show(activity),
+                    show(activity),
+                    show(activity)
+                ),
+            ));
+        }
         if self.raising.contains_key(&activity) {
             return Err(refusal(
                 "raise.under-way",
@@ -3720,13 +3743,26 @@ impl Engine {
 
     /// A part `r` (not a take) whose walkers' maps went stale before its commit (0.135 A2: a retiring holder's body
     /// left meanwhile; #5067: a raise's or a seating's end while bodies walk): prepared again from the world as it is
-    /// then, at most [`RETRIES`] times; `false` when it has been, and it is refused.
-    pub fn retry(&mut self, r: crate::assembly::Ready) -> bool {
-        let n = self.retried.entry(r.activity).or_insert(0);
-        *n += 1;
-        if *n > RETRIES {
-            self.retried.remove(&r.activity);
-            return false;
+    /// then, once a tick, at most [`RETRIES`] times; `false` when it has been, and it is refused. A seating at the end
+    /// of a raise's or a set-in's track (FOR-FABLE 15) is under way: it is prepared again for up to the world's seat wait
+    /// ([`SEAT_WAIT`]) of world time from its first stale try, and its raise does not count that as a commit that never
+    /// came back. Past it a raise stops held where it stands (`raise.map-busy`, never turned back); a set-in is refused.
+    pub fn retry(&mut self, r: crate::assembly::Ready, now: Micros, live: &Tree) -> bool {
+        if r.step == crate::assembly::Step::Seated {
+            let since = *self.seat_since.entry(r.activity).or_insert(now);
+            if now.saturating_sub(since) > self.seat_wait {
+                self.seat_since.remove(&r.activity);
+                // A raise stops held where it stands; a set-in's seating is refused as before.
+                return self.raise_busy(&r, now, live);
+            }
+            self.raise_waits(r.activity);
+        } else {
+            let n = self.retried.entry(r.activity).or_insert(0);
+            *n += 1;
+            if *n > RETRIES {
+                self.retried.remove(&r.activity);
+                return false;
+            }
         }
         match self.asm.as_mut() {
             Some(asm) => {
@@ -3870,6 +3906,7 @@ impl Engine {
     ) {
         // Written or refused for good: its retries of stale maps are over.
         self.retried.remove(&r.activity);
+        self.seat_since.remove(&r.activity);
         // #5067: a raise's or a lowering's own commits.
         if self.raising.contains_key(&r.activity)
             && matches!(

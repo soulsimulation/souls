@@ -1,0 +1,79 @@
+// The old page samples this public recording at its depicted body clock, once per render (never at wall time).
+import type {CarriedParts} from './take-parts.ts';
+import {entityId} from './entity-id.ts';
+import {layerDraws} from './layer-draws.ts';
+import {rotate,worldPoint,type NativePose} from './recorded-carry.ts';
+import {setCarryHeading} from './carry-heading.ts';
+import type {CarryObservation} from './recorded-carry.ts';
+import type {CarryGrips} from './source/carry-record.ts';
+export type CarryHands={left:[number,number,number];right:[number,number,number]};
+export type NativeCarryBody={body:string;crew:string;load:string;grip:string;phase:string;sinceUs:number;untilUs?:number;hands:CarryHands;order:[number,number];weight:number;preparing?:boolean};
+export type CarryPageFrame={at:number;loads:Record<string,NativePose>;bodies:Record<string,NativeCarryBody>;observations:CarryObservation[];preparations:CarryGrips[];contactStates:ReturnType<CarriedParts['recorded']['contactStates']>;phaseHistory:Record<string,CarryGrips[]>;evidence:Record<string,ReturnType<CarriedParts['recorded']['evidence']>>;errors:string[]};
+let current:CarriedParts|null=null;
+let bodies:ReadonlyMap<string,string>=new Map();
+export const setNativeBodyEntities=(map:ReadonlyMap<string,string>)=>{bodies=map;};
+export const nativeBodyEntities=()=>bodies;
+export const setCarryPage=(parts:CarriedParts|null)=>{current=parts;setCarryHeading(parts?carryHeadingAt:null);};
+/** carry-heading.ts: the heading (atan2(dz, dx), as bridge.ts reads a turn) the world has the body drawn as
+ *  `entity` turned to at `at` µs while it is in an unreleased native hold, or has let go and not stepped away, else null. The live take only: a replayed past
+ *  builds its chunks in the history worker, which has no carry feed, so its carriers still face their travel. */
+export function carryHeadingAt(entity:string,at:number,byBody:ReadonlyMap<string,string>=bodies,source:CarriedParts|null=current):number|null{
+ if(!source)return null;const body=source.recorded.facing(at,b=>byBody.get(b)===entity),pose=body?source.recorded.pose(body,at):null;
+ return pose?-2*Math.atan2(pose.q[2],pose.q[0]):null;}
+/** A raise's holds (#5067: phase `souls:raise` or `souls:lower`, a lifter and a footer, `point:foot`) are said once, at
+ *  its start; their hands are placed by rule on each frame (the engine's `raise::Spec::hold_up`, `FOOT_HOLD`): the
+ *  lifter's two hands on its post where the post is 1.9 m above the foot, or at its top while that is lower, the
+ *  footer's 0.4 m up its post from the foot, each 0.1 m either side along the post, within the post's length. The
+ *  same holds carried on unchanged into the phase that follows (`souls:held`, `souls:released`) keep the rule; holds
+ *  the world says again are its own. */
+export const RAISE_PHASES=new Set(['souls:raise','souls:lower']);
+const LIFT_HAND=1.9,FOOT_HOLD=.4,HAND_HALF=.1;
+export function raiseRule(records:CarriedParts['recorded'],g:CarryGrips,at:number):boolean{
+ if(RAISE_PHASES.has(g.phase))return true;if(!g.holds.some(h=>h.grip==='point:foot'))return false;
+ const h=records.phaseHistory(g.crew,at),i=h.lastIndexOf(g),prev=i>0?h[i-1]:null;
+ return!!prev&&RAISE_PHASES.has(prev.phase)&&prev.load===g.load&&JSON.stringify(prev.holds)===JSON.stringify(g.holds);}
+/** The two hand points of hold `h` (load-local µm) on a raised part `heightUm` long, posed `pose`. */
+export function raiseHands(h:CarryGrips['holds'][number],pose:NativePose,heightUm:number):[[number,number,number],[number,number,number]]{
+ const H=heightUm/1e6,rise=rotate(pose.q,[0,1,0])[1],s=h.grip==='point:foot'?Math.min(FOOT_HOLD,H):rise>0?Math.min(H,LIFT_HAND/rise):H,[x,,z]=h.handsUm[0];
+ return[[x,Math.max(0,s-HAND_HALF)*1e6,z],[x,Math.min(H,s+HAND_HALF)*1e6,z]];}
+export function carryPageAt(at:number,byBody:ReadonlyMap<string,string>,source:CarriedParts|null=current):CarryPageFrame|null{
+ if(!source)return null;const records=source.recorded,loads:Record<string,NativePose>={},bodies:Record<string,NativeCarryBody>={},observations=records.observations(at),errors:string[]=[],evidence:CarryPageFrame['evidence']={},ambiguous=new Set<string>();
+ if(records.error)errors.push('carry-record:'+records.error);
+ // Static construction parts keep their recorded quaternion too; the actual furnished piece path stays untouched.
+ for(const n of records.nodesAt(at)){const id=n.id;if(!source.isLoadKind(n.kind)&&!observations.some(o=>o.grips.load===id))continue;
+  if(n.soul||/:(body|humanoid)(@|$)/.test(n.kind))continue;
+  const pose=records.pose(id,at);if(pose){loads[layerDraws(n)&&n.origin?n.origin:entityId(id)]=pose;evidence[id]=records.evidence(id,at);}
+ }
+ const depicted=[...observations,...records.retiring(at).map(grips=>({grips,members:null,pose:records.pose(grips.load,at),at}))];
+ for(const o of depicted.sort((a,b)=>Number(a.grips.phase==='souls:released')-Number(b.grips.phase==='souls:released'))){const g=o.grips;if(!o.pose){errors.push('load-frame:'+g.load);continue;}
+  const n=records.nodeAt(g.load,at);if(!n){errors.push('load-node:'+g.load);continue;}loads[layerDraws(n)&&n.origin?n.origin:entityId(g.load)]=o.pose;
+  const released=g.phase==='souls:released';
+  if(!released&&!o.members){errors.push('crew-members:'+g.crew);continue;}
+  if(!released&&(o.members!.length!==g.holds.length||o.members!.some(m=>!g.holds.some(h=>h.body===m.body))))errors.push('crew-contacts:'+g.crew);
+  if(!released&&g.untilUs!==undefined&&at>=g.untilUs){errors.push('expired-phase:'+g.crew);continue;}
+  const weight=released?Math.max(0,1-(at-g.sinceUs)/300000):1;
+  const ruled=raiseRule(records,g,at);
+  evidence[g.load]=records.evidence(g.load,at);
+  if(!weight)continue;
+  for(const h of g.holds){const entity=byBody.get(h.body),order=records.anatomical(g,h.body);if(!entity||!order){errors.push('carrier-frame:'+h.body);continue;}
+   if(!released&&!o.members?.some(m=>m.body===h.body)){errors.push('carrier-membership:'+h.body);continue;}
+   const height=ruled?source.heightUm(n.kind):null;if(ruled&&height===null){errors.push('raise-height:'+g.load);continue;}
+   const points=(ruled?raiseHands(h,o.pose!,height!):h.handsUm).map(p=>worldPoint(o.pose!,p));
+   if(ambiguous.has(entity)||released&&bodies[entity])continue;
+   if(bodies[entity]){errors.push('ambiguous-carrier:'+h.body);delete bodies[entity];ambiguous.add(entity);continue;}
+   bodies[entity]={body:h.body,crew:g.crew,load:g.load,grip:h.grip,phase:g.phase,sinceUs:g.sinceUs,...(g.untilUs!==undefined?{untilUs:g.untilUs}:{}),hands:{left:points[order[0]],right:points[order[1]]},order,weight};
+  }
+ }
+ const preparing=records.preparing(at);
+ for(const{grips:g,holds}of preparing){const pose=records.pose(g.load,at);if(!pose){errors.push('prepare-load-frame:'+g.load);continue;}const n=records.nodeAt(g.load,at);if(!n){errors.push('prepare-load-node:'+g.load);continue;}
+  loads[layerDraws(n)&&n.origin?n.origin:entityId(g.load)]=pose;evidence[g.load]=records.evidence(g.load,at);
+  for(const h of holds){const entity=byBody.get(h.body),existing=entity?bodies[entity]:null;if(!entity||existing&&existing.phase!=='souls:released'||ambiguous.has(entity))continue;const order=records.anatomical(g,h.body);if(!order){errors.push('prepare-carrier-frame:'+h.body);continue;}const points=h.handsUm.map(p=>worldPoint(pose,p)),release=records.releaseBefore(h.body,at),prior=release&&release.sinceUs+300000>g.sinceUs-300000?release:null,start=Math.max(g.sinceUs-300000,prior?.sinceUs??-Infinity),u=Math.max(0,Math.min(1,(at-start)/(g.sinceUs-start))),blend=u*u*(3-2*u);
+   const hands:CarryHands={left:points[order[0]],right:points[order[1]]};let weight=blend;
+   if(prior){const oldPose=records.pose(prior.load,at),oldOrder=records.anatomical(prior,h.body),old=prior.holds[0];if(!oldPose||!oldOrder){errors.push('prepare-release-frame:'+h.body);continue;}const oldPoints=old.handsUm.map(p=>worldPoint(oldPose,p)),releaseWeight=Math.max(0,1-(at-prior.sinceUs)/300000);weight=releaseWeight+(1-releaseWeight)*blend;for(const[side,i]of[['left',0],['right',1]]as const)hands[side]=oldPoints[oldOrder[i]].map((n,k)=>n+(hands[side][k]-n)*blend)as[number,number,number];}
+   bodies[entity]={body:h.body,crew:g.crew,load:g.load,grip:h.grip,phase:g.phase,sinceUs:g.sinceUs,hands,order,weight,preparing:true};
+  }
+ }
+ const contactStates=records.contactStates(at);return{at,loads,bodies,observations,preparations:preparing.map(p=>p.grips),contactStates,phaseHistory:Object.fromEntries(contactStates.map(o=>[o.crew,records.phaseHistory(o.crew,at)])),evidence,errors};
+}
+
+export function carryOwnerBetween(entity:string,fromSeconds:number,toSeconds:number,byBody:ReadonlyMap<string,string>,source:CarriedParts|null=current){if(!source)return false;for(const[body,id]of byBody)if(id===entity)return source.recorded.ownedBetween(body,Math.round(fromSeconds*1e6),Math.round(toSeconds*1e6));return false;}
