@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BYTES_SHARE, FIRST_FRAME, STARTED, WORLD_DATA, arrivalFraction, reasonDelayMs } from './viewer-arrival.ts';
-import { ARRIVAL_CATCH_MS, ARRIVAL_NOW_MS, ARRIVAL_STALE_MS, arrivalCatching } from './arrival-catching.ts';
+import { ARRIVAL_CATCH_MS, ARRIVAL_NOW_MS, ARRIVAL_SPAN_MS, ARRIVAL_STALE_MS, ArrivalLag, arrivalCatching } from './arrival-catching.ts';
 import { STREAM_CATCHING, STREAM_NOTICE } from './v2-engine/stream-health.ts';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 
@@ -69,4 +69,22 @@ test('27 Nov: a cold arrival over an old checkpoint is catching up until it is w
   assert.equal(arrivalCatching(now - 2500, now, 5000), false, 'the page plays a little behind the world: that is Live');
   assert.equal(arrivalCatching(now - ARRIVAL_STALE_MS - 1, now, 1000), false, 'a clock far off is no catch-up');
   assert.equal(arrivalCatching(now - 3600_000, now, ARRIVAL_CATCH_MS), false, 'and the arrival is over after a minute');
+});
+
+test('N8: the pill waits for the picture to be at now, not for it to come within a few seconds of the clock', () => {
+  const now = 1_800_000_000_000;
+  // Verdelis Eden, 28 Nov: 6 s behind and still playing on fast to now is catching up; holding its lag, it is Live
+  assert.equal(arrivalCatching(now - 5900, now, 5000, true), true, 'within a few seconds but still gaining');
+  assert.equal(arrivalCatching(now - 5900, now, 5000, false), false, 'within a few seconds and holding');
+  assert.equal(arrivalCatching(now - 5900, now, ARRIVAL_CATCH_MS, true), false, 'never for good');
+  const fast = new ArrivalLag();
+  const seen = [0, 250, 500, 750, 1000, 1250].map((t) => fast.gaining(t, 8000 - t));  // the lag falls 1 s a second
+  assert.deepEqual(seen, [false, false, false, false, true, true], 'gaining once seen for a span');
+  const held = new ArrivalLag();
+  const steady = [0, 400, 800, 1200, 1600, 2000].map((t, i) => held.gaining(t, 2000 + (i % 2) * 100));  // a picture at the clock's pace
+  assert.deepEqual(steady, [false, false, false, false, false, false]);
+  const sparse = new ArrivalLag();  // a render a while after the last: the lag fell over the time between
+  sparse.gaining(0, 9000);
+  assert.equal(sparse.gaining(3 * ARRIVAL_SPAN_MS, 5500), true);
+  assert.equal(sparse.gaining(4 * ARRIVAL_SPAN_MS, 5450), false, 'and holding since');
 });

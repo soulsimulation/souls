@@ -51,7 +51,7 @@ export class StreamPlayer {
   query() { return new Uint8Array([0x80]); }
   snapshot() { return globalThis.__snapshot; }
   samples() { return '[]'; }
-  events() { return new Uint8Array([0x80]); }
+  events() { return globalThis.__events?.() ?? new Uint8Array([0x80]); }
   publicHash() { return ''; }
   free() {}
 }
@@ -164,4 +164,26 @@ test('64 read ahead are played in their order, and a refused read backs off to o
   while (Math.max(...posted.filter((m) => m.t === 'part').map((m) => m.p!.number)) < 300 && k++ < 80) await polls[0]();
   assert.ok(k <= 45, `caught up within ${k} polls of the edge answering again (the wait is at most 10 s, 40 polls)`);
   assert.deepEqual(posted.filter((m) => m.t === 'error'), []);
+});
+
+test('N8: the words of the parts played one by one come through the read ahead, not one part at a time', async () => {
+  // Verdelis Eden, 28 Nov: each of the last 44 parts named a word none had given, and its words file was read only after
+  // it played, one at a time (4.8 of the 10 to 12 s to now). Here every part says a line whose words are never given.
+  span = (k) => [k * PERIOD_US, (k + 1) * PERIOD_US];
+  const far = Math.ceil((BEHIND_US + CUT_US) / PERIOD_US), newest = 200, line = [new Uint8Array(16).fill(6), 1], speaker = [new Uint8Array(16).fill(5), 1];
+  const said = encode([new Map<number, unknown>([[1, 'souls:said'], [2, new Map<number, unknown>([[1, new Map([[21, line]])], [2, 10], [4, S]])], [3, speaker], [4, 0]])]);
+  (globalThis as { __events?: () => Uint8Array }).__events = () => said;
+  try {
+    const t0 = Date.now();
+    const { posted, reads } = await start('words', { newest: () => newest, delay: (p) => (p.endsWith('.text') ? 100 : 1) });
+    const took = Date.now() - t0;
+    assert.deepEqual(posted.filter((m) => m.t === 'error'), []);
+    const parts = posted.filter((m) => m.t === 'part').map((m) => m.p!.number);
+    assert.deepEqual(parts, Array.from({ length: far }, (_, i) => newest - far + 1 + i), 'the last parts played one by one, in order');
+    const asked = new Map<string, number>();
+    for (const p of reads) if (/\/\d+\.text$/.test(p)) asked.set(p, (asked.get(p) ?? 0) + 1);
+    assert.equal(asked.size, newest + 1, 'every part\'s words asked for');
+    assert.equal(Math.max(...asked.values()), 1, 'each once: the read ahead\'s is the one used');
+    assert.ok(took < (far * 100) / 2, `caught up in ${took} ms, not a 100 ms words read after each of the ${far} parts`);
+  } finally { delete (globalThis as { __events?: unknown }).__events; }
 });
