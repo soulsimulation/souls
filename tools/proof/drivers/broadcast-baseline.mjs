@@ -70,21 +70,21 @@ export function assessProfiles(windows,ids,samples,draws){
 export class ProfileWindows{
  constructor({cdp,stamp,save,now=()=>performance.now(),schedule=setTimeout,cancel=clearTimeout}){Object.assign(this,{cdp,stamp,save,now,schedule,cancel});this.windows=[];this.pending=null;this.active=null;this.failed=false;}
  async init(){await this.cdp.send('Profiler.enable');await this.cdp.send('Profiler.setSamplingInterval',{interval:1000});}
- async metadata(w,name){try{let timer;try{w[name]=await Promise.race([Promise.resolve().then(()=>this.stamp()),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('profile-metadata-timeout')),250);})]);}finally{clearTimeout(timer);}}catch(e){(w.metadataErrors??=[]).push({name,error:String(e)});}}
+ async metadata(w,name){try{let timer;try{w[name]=await Promise.race([Promise.resolve(this.stamp()),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('profile-metadata-timeout')),250);})]);}finally{clearTimeout(timer);}}catch(e){(w.metadataErrors??=[]).push({name,error:String(e)});}}
  async start(kind){if(this.closed||this.active||this.failed||this.windows.some(w=>w.kind===kind))return;const w={kind,host:{}};this.windows.push(w);
   await this.metadata(w,'beforeStart');this.active=w;w.host.startRequest=this.now();
   // Own cleanup from the sent start, even if its response or metadata is delayed.
-  w.timer=this.schedule(()=>{this.pending=this.stop().catch(e=>{this.asyncError=String(e);this.failed=true;});},kind==='quiet'?9250:4750);
+  this.timer=this.schedule(()=>{this.pending=this.stop().catch(e=>{this.asyncError=String(e);this.failed=true;});},kind==='quiet'?9250:4750);
   try{w.startSent=true;await this.cdp.send('Profiler.start');w.host.startResponse=this.now();await this.metadata(w,'afterStart');}
   catch(e){w.error=String(e);this.failed=true;this.save(`profile-${kind}-partial.json`,w);if(this.active===w)await this.stop();}
  }
- async stop(){const w=this.active;if(!w)return;this.active=null;this.cancel(w.timer);delete w.timer;
+ async stop(){const w=this.active;if(!w)return;this.active=null;this.cancel(this.timer);this.timer=null;
   const metadata=this.metadata(w,'beforeStop');w.host.stopRequest=this.now();
   try{const result=await this.cdp.send('Profiler.stop');w.host.stopResponse=this.now();w.profile=result.profile;if((w.profile.endTime-w.profile.startTime)/1000>(w.kind==='quiet'?10000:5000))this.failed=true;}
   catch(e){w.error=String(e);this.failed=true;}
   finally{await metadata;await this.metadata(w,'afterStop');this.save(`profile-${w.kind}.json`,w);}
  }
- async close(){if(this.closed)return;this.closed=true;if(this.active)await this.stop();if(this.pending)await this.pending;try{await this.cdp.send('Profiler.disable');}finally{await this.cdp.detach();}if(this.asyncError)throw Error(this.asyncError);}
+ async close(){if(this.closed)return;this.closed=true;let failure;try{if(this.active)await this.stop();if(this.pending)await this.pending;if(this.asyncError)throw Error(this.asyncError);}catch(e){failure=e;}finally{try{await this.cdp.send('Profiler.disable');}catch(e){failure??=e;}finally{try{await this.cdp.detach();}catch(e){failure??=e;}}}if(failure)throw failure;}
 }
 export async function prepare({recipe,paths}){
  const p=baselineDeclaration(recipe.sourceRecording?.baselineLive),actors=[];
