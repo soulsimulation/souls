@@ -3660,16 +3660,40 @@ impl Engine {
                     continue;
                 };
                 let (at, face) = grips::stance(hold, half);
-                let (Ok(at), Ok(face)) = (x.point(at), x.point(face)) else { continue };
-                let (to, face) = (Vec3::new(at.x, feet.y, at.z), Vec3::new(face.x, feet.y, face.z));
+                // Round its post, not past its corner: first straight out from the part's face to its stance's line,
+                // then along that line behind the post.
+                let local = {
+                    let [w, qx, qy, qz] = x.rot.parts();
+                    let inv = replica::pose::Quat::new(w, -qx, -qy, -qz)
+                        .or_else(|_| replica::pose::Quat::new(-w, qx, qy, qz));
+                    inv.ok().and_then(|q| {
+                        q.rotate(Vec3::new(feet.x - x.pos.x, 0, feet.z - x.pos.z)).ok()
+                    })
+                };
+                let Some(local) = local else { continue };
+                let (Ok(at), Ok(face), Ok(round)) = (
+                    x.point(at),
+                    x.point(face),
+                    x.point(Vec3::new(local.x, 0, at.z)),
+                ) else {
+                    continue;
+                };
+                let g = |p: Vec3| Vec3::new(p.x, feet.y, p.z);
+                let (to, face, round) = (g(at), g(face), g(round));
                 if apart(feet, to) > 20_000 {
-                    if !way_is_ground(c, town, ground, hold.body, feet, to) {
+                    let line = if way_is_ground(c, town, ground, hold.body, feet, to) {
+                        vec![to]
+                    } else if way_is_ground(c, town, ground, hold.body, feet, round)
+                        && way_is_ground(c, town, ground, hold.body, round, to)
+                    {
+                        vec![round, to]
+                    } else {
                         eprintln!("worldd: {} holds from where it stands: no ground to its stance", show(hold.body));
                         continue;
-                    }
+                    };
                     let track = sim::controller::Track {
                         link: None,
-                        line: vec![to],
+                        line,
                         speed: crate::assembly::SET_IN_PACE,
                         to: ground,
                         arrive: None,

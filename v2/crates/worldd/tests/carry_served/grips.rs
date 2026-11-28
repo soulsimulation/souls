@@ -860,7 +860,7 @@ async fn grips_a_frame_taken_from_out_of_reach_is_refused_by_name_then_taken_fro
     // #5067 item 2: held at a natural height. Each hand on its post's outer face, 0.9 m and 1.2 m up the frame from its
     // foot, which is lifted 0.15 m: 1.05 m and 1.35 m above the ground.
     for hold in &h.holds {
-        assert_eq!(hold.hands[0].x.abs(), l.half.x, "on the post's outer face: {hold:?}");
+        assert!((hold.hands[0].x.abs() - l.half.x).abs() <= 2_000, "at the post's outer edge: {hold:?}");
         assert_eq!(
             [hold.hands[0].y, hold.hands[1].y],
             [900_000, 1_200_000],

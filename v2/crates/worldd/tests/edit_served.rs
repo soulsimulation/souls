@@ -5118,7 +5118,21 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
         if let Some(h) = h.filter(|h| h.phase == HELD) {
             break h;
         }
-        assert!(t0.elapsed() < Duration::from_secs(40), "never held: {:?}", where_is(&w, frame));
+        if t0.elapsed() > Duration::from_secs(40) {
+            while let Ok(l) = s.lines.try_recv() {
+                if l.contains("worldd:") {
+                    println!("served: {l}");
+                }
+            }
+            let words: Vec<String> = logged(&w)
+                .iter()
+                .flat_map(|p| p.effects.iter())
+                .flat_map(|e| e.events.iter().flatten())
+                .filter(|ev| ev.fields.get(&1) == Some(&crew.to_value()))
+                .map(|ev| format!("{} {:?}", ev.name.as_str(), ev.fields.get(&3)))
+                .collect();
+            panic!("never held: {:?}; the crew's words {words:?}", where_is(&w, frame));
+        }
         std::thread::sleep(Duration::from_millis(200));
     };
     let (parent, slot, pos) = where_is(&w, frame);
