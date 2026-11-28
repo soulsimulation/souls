@@ -113,8 +113,9 @@ const RESERVED: &[Reserved] = &[
     r(144, "who_may::F_ACCESS (#3913)", On::Thing),
     // 0.134 R4: a creator's tint on a thing or one of its parts (`souls-god recolor`).
     r(crate::tint::F_TINT, "tint::F_TINT", On::Thing),
-    // #5068: what the world's default body is made of, written by the world alone. Kept on things too: an edit that
-    // sets it on any node is refused.
+    // #5068: what the world's default body is made of, on the world's root, written by the world alone. Kept on
+    // things too, so no kind's state takes the number: an edit that names it on any node (a set, rows, a placed
+    // thing's first fields, a link's row) is refused.
     r(
         crate::bodies::F_DEFAULT_FAMILY,
         "bodies::F_DEFAULT_FAMILY",

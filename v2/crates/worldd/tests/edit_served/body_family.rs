@@ -25,6 +25,27 @@ fn published(w: &Seeded) -> Value {
     }
 }
 
+/// How many times the served world's log sets the field.
+fn writes(w: &Seeded) -> usize {
+    sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+        .unwrap()
+        .records
+        .iter()
+        .filter(|record| !sim::recorder::is_input(record))
+        .filter_map(|record| replica::effects::Part::read(record).ok())
+        .flat_map(|part| part.effects)
+        .map(|e| match e.body {
+            replica::effects::Body::Changes(cs) => cs
+                .iter()
+                .filter(|c| {
+                    matches!(&c.change, replica::effects::Change::Set { field, .. } if *field == F_DEFAULT_FAMILY)
+                })
+                .count(),
+            _ => 0,
+        })
+        .sum()
+}
+
 /// The world writes the family it gives joining bodies at its first tick: the default body's exact pinned kind, two
 /// hands each with its slot, and the rest with none. A creator's set of the field, whole or in rows, is refused
 /// `edit.body-family` with nothing written, and a restart leaves the same value.
@@ -104,10 +125,7 @@ async fn the_world_says_what_its_default_body_is_made_of_and_no_edit_changes_it(
         .collect();
     assert_eq!(
         hands,
-        [
-            ("souls:hand-left", Some(1)),
-            ("souls:hand-right", Some(2))
-        ]
+        [("souls:hand-left", Some(1)), ("souls:hand-right", Some(2))]
     );
     assert!(
         resources
@@ -122,7 +140,39 @@ async fn the_world_says_what_its_default_body_is_made_of_and_no_edit_changes_it(
     };
     assert_eq!(default_family(&kind, &family), held);
 
-    // A restart of the unchanged world leaves it as it was.
+    assert_eq!(writes(&w), 1, "written once");
+    // A view is given it: the public projection of the world, as the stream's snapshots are made, holds the value.
+    let seen = replica::stream::public::project(copy.header(), &copy.tree().to_state()).unwrap();
+    let (seen, value) = (encode(&seen).unwrap(), encode(&held).unwrap());
+    assert!(
+        seen.windows(value.len()).any(|w| w == value.as_slice()),
+        "the public projection carries the root's field"
+    );
+    // A placed thing's first fields may not name the field either.
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(
+            &w,
+            creator,
+            3,
+            got.version,
+            {
+                let mut place = wall(&w, -30, 30);
+                if let Op::Place { fields, .. } = &mut place {
+                    fields.insert(F_DEFAULT_FAMILY, forged.clone());
+                }
+                place
+            },
+        ),
+    )
+    .await;
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, DEFAULT_FAMILY_REFUSED),
+        "a placed thing's first fields are refused: {got:?}"
+    );
+
+    // A restart of the unchanged world leaves it as it was, and writes nothing.
     drop(ws);
     drop(s);
     let s = serve(&w, &socket, &bucket);
@@ -134,7 +184,7 @@ async fn the_world_says_what_its_default_body_is_made_of_and_no_edit_changes_it(
         edit_intent(
             &w,
             creator,
-            3,
+            4,
             0,
             Op::Set {
                 node: Ref::Node(w.root),
@@ -146,4 +196,5 @@ async fn the_world_says_what_its_default_body_is_made_of_and_no_edit_changes_it(
     .await;
     assert_eq!((got.kind, got.reason.as_str()), (2, DEFAULT_FAMILY_REFUSED));
     assert_eq!(published(&w), held);
+    assert_eq!(writes(&w), 1, "a restart of the unchanged world writes nothing");
 }

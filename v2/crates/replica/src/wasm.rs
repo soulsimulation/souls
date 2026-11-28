@@ -1368,6 +1368,12 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                             "owned geometry is written only by the doorway operation".into(),
                         ));
                     }
+                    if fields.contains_key(&crate::bodies::F_DEFAULT_FAMILY) {
+                        return Err((
+                            crate::bodies::DEFAULT_FAMILY_REFUSED,
+                            "what the default body is made of is written only by the world".into(),
+                        ));
+                    }
                     if kinds
                         .as_ref()
                         .is_some_and(|k| !k.contains_key(kind.as_str()))
@@ -1417,6 +1423,12 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                             "owned geometry is written only by the doorway operation".into(),
                         ));
                     }
+                    if *field == crate::bodies::F_DEFAULT_FAMILY {
+                        return Err((
+                            crate::bodies::DEFAULT_FAMILY_REFUSED,
+                            "what the default body is made of is written only by the world".into(),
+                        ));
+                    }
                     named(*node)?;
                     written = crate::edit::write_size(None, written, to)
                         .map_err(|r| (r.name, r.detail))?;
@@ -1426,6 +1438,12 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     Ok(())
                 }
                 Op::Rows { node, field, rows } => {
+                    if *field == crate::bodies::F_DEFAULT_FAMILY {
+                        return Err((
+                            crate::bodies::DEFAULT_FAMILY_REFUSED,
+                            "what the default body is made of is written only by the world".into(),
+                        ));
+                    }
                     if *field == crate::edit::DOOR_GEOMETRY || *field == 7 {
                         return Err((
                             "edit.rows",

@@ -495,6 +495,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         "owned geometry is written only by the doorway operation",
                     );
                 }
+                if initial_fields.contains_key(&crate::bodies::F_DEFAULT_FAMILY) {
+                    return refuse(
+                        here,
+                        crate::bodies::DEFAULT_FAMILY_REFUSED,
+                        "what the default body is made of is written only by the world",
+                    );
+                }
                 let k = kind.as_str();
                 // A kind defined later in the batch is not yet pinned here.
                 let later = made.range(i..).any(|(_, (full, ..))| full == k);
@@ -719,6 +726,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         here,
                         crate::arrival::UNKNOWN,
                         "the arrival is a place's id or none, never a link's row",
+                    );
+                }
+                if *field == crate::bodies::F_DEFAULT_FAMILY {
+                    return refuse(
+                        here,
+                        crate::bodies::DEFAULT_FAMILY_REFUSED,
+                        "what the default body is made of is written only by the world",
                     );
                 }
                 if *field == DOOR_GEOMETRY
