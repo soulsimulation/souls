@@ -1634,7 +1634,7 @@ impl Bodies {
 
     /// The walks whose target or end distance is still kept: none once every walk has ended and been written.
     pub fn walks_kept(&self) -> usize {
-        self.walked_to.len() + self.away_of.len()
+        self.walked_to.len() + self.away_of.len() + self.walked_again.len()
     }
 
     /// How far `body` stands from point `p` (µm, the frame of node `node`) on the level, mm; `None` when it stands in
@@ -2156,6 +2156,9 @@ impl Bodies {
                 out.push((id, how));
             }
         }
+        // A walk sent again that was then replaced, cancelled or retired keeps no count (review of #5268).
+        let live: BTreeSet<Id> = self.live.values().map(|(id, _)| *id).collect();
+        self.walked_again.retain(|id, _| live.contains(id));
         out
     }
 

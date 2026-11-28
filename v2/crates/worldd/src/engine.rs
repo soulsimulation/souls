@@ -1279,6 +1279,9 @@ impl Engine {
                 }
                 // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is (a lift's track
                 // ended by name and gone back down, #5067). A side carrier's with the load's crew left does not (C5).
+                // A leave the world refuses (`support.holders`: a frame its crew holds) changes nothing: the holds a
+                // carrier's leave would say without it are taken back with it (#5067).
+                let said = self.activities.stream.len();
                 self.carrier_leaves(&mut tree, activity, a.body, now, (a.id, a.soul))?;
                 let lone = self
                     .activities
@@ -1286,17 +1289,22 @@ impl Engine {
                     .is_some_and(|m| m.len() == 1);
                 let e = &mut self.activities;
                 e.next = tree.next();
-                e.leave(
-                    &mut tree,
-                    c,
-                    &mut self.moves,
-                    &mut self.due,
-                    &mut self.mint,
-                    ask,
-                    a.body,
-                    activity,
-                )
-                .map_err(|r| held_up(r, lone))?;
+                let left = e
+                    .leave(
+                        &mut tree,
+                        c,
+                        &mut self.moves,
+                        &mut self.due,
+                        &mut self.mint,
+                        ask,
+                        a.body,
+                        activity,
+                    )
+                    .map_err(|r| held_up(r, lone));
+                if let Err(r) = left {
+                    self.activities.stream.truncate(said);
+                    return Err(r);
+                }
                 // A carry ends with its activity: what it carried stays where the last sample put it.
                 if self.activities.members(activity).is_none() {
                     self.carries.remove(&activity);

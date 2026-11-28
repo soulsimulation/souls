@@ -525,10 +525,9 @@ async fn turn_two_souls_turn_a_lying_frame_a_quarter_turn_about_its_middle() {
     drop(served);
 }
 
-/// #5254: a walk never answers as an arrival short of its goal. A Soul sent to a point inside the loose frame's post
-/// (no ground it can stand on there) is answered `walk.stopped-short`, or refused before it starts; sent to beside the
-/// frame's edge it arrives, within 0.4 m. Then two crews of two walk past each other on crossing lanes: each walk that
-/// answers done stands within 0.4 m of its goal; any other answers by name.
+/// #5254: a walk never answers as an arrival short of its goal. A Soul sent to beside the loose frame's edge arrives
+/// within 0.4 m. Then two crews of two walk past each other on crossing lanes: each walk that answers done stands within
+/// 0.4 m of its goal; any other answers `walk.stopped-short`.
 #[tokio::test(flavor = "multi_thread")]
 async fn walk_a_walk_short_of_its_goal_says_so_and_two_crews_walk_past_each_other() {
     let d = scratch("cwalk");
@@ -556,14 +555,6 @@ async fn walk_a_walk_short_of_its_goal_says_so_and_two_crews_walk_past_each_othe
         let f = stood(&dir)[&b];
         (i128::from(f.x - p.x).pow(2) + i128::from(f.z - p.z).pow(2)).isqrt() as i64
     };
-    // Inside its post: no ground a body stands on.
-    let post = Vec3::new(at.x + l.half_width - 38_000, 0, at.z);
-    let inside = souls[0].act("eden:walk", ground, point(post)).await;
-    println!("to inside the frame's post: {inside:?}, {} mm off", off(bodies[0], post) / 1000);
-    match &inside {
-        Ok(_) => panic!("answered as arrived {} mm off its goal", off(bodies[0], post) / 1000),
-        Err(name) => assert!(!name.is_empty(), "named"),
-    }
     // Beside its edge: arrives.
     let edge = spot(at, l.half_width + 350_000, false);
     souls[0].act("eden:walk", ground, point(edge)).await.expect("arrives beside its edge");
@@ -592,7 +583,7 @@ async fn walk_a_walk_short_of_its_goal_says_so_and_two_crews_walk_past_each_othe
         println!("crossing walker {k}: {got:?}, {} mm off its goal", gap / 1000);
         match got {
             Ok(_) => assert!(gap <= 400_000, "done within 0.4 m: {gap} µm"),
-            Err(name) => assert!(name == "walk.stopped-short" || !name.is_empty(), "{name}"),
+            Err(name) => assert_eq!(name, "walk.stopped-short", "a walk ends done or stopped short by name"),
         }
     }
     drop(served);

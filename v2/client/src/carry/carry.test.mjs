@@ -456,6 +456,12 @@ test('#5067: part raise into a bay slot, named or found at the foot; lower away 
   assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20), into: id(5), slot: 'upright_a' }), [{ verb: 'part:raise', target: id(8), params: { 1: id(20), 4: id(5), 5: 1 } }]);
   // Found: upright_a's place is 80 mm from its foot, free, and takes its kind.
   assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }), [{ verb: 'part:raise', target: id(8), params: { 1: id(20), 4: id(5), 5: 1 } }]);
+  // Turned a half turn: found for a kind the same either way (its entry's `symmetry`), not for one that is not.
+  const back = { ...lying, rot: [0, 0, ONE, 0] };
+  const turned = { ...c, placeOf: (n) => (n === id(20) ? back : at(n)) };
+  assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }, turned), [{ verb: 'part:raise', target: id(8), params: { 1: id(20), 4: id(5), 5: 1 } }]);
+  const plainKinds = { ...kinds, 'mars:rack_upright': { ...kinds['mars:rack_upright'], state: {} } };
+  assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }, { ...turned, kinds: plainKinds }), [{ verb: 'part:raise', target: id(8), params: { 1: id(20) } }]);
   // Filled, or too far: raised on the ground.
   assert.deepEqual(part({ do: 'raise', crew: id(8), part: id(20) }, { ...c, seated: () => [{ id: id(4), slot: 1 }] }), [{ verb: 'part:raise', target: id(8), params: { 1: id(20) } }]);
   const far = { ...c, placeOf: (n) => (n === id(20) ? { ...lying, pos: [12e6 + 200_000, 38_000, 6e6 - 1_448_000] } : at(n)) };
