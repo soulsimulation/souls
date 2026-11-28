@@ -8026,9 +8026,9 @@ mod s10c_lockstep {
         let (on, along) = rows[0].3.expect("the link it is on");
         assert_eq!(on, link, "the link it crosses");
         assert!(along > 0 && along < 1_000_000, "part way along: {along}");
-        let written = crate::bodies::row_on(body, &now, (on, along));
+        let written = worldd::bodies::row_on(body, &now, (on, along));
         assert_eq!(
-            crate::bodies::read_link(&written),
+            worldd::bodies::read_link(&written),
             Some((on, along)),
             "read back"
         );
