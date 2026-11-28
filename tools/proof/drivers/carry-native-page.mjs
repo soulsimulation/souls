@@ -103,6 +103,16 @@ const SCENES = {
     view: 'post=0&hour=12:00&eye=13,6.5,37&at=13,.6,27',
     crews: [{ load: 'generator', front: 'ada', back: 'bo', sides: [['cy', 'right', 1], ['di', 'left', 2]], legs: [['14,29', 8000], ['17,29', 8000]] },
       { load: 'timber-bundle', front: 'ada', back: 'bo', sides: [['cy', 'right', 1], ['di', 'left', 2], ['ed', 'right', 3], ['fi', 'left', 4]], legs: [['11.6,29', 8000], ['8,29', 8000]] }] },
+  // Six Souls seat one rack beam (N5; CARRY_SCENE=sixbeam; #5206): two crews carry the stand's frames standing into
+  // the rack bay's upright slots and hold them, two to a frame; two seat a low beam on each column (west mouth, then
+  // round to the east mouth); the holders let go and the bay stands. Then all six take a loose beam, one at each of
+  // its six grips (the offerer its front, sides right 1, left 2, right 3, left 4), carry it to the west mouth and seat
+  // it in beam_high_l: the side carriers walk with it on the set-in.
+  sixbeam: { who: ['ada', 'bo', 'cy', 'di', 'ed', 'fi'], kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
+    view: 'post=0&hour=12:00&eye=-.5,5.2,30&at=3,.9,20',
+    sixbeam: { bay: 'rack-bay', frames: [['rack-frame-1', 'ada', 'bo', 'upright_a'], ['rack-frame-2', 'cy', 'di', 'upright_b']],
+      beams: ['ed', 'fi', [['rack-beam-1', ['4.978,20'], 'beam_low_l'], ['rack-beam-2', ['4,16', '8,16', '7.022,20'], 'beam_low_r']]],
+      six: { load: 'rack-beam-3', front: 'ada', back: 'bo', sides: [['cy', 'right', 1], ['di', 'left', 2], ['ed', 'right', 3], ['fi', 'left', 4]], mouth: '4.978,20', slot: 'beam_high_l' } } },
   // The deck walk (B5, attempt 24; CARRY_SCENE=deckwalk; #5284's creator-placed ways): the world's creator places the
   // finished deck bay in one `souls-god.mjs batch`, a part of each slot's kind into each of deck_bay's slots in the
   // entry's order (frames, four beams, five joists, two sheets, the stair); then Ada walks up the stair onto the first
@@ -719,6 +729,53 @@ async function crewsSurvey({ state, page, paths, signal, check, arm }) {
     check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
   } finally { save(state, 'survey-measurement.json', { note: 'Crews of four and six: each carry\'s crew and load.', crews: out, shortWalks: state.shortWalks ?? [] }); save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: [] }); }
 }
+/** Six Souls seat one rack beam (N5): the bay's frames held, its low beams seated, the holders let go, then a crew of
+ *  six seats a beam. Every command accepted (a refusal for a moment asked again), no page error; the seat measured. */
+async function sixBeamSurvey({ state, page, paths, signal, check, arm, root }) {
+  const S = SCENE.sixbeam, wait = ms => delay(ms, signal), shot = async step => { await page.screenshot({ path: join(paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
+  check('candidate-arm', arm === 'candidate'); const manifest = await verifyAssets(state, check);
+  const bay = (await find(state, S.bay)).id, frames = []; for (const [name] of S.frames) frames.push(await find(state, name));
+  await setupGate(state, page, signal);
+  check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  const out = {};
+  try {
+    const holds = [];
+    for (const [k, [name, a, b, slot]] of S.frames.entries()) {
+      await gripEnds(state, frames[k].id, a, b);
+      const c = await crewOf(state, a, b); holds.push([c, a, b]);
+      await retried(state, a, 'part', 'take', c, frames[k].id); await wait(1500);
+      await retried(state, a, 'carry', 'to', c, bay, slot); await wait(9000);
+      await retried(state, a, 'part', 'put', c, bay, slot); await wait(2000); await shot(`${name}-in-${slot}`);
+    }
+    const [x, y, beams] = S.beams, bc = await crewOf(state, x, y);
+    for (const [name, ways, slot] of beams) {
+      const beam = await find(state, name);
+      await Promise.all([gripAt(state, x, beam.id, 'front'), gripAt(state, y, beam.id, 'back')]);
+      await retried(state, x, 'part', 'take', bc, beam.id); await wait(1500);
+      for (const w of ways) { await retried(state, x, 'carry', 'to', bc, w); await wait(6000); }
+      await retried(state, x, 'part', 'put', bc, bay, slot); await wait(2500); await shot(`${name}-in-${slot}`);
+    }
+    for (const [c, a, b] of holds) for (const w of [a, b]) await cli(state, w, 'carry', 'leave', c);
+    for (const w of [x, y]) await cli(state, w, 'carry', 'leave', bc);
+    await wait(2000); await shot('bay-stands');
+    const X = S.six, load = await find(state, X.load);
+    await Promise.all([gripAt(state, X.front, load.id, 'front'), gripAt(state, X.back, load.id, 'back'),
+      ...X.sides.map(([w, side, n]) => retried(state, w, 'carry', 'grip', load.id, side, String(n)))]);
+    const others = [X.back, ...X.sides.map(s => s[0])];
+    const crew = state.crew = (await cli(state, X.front, 'carry', 'offer', ...others.map(w => state.bodies[w]))).crew;
+    for (const w of others) await cli(state, w, 'carry', 'accept', crew);
+    await retried(state, X.front, 'part', 'take', crew, load.id); await wait(2000); await shot('six-take-the-beam');
+    await retried(state, X.front, 'carry', 'to', crew, X.mouth); await wait(12000); await shot('six-at-the-mouth');
+    const put = await asked(state, X.front, 'part', 'put', crew, bay, X.slot); await wait(4000); await shot('six-seat-the-beam');
+    out.put = { ok: put.ok === true, code: put.code ?? null, detail: put.detail ?? null };
+    for (const w of [X.front, ...others]) await asked(state, w, 'carry', 'leave', crew);
+    await wait(2000); await shot('seated');
+    check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  } finally {
+    save(state, 'survey-measurement.json', { note: 'Six Souls seat one rack beam: the put\'s answer, measured.', ...out, shortWalks: state.shortWalks ?? [] });
+    save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: [] });
+  }
+}
 /** A load carried by two as a survey: taken, walked its legs, set down. Its checks: every command accepted, no page error;
  *  the contact oracle on its crew is a measurement. */
 async function carrySurvey({ state, page, paths, signal, check, arm, root }) {
@@ -787,6 +844,7 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   if (SCENE.third) return firstThird({ state, page, paths, signal, check, arm, root });
   if (SCENE.carry) return carrySurvey({ state, page, paths, signal, check, arm, root });
   if (SCENE.deckwalk) return deckWalk({ state, page, paths, signal, check, arm });
+  if (SCENE.sixbeam) return sixBeamSurvey({ state, page, paths, signal, check, arm, root });
   if (SCENE.crews) return crewsSurvey({ state, page, paths, signal, check, arm });
   await offer(state);
   if (arm === 'baseline') {
