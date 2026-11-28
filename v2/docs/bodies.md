@@ -17,6 +17,15 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    `kinds/body.rs`; `v2/tools/import-body` writes it for a body from the authoring kit);
    `replica` holds it decoded as `{1: name, 2: [{1: name, 2: class, 3: slot}, ...]}`, never an authored or stored
    form. Unknown fields, and two resources of one name, are refused (`not-a-family`, `resource-duplicate`).
+   **The default body's family is the world's to say (#5068).** A body that wears no catalogue body takes the
+   family the world gives every joining Soul. The world publishes it on its root node, field 146
+   (`replica::bodies::F_DEFAULT_FAMILY`): `{1: kind, 2: [{1: name, 2: class, 3: slot}, ...]}`, `kind` the default
+   body node's exact pinned kind (`namespace:name@revision`) and the resources as above, so a view reads which slot
+   is which hand from the world and never guesses. The world writes it at a start's first tick whenever the root
+   does not hold exactly what that start gives bodies (a restart of an unchanged world writes nothing); an edit that
+   sets it, whole or in rows, is refused `edit.body-family`. Reading it: a body that wears a catalogue body (field
+   32) is described by that body's own hash-bound kind file, first; only a body with no field 32 whose kind is
+   exactly `kind` takes these resources (the page: `apps/web/src/v2-engine/source/family-record.ts`).
 2. **A skill claims classes or names, never anatomy:** every resource of a class (a walk takes all the legs), any
    one of a class (a carry takes one hand), or one by name (a family's own skill). So one walk runs unchanged on a
    dog and a person.

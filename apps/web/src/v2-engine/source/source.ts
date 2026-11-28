@@ -6,6 +6,7 @@
 import type { CarryChange, CarryGrips, CrewMember } from './carry-record.ts';
 import type { Happened } from './sound-record.ts';
 import type { SkyFields } from './sky-record.ts';
+import type { DefaultFamily } from './family-record.ts';
 import type { Fields } from './kinds-state.ts';
 
 /** One node as the page needs it, read from R1's replica after a part. */
@@ -63,6 +64,8 @@ export type NodeRec = {
   placeName?: string | null;
   /** The world node's day, night and weather fields (E6; V19, `sky/record.ts`). */
   sky?: SkyFields;
+  /** The world node's default body family (#5068, field 146; `family-record.ts`): which slot of a default body is which hand. */
+  family?: DefaultFamily;
   /** A moving node's course (field 80, `replica::schedule::F_COURSE`), its value's canonical bytes, for the replica's
    *  `courseAt` (#3603). */
   course?: Uint8Array;

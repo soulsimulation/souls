@@ -14,6 +14,7 @@ import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, t
 import { happenedInPart } from './sound-record.ts';
 import { readChanged } from './changed.ts';
 import { skyFields } from './sky-record.ts';
+import { defaultFamilyOf } from './family-record.ts';
 import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
 import { courseLeaves, coursePlaces, type CoursePlaces } from '../course-samples.ts';
@@ -145,6 +146,8 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (fields) rec.fields = fields;
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
+  const family = defaultFamilyOf(f); // #5068: what the world's default body is made of (the world node's field 146)
+  if (family) rec.family = family;
   return rec;
 }
 
