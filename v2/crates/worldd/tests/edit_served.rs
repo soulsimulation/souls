@@ -3139,6 +3139,14 @@ fn a2_parts_rest_at_the_grounds_height() {
         } else {
             frame_ends_of(&w, fa)
         };
+        println!(
+            "{what}: in {:?} (the bay {bay:?}), to {p:?} and {q:?}; Souls {} and {} at {:?} {:?}",
+            where_is(&w, fa).0,
+            ab.0 + 1,
+            ab.1 + 1,
+            body_at(&w, body_of(&w, w.souls[ab.0])),
+            stood_or_none(&w, w.souls[ab.1])
+        );
         both(hands, ab, p, q, what);
         let c = crew(hands, ab);
         let got = hands[ab.0].act("part:take", c, part(fa));
@@ -3966,6 +3974,19 @@ fn whys(w: &Seeded, entries: &[u64], event: &str) -> Vec<(Id, String)> {
             _ => None,
         })
         .collect()
+}
+
+/// Where Soul `soul`'s body last stood, if it has one yet.
+fn stood_or_none(w: &Seeded, soul: Id) -> Option<Vec3> {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let b = t
+        .links_at(soul)
+        .iter()
+        .filter(|e| t.ty(e).as_str() == "souls:body-of")
+        .find_map(|e| Some(t.link(e.link)?.1[0]))?;
+    drop(copy);
+    Some(body_at(w, b))
 }
 
 /// Waits (at most 60 s) until body `body` is no longer in the served world's tree (a retired Soul's body has left),
