@@ -1004,7 +1004,7 @@ export class HumanViews {
       v.bench = LYING.has(act)||act==='bench-press'?(typeof f.seatHeight==='number'&&Number.isFinite(f.seatHeight)&&f.seatHeight>0&&f.seatHeight<=1.2?f.seatHeight:0):0;
       v.groundSeat = onGround(act, f.baseActivity);
       if (v.groundSeat) v.seat = GROUND_SEAT;
-      v.propWanted = f.prop;
+      v.propWanted = f.heldEntries?.entries.length===0 ? undefined : f.prop;
       v.heldEntries = f.heldEntries;
       v.nativeHands = f.nativeHands;
       v.consumeMove = f.consumeMove;

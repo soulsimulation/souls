@@ -145,6 +145,15 @@ test('canonical held quantity, owner and arrival controls follow production palm
     const priorDisposed=disposed.length,priorBuilds=builds.length;
     views.setFrame([{...sample,nativeHands:undefined,prop:'plate',heldEntries:held}],9000);views.render(1);assert.equal(disposed.length,priorDisposed+1,'unknown default metadata cannot attach');
     views.setFrame([{...sample,heldEntries:held,hands:{left:[2,1,3]}}],9000);views.render(1);assert.equal(builds.length,priorBuilds,'native hand owner wins');
+    views.clear();reference.clear();
+    const knownEmpty={...sample,activity:'idle',baseActivity:'idle',prop:'plate',heldEntries:{observedAt:30,entries:[]}};
+    views.setFrame([knownEmpty],9000);views.render(1);reference.setFrame([{...knownEmpty,prop:undefined}],9000);reference.render(1);
+    assert.deepEqual(bones(views.bodyObject(sample.id)!),bones(reference.bodyObject(sample.id)!),'known-empty stale plate has no holding pose');
+    const propState=()=>((views as unknown as{views:Map<string,{prop?:{obj:THREE.Object3D}}>}).views.get(sample.id)?.prop);
+    assert(!propState()?.obj.visible,'known-empty leaves no visible generic held copy');
+    assert.equal((views as unknown as{heldPictures:Map<string,Map<string,unknown>>}).heldPictures.get(sample.id)?.size??0,0,'known-empty leaves no canonical copy');
+    views.setFrame([{...knownEmpty,heldEntries:undefined}],9001);views.render(1);assert(propState()?.obj.visible,'unknown ownership retains existing legacy depiction');
+    views.setFrame([{...knownEmpty,activity:'eat'}],9002);views.render(1);assert(propState()?.obj.visible,'legitimate activity-owned default plate remains');
     // The ordinary take path, with display clock intentionally unrelated to world time.
     const observed=(at:number,soup?:number,slot=7)=>({observedAt:at,entries:soup===undefined?[]:[{id:'same-bowl',kind:'eden:soup_bowl@aa',parent:'native-body',slot,pos:[0,0,0] as const,rot:[Q,0,0,0] as const,fields:{28:soup}}]});
     const skin=(holder:THREE.Object3D)=>{holder.updateMatrixWorld(true);const out:number[]=[];holder.traverse(o=>{const m=o as THREE.SkinnedMesh;if(!m.isSkinnedMesh||!m.userData.bodyDraw||!m.visible)return;const g=m.geometry,index=g.index!,materials=Array.isArray(m.material)?m.material:[m.material],seen=new Set<number>();for(const group of g.groups.length?g.groups:[{start:0,count:index.count,materialIndex:0}]){if(!materials[group.materialIndex??0]?.visible)continue;for(let i=Math.max(group.start,g.drawRange.start);i<Math.min(group.start+group.count,g.drawRange.start+g.drawRange.count,index.count);i++)seen.add(index.getX(i));}for(const i of seen)out.push(...m.getVertexPosition(i,new THREE.Vector3()).applyMatrix4(m.matrixWorld).toArray());});assert(out.length>3000);return out;};

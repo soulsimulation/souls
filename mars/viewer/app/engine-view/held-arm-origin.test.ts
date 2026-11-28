@@ -32,3 +32,8 @@ test('partner-only contact boundaries invalidate free-arm origins without changi
  const t=take([held(0),held(100000,2)]);t.changes.push([4,'person','partner','other'],[6,'person','partner',null]);t.changes.sort((a,b)=>a[0]-b[0]);
  const r=reader(t);try{assert.equal(r.at(.15).heldArmKnown,true);assert.equal(r.at(.25).partner,'other');assert.equal(r.at(.25).heldArmKnown,false);assert.equal(r.at(.325).heldArmKnown,false,'ending an owner is not a fabricated free-arm predecessor');assert.equal(r.at(.325).heldArmOrigin,undefined);}finally{r.dispose();}
 });
+
+test('sleep-pose owners invalidate history and known-empty observations suppress stale held props',()=>{
+ const t=take([held(0),held(100000,2),held(400000)]);t.changes.push([0,'person','prop','plate'],[4,'person','sleepPose',{owner:'native'}],[6,'person','sleepPose',null]);t.changes.sort((a,b)=>a[0]-b[0]);
+ const r=reader(t);try{assert.equal(r.at(.25).heldArmKnown,false);assert.equal(r.at(.325).heldArmKnown,false);assert.equal(r.at(.45).prop,undefined,'known empty clears stale public legacy held prop');}finally{r.dispose();}
+});
