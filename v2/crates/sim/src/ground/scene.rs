@@ -100,6 +100,93 @@ pub struct Scene {
     /// The open ground's terrain (N1b), on the open ground, or under a floor's thing that stands on it: what a
     /// footprint, a doorway or a step to the ground is measured from (#3227).
     pub terrain: Option<Terrain>,
+    /// On a floor: the stretches of its edges that lie on another thing's floor's edge at the same height, within
+    /// [`SEAM`] (racks T9: two deck sheets side by side), each `(y, [a, b])` in the floor's frame. Its cut does not
+    /// take them back from the edge (`super::cut_floor`), so the two floors meet there as one floor.
+    pub seams: Vec<(i64, [Xz; 2])>,
+}
+
+/// How near, µm, another thing's floor edge lies to one of a floor's own, in height and across, to be a seam.
+pub const SEAM: i64 = 5_000;
+
+/// The seams of floor `floor` ([`Scene::seams`]): its surfaces' edges against those of the floors of the other things
+/// in its thing's parent (not the open ground), read in that parent's frame and given back in the floor's.
+fn seams_of(tree: &Tree, floor: Handle) -> Vec<(i64, [Xz; 2])> {
+    let mut out = Vec::new();
+    let Some(thing) = tree.node(floor).and_then(|n| n.parent()).and_then(|p| tree.handle(p)) else {
+        return out;
+    };
+    let Some(parent) = tree.node(thing).and_then(|n| n.parent()).and_then(|p| tree.handle(p)) else {
+        return out;
+    };
+    // Things in a thing (parts in a bay), not every building on the open ground: a town's floors are not read
+    // against each other.
+    if kind_of(tree, parent) == GROUND {
+        return out;
+    }
+    let Ok(here) = xform_to(tree, thing, parent) else {
+        return out;
+    };
+    let Ok(mine) = surfaces_of(tree, floor, &here) else {
+        return out;
+    };
+    let [w, x, y, z] = here.rot.parts();
+    let Some(back) = Quat::new(w, -x, -y, -z).or_else(|_| Quat::new(-w, x, y, z)).ok() else {
+        return out;
+    };
+    let local = |p: Xz, y: i64| {
+        back.rotate(Vec3::new(p[0] - here.pos.x, y - here.pos.y, p[1] - here.pos.z))
+            .ok()
+            .map(|v| [v.x, v.z])
+    };
+    let mut theirs: Vec<Surface> = Vec::new();
+    for &sib in tree.children(parent).unwrap_or(&[]) {
+        if sib == thing {
+            continue;
+        }
+        let Ok(x) = xform_to(tree, sib, parent) else { continue };
+        for &f in tree.children(sib).unwrap_or(&[]) {
+            if kind_of(tree, f) == FLOOR
+                && let Ok(ss) = surfaces_of(tree, f, &x)
+            {
+                theirs.extend(ss);
+            }
+        }
+    }
+    let edges = |r: &[Xz]| -> Vec<[Xz; 2]> { (0..r.len()).map(|k| [r[k], r[(k + 1) % r.len()]]).collect() };
+    for m in &mine {
+        for o in theirs.iter().filter(|o| (o.y - m.y).abs() <= SEAM) {
+            for [a, b] in edges(&m.ring) {
+                let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+                let l2 = ex * ex + ez * ez;
+                if l2 == 0 {
+                    continue;
+                }
+                let l = l2.isqrt();
+                for [c, d] in edges(&o.ring) {
+                    let off = |p: Xz| (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])).abs() / l;
+                    if off(c) > i128::from(SEAM) || off(d) > i128::from(SEAM) {
+                        continue;
+                    }
+                    let t = |p: Xz| ex * i128::from(p[0] - a[0]) + ez * i128::from(p[1] - a[1]);
+                    let (t0, t1) = (t(c).min(t(d)).max(0), t(c).max(t(d)).min(l2));
+                    if t1 <= t0 {
+                        continue;
+                    }
+                    let at = |t: i128| {
+                        [
+                            a[0] + (ex * t / l2) as i64,
+                            a[1] + (ez * t / l2) as i64,
+                        ]
+                    };
+                    if let (Some(p), Some(q)) = (local(at(t0), m.y), local(at(t1), m.y)) {
+                        out.push((m.y - here.pos.y, [p, q]));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The open ground's terrain (N1b, #3197), read from its node's `F_TILE_SIZE` and `F_TILES` (N1's import, byte for
@@ -1336,6 +1423,7 @@ impl Scene {
                 if s.surfaces.is_empty() {
                     return Err("a floor with no surfaces".into());
                 }
+                s.seams = seams_of(tree, h);
                 things_below(tree, thing, thing, false, &mut s, None)?;
                 let mut ends = vec![h];
                 ends.extend(tree.children(h).ok_or("a floor")?.iter().copied());

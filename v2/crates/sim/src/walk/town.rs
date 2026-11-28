@@ -63,7 +63,7 @@ use crate::links::{
     Building, Doors, F_OPEN, Kind, Open, SquareMeet, back, floor_joins, ground_doors,
 };
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
+use crate::routes::{CLIMB, HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
 use crate::spots::{Ask, CLEAR, ClassGround, Granted, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
@@ -2800,7 +2800,9 @@ impl Ground for Grounds<'_> {
         if !self.map.get().may_reach(from.piece, to.piece) {
             return None;
         }
-        let r = self.map.route(self.tree, from, to, HANDS).ok()?;
+        // A place up a ladder is a place (racks T6: a frame's standing place): the walk there is the body's, which
+        // still needs the climb.
+        let r = self.map.route(self.tree, from, to, HANDS | CLIMB).ok()?;
         // As a body could walk it, not by the coarse search's middles of the squares' edges (#5012's short walk).
         Some(self.map.walked(&r, from, to) as i64 * 1000)
     }

@@ -755,21 +755,6 @@ impl Bay {
             4,
         )
         .unwrap();
-        for b in &town.buildings {
-            for l in &b.links {
-                if l.nodes.contains(&node) {
-                    println!(
-                        "DEBUG link {} {:?} nodes {:?} blocked {:?} ends {:?} line {:?}",
-                        show(l.id),
-                        l.kind,
-                        l.nodes.map(show),
-                        l.blocked,
-                        l.ends,
-                        l.line
-                    );
-                }
-            }
-        }
         town.view().stand_near(node, p, 0, None)
     }
 

@@ -888,6 +888,34 @@ fn square_ring(w: [i32; 4]) -> Vec<P> {
 
 /// The patch of a floor scene for one radius, turned by `t` before it is put on the grid.
 pub fn cut_floor(s: &Scene, radius: i64, t: Turn) -> Result<Patch, String> {
+    // A seam (racks T9) is no edge: the floor is widened past it by the cut's depth, so the cut brings it back to the
+    // seam itself, where the other floor's cut meets it.
+    let widened;
+    let s = if s.seams.is_empty() {
+        s
+    } else {
+        let d = (radius + MARGIN + 1) * 1000;
+        let mut w = s.clone();
+        for (y, [a, b]) in &s.seams {
+            let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
+            let len = (i128::from(ex) * i128::from(ex) + i128::from(ez) * i128::from(ez)).isqrt().max(1) as i64;
+            let (nx, nz) = (
+                (i128::from(-ez) * i128::from(d) / i128::from(len)) as i64,
+                (i128::from(ex) * i128::from(d) / i128::from(len)) as i64,
+            );
+            w.surfaces.push(scene::Surface {
+                y: *y,
+                ring: vec![
+                    [a[0] - nx, a[1] - nz],
+                    [b[0] - nx, b[1] - nz],
+                    [b[0] + nx, b[1] + nz],
+                    [a[0] + nx, a[1] + nz],
+                ],
+            });
+        }
+        widened = w;
+        &widened
+    };
     let g = prepare(s, radius, t)?;
     let mut patch = Patch {
         radius,
