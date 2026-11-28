@@ -932,12 +932,10 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
     // Soul 5 walks up onto the first sheet, then across onto the second.
     k.walk(&[(4, Bay::at(-4_500, STAIR_AT[1]))], "Soul 5 to the flight's foot");
     let walker = body_of(&k.w, k.w.souls[4]);
-    println!(
-        "decks {} {}, flight {}; afresh a body stands on the first at {:?}",
-        show(decks[0]),
-        show(decks[1]),
-        show(flight),
-        k.fresh(decks[0], v3(0, 19_000, 0))
+    // The served tree's geometry, read afresh: a body stands on the first sheet's top.
+    assert!(
+        k.fresh(decks[0], v3(0, 19_000, 0)).is_some(),
+        "a town built afresh from the served tree stands a body on the deck"
     );
     let up = |k: &mut Bay, node: Id, p: Vec3, what: &str| {
         let to = BTreeMap::from([(1, Value::Array(vec![int(p.x), int(p.y), int(p.z)]))]);
@@ -1003,7 +1001,10 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
         k.walk(&[(4, Bay::at(0, -3_200))], "Soul 5 to the ladder's foot");
         body_of(&k.w, k.w.souls[4])
     };
-    println!("afresh a body stands on the place at {:?}", k.fresh(perch, v3(0, 1_800_000, -488_000)));
+    assert!(
+        k.fresh(perch, v3(0, 1_800_000, -488_000)).is_some(),
+        "a town built afresh from the served tree stands a body on the standing place"
+    );
     let before = body_rows(&k.w, walker).len();
     let to = BTreeMap::from([(1, Value::Array(vec![int(0), int(1_800_000), int(-488_000)]))]);
     k.hands[4].send("eden:walk", perch, to);
