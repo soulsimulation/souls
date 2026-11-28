@@ -132,6 +132,18 @@ async function conferenceServedSource({ recipe, paths, bundle, seat, signal }) {
   return { command, clientRoot };
 }
 
+/** Read only the actual sent sequence. The ordinary command log preserves every public answer. */
+export async function conferenceJoinReceipt(status, cli) {
+  if (!Number.isSafeInteger(status.sequence) || status.sequence <= 0 || !(status.sent > 0)
+      || !Array.isArray(status.unanswered) || status.unanswered.includes(status.sequence)) return null;
+  const answer = await cli('receipt', String(status.sequence));
+  assert.equal(answer.ok, true, 'conference-proof join receipt must be available');
+  assert.equal(answer.receipt?.sequence, status.sequence, 'conference-proof join receipt sequence');
+  assert.deepEqual(answer.receipt.verbs, ['life:join'], 'conference-proof admission must read the real join');
+  assert(Array.isArray(answer.receipt.answers), 'conference-proof join answers required');
+  return answer;
+}
+
 export async function pairConferenceSeat({ recipe, paths, bundle, label, name, signal }) {
   requireConferenceRecipe(recipe);
   assert(/^[a-z][a-z0-9-]{0,31}$/.test(label), 'conference-proof synthetic seat label');
@@ -163,9 +175,19 @@ export async function pairConferenceSeat({ recipe, paths, bundle, label, name, s
     return command([bundle, ...words, '--soul', seat.soul]);
   };
   const until = Date.now() + 10000;
+  let admission = null;
   while (!seat.body) {
     signal.throwIfAborted();
     const status = await seat.cli('status'); seat.body = status.body ?? null;
+    if (!admission) {
+      const answer = await conferenceJoinReceipt(status, seat.cli);
+      const terminal = answer?.receipt.answers.find(row => ['receipt', 'refused', 'resolved', 'unread'].includes(row.answer));
+      if (terminal) {
+        admission = answer;
+        privateJson(join(paths.dir, `conference-admission-${label}.json`), { sequence: status.sequence, answer });
+        assert.notEqual(terminal.answer, 'refused', `conference-proof join refused: ${terminal.reason ?? 'unknown'}`);
+      }
+    }
     assert(Date.now() < until, 'conference-proof named Soul body admission');
     if (!seat.body) await new Promise((ok, no) => {
       const abort = () => { clearTimeout(timer); no(signal.reason); };

@@ -1,0 +1,291 @@
+#!/usr/bin/env node
+// A social party composed from the shipped jukebox, body gestures and shared-beat dance.
+// All movement and activity changes are commands through the world's downloaded Soul client.
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
+import { startOldPage } from '../arena/new-engine/old-page.mjs';
+import { exportFacts } from '../arena/new-engine/world.mjs';
+import { defOf } from '../../entry/look.mjs';
+import { REPO_ROOT } from '../../lib/paths.mjs';
+
+const exec = promisify(execFile);
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const names = ['Cedar', 'Maple', 'Willow', 'Birch', 'Aspen'];
+
+/** A real, geometry-free park zone: the existing template operation also names the dance space. */
+export function partyDanceArea() {
+  return { op: 'place', def: 'core/zone@1', name: 'party-dance-space', params: { use: 'park' },
+    shape: { area: [[-8, -8], [8, -8], [8, 8], [-8, 8]] } };
+}
+
+export function silentPartyTemplate() {
+  return { schema: 'genesis/1', name: 'Silent party rehearsal',
+    description: 'An open, flat park dance space for five Souls greeting and dancing without a jukebox or sound claim.',
+    constants: { extent: 50, ground: 'land' },
+    batches: [{ group: 'party-dance-space', ops: [partyDanceArea()] }] };
+}
+
+export function partyTemplate(jukeboxEntry) {
+  assert.equal(jukeboxEntry.kind, 'eden:jukebox', 'use the shipped jukebox');
+  const def = defOf(jukeboxEntry);
+  assert(def, 'the jukebox must have its existing shape');
+  return {
+    schema: 'genesis/1', name: 'Garden party', description: 'A jukebox beside an open dance space.',
+    constants: { extent: 50, ground: 'land' },
+    batches: [{ group: 'party-rehearsal', ops: [
+      { op: 'define', def },
+      { op: 'place', def: 'core/jukebox@1', name: 'party-jukebox', p: [4, 0, -2] },
+      partyDanceArea(),
+    ] }],
+  };
+}
+
+export function completed(answer, label) {
+  assert.equal(answer.ok, true, `${label}: ${answer.code ?? 'not accepted'}`);
+  assert.equal(answer.phase, 'done', `${label}: ${answer.phase ?? 'no terminal receipt'}`);
+  assert(answer.receipt?.answers?.some((row) => row.answer === 'receipt'), `${label}: terminal receipt`);
+  return answer;
+}
+
+/** `together kinds` supplies the selected card and invited capacity, never an invented activity pin. */
+export function partyDance(catalog, invited) {
+  assert.equal(catalog.ok, true, 'activity discovery must succeed');
+  const dance = catalog.activities?.find((row) => row.word === 'dance-together');
+  assert(dance && typeof dance.card === 'string' && /\bbeat\b/i.test(dance.card), 'the public dance card must name its shared beat');
+  assert(Number.isInteger(dance.asks) && dance.asks >= invited, 'the public dance capacity must admit the invited guests');
+  assert.equal(dance.where, 'anywhere', 'this rehearsal uses an activity with no thing');
+  assert(!dance.how, 'the dance must support ordinary offer and accept');
+  return dance;
+}
+
+/** `look` teaches the exact activity id through its ordinary leave command. `inspect` then teaches roles/members. */
+export function partyActivityId(look, word) {
+  assert.equal(look.ok, true, 'membership look must succeed');
+  const lines = (look.in ?? []).filter((line) => line.includes(word));
+  assert.equal(lines.length, 1, 'look must name exactly one selected dance');
+  const id = /(?:leave:|take it back:) together leave (\S+)$/.exec(lines[0])?.[1];
+  assert(id, 'look must teach the activity id in its leave command');
+  return id;
+}
+
+export function partyMembers(answer, { id, word, bodies }) {
+  assert.equal(answer.ok, true, 'activity inspect must succeed');
+  assert.equal(answer.id, id, 'inspect must read the exact offered activity');
+  assert.equal(answer.activity, word, 'inspect must name the selected dance');
+  assert.equal(answer.started, true, 'the accepted dance must have started');
+  assert(Array.isArray(answer.members), 'inspect must list public members and roles');
+  assert.deepEqual(answer.members.map((m) => m.body).sort(), [...bodies].sort(), 'the dance must retain exactly the expected members');
+  assert(answer.members.every((m) => typeof m.role === 'string' && m.role.length), 'each member must have a public role');
+  assert.equal(answer.leave, `together leave ${id}`, 'inspect must teach the real leave command');
+  return answer;
+}
+
+/** One member leaving must not end the other members' dance. The camera records this entire sequence. */
+export async function performParty({ seats, jukebox, mode = 'jukebox', record = () => {}, pause = sleep, observe = async () => {} }) {
+  assert.equal(seats.length, 5, 'the rehearsal uses five independent Souls');
+  assert(['silent', 'jukebox'].includes(mode), 'choose an explicit supported music mode');
+  assert(mode === 'silent' || jukebox, 'jukebox mode needs its ordinary discovered thing');
+  const [operator, ...guests] = seats;
+  const command = async (seat, ...words) => {
+    const answer = await seat.cli(...words);
+    record({ person: seat.label, words, answer });
+    return answer;
+  };
+  const act = async (seat, form, target, ...args) => completed(await command(seat, 'act', `${form}:${target}`, ...args, '--wait'), form);
+  const body = async (seat, form, ...args) => completed(await command(seat, 'act', form, ...args, '--wait'), form);
+  const walk = (seat, target) => act(seat, 'walk', target);
+  let activityId;
+  const leave = async (seat) => completed(await command(seat, 'together', 'leave', activityId), 'leave dance');
+  async function spoken(speaker, listener, words, gesture) {
+    const sent = await command(speaker, 'say', words, '--to', listener.body, '--gesture', gesture);
+    assert.equal(sent.ok, true, 'the spoken greeting is admitted');
+    assert(Number.isInteger(sent.sequence) && Number.isInteger(sent.to?.sequence), 'speech and gesture have separate real receipts');
+    for (const sequence of [sent.sequence, sent.to.sequence]) {
+      for (const until = Date.now() + 15000;;) {
+        const answer = await command(speaker, 'receipt', String(sequence));
+        const last = answer.receipt?.answers?.at(-1);
+        assert.notEqual(last?.answer, 'refused', `greeting: ${last?.reason}`);
+        if (last?.answer === 'receipt' && !answer.receipt.going) break;
+        assert(Date.now() < until, 'speech and gesture must complete'); await pause(100);
+      }
+    }
+    for (const until = Date.now() + 15000;;) {
+      const events = await command(listener, 'events');
+      if (events.events?.some((event) => event.kind === 'heard' && event.words === words)) break;
+      assert(Date.now() < until, 'the other Soul must actually hear the words'); await pause(100);
+    }
+  }
+  const discovery = [];
+  for (const seat of seats) {
+    const help = await command(seat, 'help');
+    for (const op of ['look', 'inspect', 'together', 'say', 'events', 'receipt']) assert(help.commands?.includes(op), `help must list ${op}`);
+    const look = await command(seat, 'look');
+    assert.equal(look.ok, true, 'arrival look must succeed');
+    assert(!(look.in ?? []).length, 'the party needs every member free before any greeting or offer');
+    const dance = partyDance(await command(seat, 'together', 'kinds'), guests.length);
+    if (discovery.length) assert.deepEqual(dance, discovery[0].dance, 'all participants must discover the same served dance');
+    discovery.push({ person: seat.label, dance });
+  }
+  const danceWord = discovery[0].dance.word;
+  await observe('greeting-start', { seat: operator });
+  await spoken(operator, guests[0], 'Welcome! Would you like to dance?', 'wave');
+  await observe('greeting-done', { seat: operator });
+  await observe('reply-start', { seat: guests[0] });
+  await spoken(guests[0], operator, 'Yes, let us dance together!', 'nod');
+  await observe('reply-done', { seat: guests[0] });
+  if (mode === 'jukebox') {
+    await walk(operator, jukebox);
+    await act(operator, 'switch_on', jukebox);
+    await walk(operator, guests[0].body);
+  } else if (jukebox) {
+    const music = await command(operator, 'inspect', jukebox);
+    assert(music.state?.on === false || music.state?.on === 0, 'silent mode requires the jukebox to remain off');
+  }
+  for (const seat of seats) {
+    const before = await command(seat, 'look');
+    assert.equal(before.ok, true, 'pre-offer look must succeed');
+    assert(!(before.in ?? []).length, 'the party needs every member free before its offer');
+  }
+  completed(await command(operator, 'together', 'offer', danceWord, ...guests.map((seat) => seat.body)), 'offer dance');
+  activityId = partyActivityId(await command(operator, 'look'), danceWord);
+  const invitations = [];
+  for (const guest of guests) {
+    let invitation;
+    for (const until = Date.now() + 15000; !invitation;) {
+      const events = await command(guest, 'events');
+      assert(!events.events?.some((e) => e.kind === 'together' && e.touch === danceWord && (e.activity === activityId || e.offer === activityId) && ['declined', 'expired', 'ended'].includes(e.what)), 'the invited dance became unavailable');
+      invitation = events.events?.find((e) => e.kind === 'together' && e.what === 'offered' && e.touch === danceWord && e.from_id === operator.body && e.offer === activityId);
+      if (!invitation) { assert(Date.now() < until, 'each guest must observe its actual invitation'); await pause(100); }
+    }
+    assert(typeof invitation.offer === 'string', 'the invitation must name its offer id');
+    assert.equal(invitation.offer, activityId, 'every guest must accept the same invitation');
+    completed(await command(guest, 'together', 'accept', invitation.offer), 'accept dance');
+    invitations.push({ person: guest.label, offer: invitation.offer });
+  }
+  const together = await command(operator, 'look');
+  assert.equal(partyActivityId(together, danceWord), activityId, 'the host must join the offered activity');
+  const membership = [];
+  for (const seat of seats) membership.push({ person: seat.label, ...partyMembers(await command(seat, 'inspect', activityId), { id: activityId, word: danceWord, bodies: seats.map((s) => s.body) }) });
+  // A page observer can wait for the actual last approach; receipts alone do not establish depiction.
+  await observe('dance-ready', { seats, activityId });
+  await pause(12000);
+  await observe('dance-sustained', { seats, activityId });
+  const leaving = guests.at(-1);
+  await observe('departure-start', { seat: leaving, seats });
+  await leave(leaving);
+  // A leave releases a move at its phase boundary. Keep that visible rather than cutting to the next action.
+  await pause(850);
+  await body(leaving, 'wave', 'for=1');
+  const departed = await command(leaving, 'look');
+  assert.equal(departed.ok, true, 'departure look must succeed');
+  assert(!(departed.in ?? []).some((line) => line.includes(danceWord)), 'the departing guest must actually leave');
+  const continued = [];
+  for (const seat of seats.filter((s) => s !== leaving)) {
+    const remaining = await command(seat, 'look');
+    assert.equal(partyActivityId(remaining, danceWord), activityId, 'the other four keep dancing after one leaves');
+    continued.push({ person: seat.label, ...partyMembers(await command(seat, 'inspect', activityId), { id: activityId, word: danceWord, bodies: seats.filter((s) => s !== leaving).map((s) => s.body) }) });
+  }
+  await observe('departure-done', { seat: leaving, seats: seats.filter(s => s !== leaving), activityId });
+  await pause(2500);
+  await observe('cleanup-start', { seats });
+  for (const guest of guests.slice(0, -1)) await leave(guest);
+  await leave(operator);
+  await pause(850);
+  if (mode === 'jukebox') await act(operator, 'switch_off', jukebox);
+  else if (jukebox) {
+    const music = await command(operator, 'inspect', jukebox);
+    assert(music.state?.on === false || music.state?.on === 0, 'silent mode must finish with the jukebox off');
+  }
+  await body(operator, 'nod');
+  const final = await Promise.all(seats.map((seat) => command(seat, 'look')));
+  assert(final.every((look) => look.ok === true && !(look.in ?? []).some((line) => line.includes(danceWord))), 'all members leave the dance');
+  await observe('party-clean', { seat: operator, seats });
+  return { people: seats.length, jukebox: !jukebox ? 'not-present' : mode === 'silent' ? 'off-unfinished-approach' : 'switched-on-and-off', mode, dance: 'shared-beat', earlyDeparture: true, allLeft: true, soundProved: false, independentCollaborationProved: false, discovery, invitations, membership, continued, finalMembership: final.map((look, i) => ({ person: seats[i].label, in: look.in ?? [] })) };
+}
+
+async function pairServedSeat({ world, page, directory, index, record, register }) {
+  const folder = join(directory, 'people', String(index));
+  mkdirSync(folder, { recursive: true });
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, SOULS_HOME: join(folder, '.souls'), BRAIN_MODE: 'fake' };
+  const seat = { label: names[index], body: null, cli: async (...words) => {
+    const result = await exec(process.execPath, [join(directory, 'served-client.mjs'), ...words], { cwd: folder, env, timeout: 90000, maxBuffer: 8000000 });
+    for (const line of result.stdout.trim().split('\n').reverse()) { try { return JSON.parse(line); } catch { /* pair prints its approval link too */ } }
+    throw new Error('the served client returned no JSON answer');
+  } };
+  register(seat); // Even a partially paired home is cleaned up if later preparation fails.
+  const pairing = await seat.cli('pair', page, '--name', names[index]);
+  assert.equal(pairing.step, 'approve');
+  const approved = await fetch(new URL('/v1/pair/approve', world.directory), {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: pairing.code, confirm: true, test_person: `party-owner-${index}` }),
+  });
+  assert.equal(approved.status, 200);
+  for (const until = Date.now() + 30000; Date.now() < until;) {
+    const status = await seat.cli('status');
+    if (status.connected && !status.syncing && status.body) { seat.body = status.body; record({ person: seat.label, status }); return seat; }
+    await sleep(100);
+  }
+  throw new Error('the paired Soul did not arrive');
+}
+
+export async function rehearse({ directory, mode = 'jukebox', startFile = null, onReady = () => {} }) {
+  directory = resolve(directory);
+  assert(!existsSync(directory), 'use a fresh isolated output directory');
+  assert(directory.startsWith(join(REPO_ROOT, '.local') + '/'), 'outputs belong in this checkout’s ignored .local/');
+  mkdirSync(directory, { recursive: true });
+  const report = { fakeMinds: true, rows: [], complete: false };
+  const save = () => {
+    const file = join(directory, 'rehearsal-private.json');
+    writeFileSync(file + '.tmp', JSON.stringify(report, null, 2)); renameSync(file + '.tmp', file);
+  };
+  const record = (row) => { report.rows.push({ at: Date.now(), ...row }); save(); };
+  const template = join(directory, 'garden-party.json');
+  writeFileSync(template, JSON.stringify(partyTemplate(JSON.parse(readFileSync(join(REPO_ROOT, 'content/kinds/music/jukebox.json'), 'utf8')))));
+  const facts = exportFacts(template, join(directory, 'facts.json'));
+  let running;
+  const seats = [];
+  try {
+    running = await startOldPage({ template, facts, dir: join(directory, 'page') });
+    report.page = running.page; save();
+    const config = await (await fetch(running.page + 'v1/config')).json();
+    const response = await fetch(running.page + 'eden.mjs');
+    const client = Buffer.from(await response.arrayBuffer());
+    assert.equal(response.status, 200); assert.equal(hash(client), config.soulClient.sha256, 'the downloaded client matches the served hash');
+    writeFileSync(join(directory, 'served-client.mjs'), client); report.clientSHA256 = hash(client);
+    for (let index = 0; index < 5; index++) await pairServedSeat({ world: running.world, page: running.page, directory, index, record, register: (seat) => seats.push(seat) });
+    const found = await seats[0].cli('find', 'party-jukebox');
+    const jukebox = found.found.find((node) => node.kind === 'eden:jukebox')?.id;
+    assert(jukebox, 'the served client sees the existing jukebox kind');
+    const floor = (await seats[0].cli('inspect', seats[0].body)).parent;
+    assert(floor, 'the Soul stands on its authoritative floor');
+    report.ready = true; save(); await onReady({ page: running.page, directory });
+    if (startFile) {
+      for (const until = Date.now() + 300000; !existsSync(startFile);) { assert(Date.now() < until, 'the recorder did not start'); await sleep(100); }
+    }
+    report.demonstrationStart = Date.now(); save();
+    report.result = await performParty({ seats, jukebox, mode, record });
+    report.complete = true; report.demonstrationEnd = Date.now(); save();
+    await sleep(2000);
+    return report;
+  } catch (error) { report.failure = String(error.stack ?? error); save(); throw error; }
+  finally {
+    await Promise.allSettled(seats.map((seat) => seat.cli('quit')));
+    if (running) await running.stop();
+    report.stopped = true; save();
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const args = process.argv.slice(2), value = (flag) => args[args.indexOf(flag) + 1];
+  if (!args.includes('--dir')) throw new Error('usage: rehearse.mjs --dir .local/<fresh folder> [--silent] [--start-file <recorder marker>]');
+  const result = await rehearse({ directory: value('--dir'), mode: args.includes('--silent') ? 'silent' : 'jukebox', startFile: args.includes('--start-file') ? resolve(value('--start-file')) : null,
+    onReady: ({ page }) => console.log(JSON.stringify({ ready: true, page })),
+  });
+  console.log(JSON.stringify({ complete: result.complete, result: result.result }));
+}

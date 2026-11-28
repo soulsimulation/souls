@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { after, test } from 'node:test';
-import { conferenceCaptureResources, conferenceWorldPage, downloadConferenceClient, ownedConferenceCommand, requireConferenceRecipe, startConferenceResident, conferenceCreatorArgs, verifyConferenceCreatorPermission, pairConferenceCreator } from './owned-seats.mjs';
+import { conferenceJoinReceipt, conferenceCaptureResources, conferenceWorldPage, downloadConferenceClient, ownedConferenceCommand, requireConferenceRecipe, startConferenceResident, conferenceCreatorArgs, verifyConferenceCreatorPermission, pairConferenceCreator } from './owned-seats.mjs';
 
 const scratch = resolve(import.meta.dirname, '../../../.local'); mkdirSync(scratch, { recursive: true });
 const directory = mkdtempSync(join(scratch, 'conference-owned-seat-tests-'));
@@ -249,3 +249,24 @@ console.log(JSON.stringify({ok:true,soul:'c_${principal}'}));`,
     }
   });
 }
+
+// Public fixtures are independent of the daemon receipt builder. No resident or world starts here.
+test('join evidence reads the actual answered public sequence and preserves refusal detail', async () => {
+  const calls=[], expected={ok:true,receipt:{sequence:37,verbs:['life:join'],answers:[{answer:'refused',reason:'birth-off-surface',detail:'no standing surface'}]}};
+  const reply=await conferenceJoinReceipt({sequence:37,sent:1,unanswered:[]},async(...words)=>{calls.push(words);return expected;});
+  assert.deepEqual(calls,[['receipt','37']]);assert.equal(reply,expected);
+  assert.equal(reply.receipt.answers[0].reason,'birth-off-surface');
+});
+
+test('join evidence does not guess an unsent or still unanswered sequence', async () => {
+  const cli=()=>{throw Error('must not ask');};
+  for(const status of [{sequence:0,sent:0,unanswered:[]},{sequence:9,sent:1,unanswered:[9]},{sequence:NaN,sent:1,unanswered:[]}])
+    assert.equal(await conferenceJoinReceipt(status,cli),null);
+});
+
+test('join evidence rejects another intent, a mismatched receipt, or an unavailable answer', async () => {
+  const status={sequence:17,sent:1,unanswered:[]};
+  await assert.rejects(conferenceJoinReceipt(status,async()=>({ok:false,code:'receipt-not-found'})),/must be available/);
+  await assert.rejects(conferenceJoinReceipt(status,async()=>({ok:true,receipt:{sequence:1,verbs:['life:join'],answers:[]}})),/sequence/);
+  await assert.rejects(conferenceJoinReceipt(status,async()=>({ok:true,receipt:{sequence:17,verbs:['souls:walk'],answers:[]}})),/real join/);
+});
