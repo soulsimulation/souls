@@ -7766,6 +7766,10 @@ async fn a4_two_teams_build_three_bays_and_take_them_down() {
     // Build. The middle bay: team 1 (Souls 1, 2) carries frame A into `upright_a` and stays to hold it, while team 2
     // (Souls 4, 5) carries its frame from the east yard to wait 3 m south of it; then it steps up to 0.4 m short of
     // the slot, from where each of its carriers still reaches its hold where the frame would go (#5067).
+    for at in [v3(80_000_000, 0, -20_000_000), v3(90_000_000, 0, -20_000_000), v3(90_000_000, 0, -24_150_000), v3(88_980_000, 0, -24_150_000)] {
+        let got = s4.act("eden:walk", g, to_point(at)).await;
+        println!("N9DBG probe to {at:?}: now {:?}: {got:?}", body_at(&w, body_of(&w, s4.soul)));
+    }
     let wait_a = v3(m_a.x, 0, m_a.z - 400_000);
     let far_a = v3(m_a.x, 0, m_a.z - 3_000_000);
     let (to_ma, to_wait) = ([m_a], [far_a]);
