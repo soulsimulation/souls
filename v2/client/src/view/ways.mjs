@@ -18,8 +18,8 @@
 /** A standing body's height, µm (`sim::ground::BODY_HIGH`). */
 const BODY_HIGH_UM = 1_800_000;
 /** A step a body takes up or down, µm (`sim::ground::STEP`); how far a flight's top is carried onto a floor, µm
- *  (`sim::links` `APRON_MAX`); a walking body's clearance, µm (`HUMAN_RADIUS` and `MARGIN`). */
-const STEP_UM = 220_000, APRON_UM = 1_000_000, CLEAR_UM = 310_000;
+ *  (`sim::links` `APRON_MAX`); a walking body's clearance, µm (`HUMAN_RADIUS` 280 and `MARGIN` 60). */
+const STEP_UM = 220_000, APRON_UM = 1_000_000, CLEAR_UM = 340_000;
 const ONE = 2 ** 30;
 
 /** `v` turned by quaternion `q` ([w, x, y, z], any scale). */
@@ -100,11 +100,6 @@ export function braced(rows, floor, part, kids = kidsOf(rows)) {
   return true;
 }
 
-/**
- * The places and ways up of `part` (a row) whose kind's entry is `entry`, that exist now: `{places: [{id, name,
- * point, standing, of}], ways: [{name, kind, to}]}`; null when its entry declares no ways. `point` is the walk's,
- * µm in the floor node's frame.
- */
 /** The floor of another part in `part`'s parent that ladder `l` of `part` (half its depth `half`, mm) lands on at its
  *  top, or null (see the head of this file): `{floor, part}`, rows. */
 function landing(rows, part, l, half, kids) {
@@ -126,6 +121,11 @@ function landing(rows, part, l, half, kids) {
   return null;
 }
 
+/**
+ * The places and ways up of `part` (a row) whose kind's entry is `entry`, that exist now: `{places: [{id, name,
+ * point, standing, of}], ways: [{name, kind, to}]}`; null when its entry declares no ways. `point` is the walk's,
+ * µm in the floor node's frame.
+ */
 export function waysOf(rows, part, entry, kids = kidsOf(rows), kinds = null) {
   const d = part ? declared(entry) : null;
   if (!d) return null;

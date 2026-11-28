@@ -521,26 +521,6 @@ pub(super) fn body_on(w: &Seeded, body: Id) -> (Id, Vec3) {
 }
 
 /// The last tick the served world has logged.
-fn last_tick(w: &Seeded) -> u64 {
-    sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
-        .unwrap()
-        .records
-        .iter()
-        .filter(|r| !sim::recorder::is_input(r))
-        .filter_map(|r| {
-            match replica::effects::Part::read(r)
-                .ok()?
-                .rest
-                .get(&answers::TICK)
-            {
-                Some(Value::Uint(t)) => Some(*t),
-                _ => None,
-            }
-        })
-        .max()
-        .unwrap_or(0)
-}
-
 /// Every row of body `body` in the log, in order, from every part (those with no effect too): the tick, the node it
 /// was on and its place there.
 fn body_ticks(w: &Seeded, body: Id) -> Vec<(u64, Id, Vec3)> {
@@ -1141,6 +1121,16 @@ fn deck_bay_a_soul_climbs_a_frame_up_its_rungs_onto_the_deck() {
     }
     for w in rows.windows(2) {
         assert!((w[1].2.y - w[0].2.y).abs() <= 70_000, "no jump: {w:?}");
+    }
+    // Past the frame's outer face it is at the deck's height, stepping across onto it: never up through its edge.
+    for r in rows
+        .iter()
+        .filter(|r| r.2.y > 0 && r.2.z > -1_448_000 - 38_000)
+    {
+        assert!(
+            r.2.y >= 2_009_000,
+            "across the frame at the deck's height: {r:?}"
+        );
     }
     // Up off the ground, a row is on the rung line, stepping in from it at the top, or on the deck: never beside the
     // frame on nothing.
