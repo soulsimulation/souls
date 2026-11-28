@@ -87,6 +87,7 @@
 //! open ground, whose frame holds the building).
 
 pub mod grips;
+pub mod raise;
 #[cfg(test)]
 mod tests;
 pub mod turn;
@@ -135,6 +136,11 @@ pub const END_CLEAR: i64 = 75_000;
 pub const SWEEP_STEP: i64 = 50_000;
 /// The activity kind's slot the board rides in.
 pub const SLOT: u64 = 1;
+/// How far off its load's side a side carrier's place is, µm (0.135 C5; #5067): 0.11 m more than the room a body's
+/// ground keeps from a part at its height (`crate::ground`: its radius, 0.28 m, and 0.06 m), so a side carrier who
+/// walks a few centimetres off its place still stands on ground when the part is seated beside it (at [`REACH`],
+/// 0.35 m, a rack beam seated at hip height left a side carrier 10 mm of ground), and 0.25 m inside [`GRIP_REACH`].
+pub const SIDE_REACH: i64 = 450_000;
 /// The farthest a carrier may stand from its grip on the plan at the lift, µm: a touch's reach (0.134).
 pub const GRIP_REACH: i64 = 700_000;
 /// How many grips a load has between its ends, at most, that carriers take (0.135 C5): a crew of six, less its front
@@ -518,10 +524,10 @@ impl Load {
     }
 
     /// Where its side carriers stand (0.135 C5), in join order: each beside its grip between the ends, from the back
-    /// toward the front, [`REACH`] off its side, the first on its + side, then alternating. Each `[along, across]`
+    /// toward the front, [`SIDE_REACH`] off its side, the first on its + side, then alternating. Each `[along, across]`
     /// from its middle, µm, in the carry's frame: along its +x, from the back toward the front, and across its +z.
     pub fn side_places(&self) -> Vec<[i64; 2]> {
-        let off = self.half_width + REACH;
+        let off = self.half_width + SIDE_REACH;
         self.inner
             .iter()
             .flatten()
@@ -1187,6 +1193,10 @@ pub struct Carry {
     pub way: Vec<turn::Ends>,
     /// The lift's or the set-down's track the node is on, if any (#5067).
     pub hoist: Option<Hoist>,
+    /// Whether a lift's track broken off goes back to where the load lay ([`Hoist::rest`]). Not for a part taken out
+    /// of a slot or a stand ([`Carry::take_up`]): it was unjoined as it was taken, so set back there it would hang;
+    /// it goes straight down from where it is, to rest on the ground.
+    pub back: bool,
 }
 
 /// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
@@ -1239,6 +1249,7 @@ impl Carry {
             raise: 0,
             way: Vec::new(),
             hoist: None,
+            back: true,
         }
     }
 
@@ -1322,6 +1333,29 @@ impl Carry {
     ) -> R<Option<(Micros, Micros)>> {
         match self.hoist {
             Some(h) if h.phase != Phase::Lift => return Ok(None),
+            Some(h) if !self.back => {
+                // Straight down from where the node is on its track, to rest under it on its carriers' floor (the
+                // track's end is between them at carrying height).
+                let floor = match (self.track.last(), here) {
+                    (Some(&(_, c, _)), _) => c.y - HEIGHT,
+                    (None, Some((_, Some(f)))) => f,
+                    _ => h.to.0.y - HEIGHT,
+                };
+                let under = Vec3::new(h.at.0.x, floor, h.at.0.z);
+                self.hoist = None;
+                return self
+                    .lower_from(
+                        tree,
+                        at,
+                        node,
+                        h.at,
+                        h.at.0.y - floor,
+                        (under, h.at.1),
+                        Phase::Release(why),
+                        None,
+                    )
+                    .map(Some);
+            }
             Some(h) => {
                 let (to, rest) = (h.from, h.rest);
                 let t1 = at + hoist_time(h.at.0.y - to.0.y);
@@ -1556,7 +1590,8 @@ impl Carry {
     /// exactly where it was, so its change of parent moved nothing), goes into its carriers' hands at `to` as a lift's
     /// does ([`Hoist`], [`Carry::step`]): one motion sample a tick, never in one step, however far the part stood from
     /// their middle. `span`: between its carriers at the take. `rest`: the ground the part was on and its place there,
-    /// where a take broken off sets it back. It takes [`hoist_time`] of how far it goes. Returns the track's times.
+    /// where a take broken off sets it back when it rested on that ground ([`Carry::back`]); one taken out of a slot or
+    /// a stand goes straight down instead. It takes [`hoist_time`] of how far it goes. Returns the track's times.
     pub fn take_up(
         &mut self,
         at: Micros,
@@ -1584,6 +1619,40 @@ impl Carry {
             floor,
         });
         Ok((at, t1))
+    }
+
+    /// One sample of the carry's node at `p` turned `q` on its ground (#5067: a raise's track, [`raise`]), written as a
+    /// step's is. Its track's last sample is this one.
+    pub fn turn_to(&mut self, tree: &mut Tree, at: Micros, p: Vec3, q: Quat) -> R<()> {
+        let e = (
+            self.activity,
+            self.audience,
+            EffectBody::Changes(vec![ChangeRec {
+                change: sample(self.activity, at, self.ground, p, q),
+                rest: Rest::new(),
+            }]),
+        );
+        self.write(tree, at, vec![e])?;
+        match self.track.last_mut() {
+            Some(last) => *last = (at, p, q),
+            None => self.track.push((at, p, q)),
+        }
+        Ok(())
+    }
+
+    /// Puts the board at rest on `node` at `position` turned `orientation` (in its frame) at once, under the transfer id
+    /// `transfer` (#5067: a part a lowering has laid down, already there): one change of parent, nothing moves.
+    pub fn rest_at(
+        &mut self,
+        tree: &mut Tree,
+        at: Micros,
+        node: Id,
+        position: Vec3,
+        orientation: Quat,
+        transfer: Id,
+    ) -> R<()> {
+        let entries = self.put_entries(tree, node, position, orientation, transfer)?;
+        self.write(tree, at, entries)
     }
 
     /// Where its carriers were at its last sample, `(front, back)` on the open ground's plan, µm: its span apart along

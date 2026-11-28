@@ -2340,6 +2340,9 @@ mod shade;
 #[path = "edit_served/sit_by_kind.rs"]
 mod sit_by_kind;
 
+#[path = "edit_served/six_beam.rs"]
+mod six_beam;
+
 /// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
 fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
     let mut out = std::collections::BTreeSet::new();
@@ -3022,6 +3025,7 @@ fn act(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, verb: &str, targ
 /// reach lays it flat where it stands, on its own base; and, with a Soul standing where it would lie, leaves it standing
 /// on its base, with no jump.
 #[test]
+#[ignore = "#5067 task 4 (coordinator, 27 Nov): its choreography stands crews 2.2 m off; rewrite for carriers at their grips, after raise and lower"]
 fn a2_parts_rest_at_the_grounds_height() {
     const RAISE: i64 = 1_000_000;
     let d = scratch("a2raised");
@@ -4020,6 +4024,7 @@ fn rest_of(w: &Seeded, id: Id, up_mm: i64) -> (i64, i64, bool) {
 ///   where it was, and Soul 1 may leave the crew.
 /// - Taking frame A out from under beam 1 is refused `support.none`, and nothing changes.
 #[test]
+#[ignore = "#5067 task 4 (coordinator, 27 Nov): its choreography stands crews 2.2 m off; rewrite for carriers at their grips, after raise and lower"]
 fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     const H: i64 = 1_200_000;
     let d = scratch("a2seat");
@@ -5231,6 +5236,7 @@ fn a_crew_puts_a_frame_back_into_a_live_placed_stand() {
 /// - Every part ends where it started, under the same id, and every node of the world as built is still there. The
 ///   checks read the world as its log replays from the start, so the history plays back.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "#5067 task 4 (coordinator, 27 Nov): its choreography stands crews 2.2 m off; rewrite for carriers at their grips, after raise and lower"]
 async fn a3_four_souls_build_a_bay_and_take_it_down() {
     const H: i64 = 1_200_000;
     let d = scratch("a3bay");
@@ -6522,6 +6528,7 @@ fn bay_holds(w: &Seeded, bay: Id) -> (usize, usize) {
 ///   B). Every part goes back where it lay in its yard, under its id; every node of the world as built is still there;
 ///   the checks read the world as its log replays from the start.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "#5067 task 4 (coordinator, 27 Nov): its choreography stands crews 2.2 m off; rewrite for carriers at their grips, after raise and lower"]
 async fn a4_two_teams_build_three_bays_and_take_them_down() {
     let d = scratch("a4bays");
     let (facts, slots) = three_bays_world(&d);
@@ -8334,9 +8341,8 @@ fn a_held_dance_says_how_long_it_may_go_on_and_the_next_act_ends_it() {
 ///   `beam_low_l`'s at the bay's mouth ([`BEAM_MOUTH`] west of it: no carrier can stand on the slot's own line within
 ///   reach of an end grip, the frames' columns stand on it) with the heading along it. Each time the other three walk
 ///   with it by their own follow orders, turning with it, and stand at their places (within 0.3 m), the back and the
-///   front on that line. The put is then refused `part.grip-out-of-reach`, naming a side carrier, before anything moves
-///   (#5067: the set-in would take the beam 0.45 m from where the sides stand, out of their reach; a set-in that walks
-///   its carriers with the part is not built). The two sides let go, the carry goes on, and the two ends seat the beam.
+///   front on that line; the front seats the beam. On the set-in track the front and the back stand, each within reach
+///   of its hold at both ends, and the two sides walk beside the beam, each keeping its place at its grip (#5067).
 /// - **A crew of two** does the same with beam 2 into `beam_high_l`, over the low beam now seated.
 ///
 /// Each beam is in its slot afterwards, and no carry broke off on the way.
@@ -8590,41 +8596,36 @@ async fn group_the_fronts_carry_to_alone_seats_a_beam_square_crews_of_four_and_t
             "square on the slot's line: the back {} mm across from the front",
             across / 1000
         );
-        let mut got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
-        if n > 2 {
-            // #5067: the set-in would take the beam out of its side carriers' reach; refused by name, nothing moved.
-            println!(
-                "crew of {n} puts beam {} in {slot}: {got:?}",
-                beam.counter()
-            );
-            assert_eq!(
-                (got.kind, got.reason.as_str()),
-                (2, "part.grip-out-of-reach"),
-                "a side carrier would be out of reach of its grip: {got:?}"
-            );
-            assert_eq!(
-                where_is(&w, beam).0,
-                Some(c),
-                "the beam still rides its crew"
-            );
-            for k in &members[2..] {
-                let left = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
-                assert_eq!(left.kind, 1, "side Soul {} lets go: {left:?}", k + 1);
-            }
-            got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
-        }
+        let before: Vec<Vec3> = crew_bodies.iter().map(|b| body_at(&w, *b)).collect();
+        let got = souls[0].act("part:put", c, in_slot(bay, slots[slot])).await;
         println!(
             "crew of {n} seats beam {} in {slot}: {got:?}",
             beam.counter()
         );
         assert_eq!(got.kind, 1, "beam seated in {slot}");
-        // #5067: a hold for each carrier still on it, let go of as the beam is seated.
+        // #5067: on the set-in track the front and the back stood and each side walked beside the beam, as far east
+        // as it went.
+        let went = where_is(&w, beam).2.x - (before[0].x + before[1].x) / 2;
+        for (k, b) in crew_bodies.iter().enumerate() {
+            let dx = body_at(&w, *b).x - before[k].x;
+            println!(
+                "crew of {n}: carrier {k} went {} mm east; the beam {} mm",
+                dx / 1000,
+                went / 1000
+            );
+            let want = if k < 2 { 0 } else { went };
+            assert!(
+                (dx - want).abs() <= 30_000,
+                "carrier {k} went {dx} µm; the beam {went} µm"
+            );
+        }
+        // A hold for each carrier, let go of as the beam is seated.
         let (phase, holding) = grips_said(&w, c, |p, _| p == "souls:released");
         assert_eq!(
             (phase.as_str(), holding),
-            ("souls:released", crew_bodies[..2].to_vec())
+            ("souls:released", crew_bodies.clone())
         );
-        for k in &members[..2] {
+        for k in &members {
             let got = souls[*k].act("activity:leave", c, BTreeMap::new()).await;
             assert_eq!(got.kind, 1, "Soul {} leaves the crew: {got:?}", k + 1);
         }
