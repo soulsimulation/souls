@@ -52,7 +52,27 @@ export function phaseEvidence(samples,startTick){
  }
  return summary;
 }
-export function applicable(summary){return summary.walk.walkSeconds>=15&&summary.walk.distanceM>10&&summary.stop.nativeSeconds>=3.5&&summary.stop.longestIdleSeconds>=2.5&&summary.stop.distanceM<.5&&summary.restart.walkSeconds>=10&&summary.restart.distanceM>8;}
+export function observedStop(samples,commands){
+ const stop=commands.find(c=>c.kind==='stop')?.before,restart=commands.find(c=>c.kind==='restart')?.before;
+ const refused=reason=>({valid:false,reason});if(!stop||!restart||!Number.isFinite(stop.tick)||!Number.isFinite(restart.tick)||restart.tick<=stop.tick)return refused('commands');
+ const first=samples.findIndex(s=>s.tick>stop.tick&&s.tick<restart.tick&&s.subject?.activity?.kind==='idle');if(first<0)return refused('no-command-bound-idle');
+ const initial=samples[first],id=initial.subject?.id;let previous=initial,distanceM=0,n=1;
+ const finite=s=>Number.isFinite(s.tick)&&Number.isFinite(s.at)&&s.subject?.id===id&&s.subject?.transform?.positionM?.length===3&&s.subject.transform.positionM.every(Number.isFinite);
+ if(!id||!finite(initial))return refused('invalid-first');
+ for(const s of samples.slice(first+1)){
+  const dt=(s.tick-previous.tick)*.05,gap=s.at-previous.at;
+  if(!finite(s)||dt<0||dt>.5||gap<=0||gap>400)return refused('unsupported-gap-or-identity');
+  const activity=s.subject?.activity?.kind;
+  if(activity!=='idle'){
+   if(activity!=='walk'||s.tick<=restart.tick||previous.tick<restart.tick)return refused('not-depicted-restart');
+   const nativeSeconds=(previous.tick-initial.tick)*.05;
+   return {valid:true,firstTick:initial.tick,lastTick:previous.tick,restartWalkTick:s.tick,nativeSeconds,longestIdleSeconds:nativeSeconds,distanceM,samples:n,stopCommandTick:stop.tick,restartCommandTick:restart.tick};
+  }
+  distanceM+=Math.hypot(...s.subject.transform.positionM.map((v,i)=>v-previous.subject.transform.positionM[i]));previous=s;n++;
+ }
+ return refused('no-supported-restart-walk');
+}
+export function applicable(summary,stop){return stop?.valid===true&&summary.walk.walkSeconds>=15&&summary.walk.distanceM>10&&stop.nativeSeconds>=3.5&&stop.longestIdleSeconds>=2.5&&stop.distanceM<.5&&summary.restart.walkSeconds>=10&&summary.restart.distanceM>8;}
 
 export async function prepare({recipe,paths}){
  declaration=liveFollowDeclaration(recipe.sourceRecording?.followLive);
@@ -96,9 +116,9 @@ export default async function({page,paths,fixture:plan,signal,check,arm}){
  save('follow-live-sample-end.json',end);
  const exported=await page.evaluate(()=>({enabled:window.__followExperiment().enabled,dropped:window.__followExperiment().dropped}));
  const all=JSON.parse(readFileSync(join(paths.dir,'phase-follow-diagnostics.json'),'utf8')).data;
- const rows=all.rows.filter(r=>r.at>=begin.at&&r.at<=end.at),summary=phaseEvidence(samples,begin.tick);save('follow-live-phases.json',summary);
+ const rows=all.rows.filter(r=>r.at>=begin.at&&r.at<=end.at),summary=phaseEvidence(samples,begin.tick),stop=observedStop(samples,commands);save('follow-live-phases.json',summary);save('follow-live-observed-stop.json',stop);
  check('follow-live-diagnostics',exported.dropped===0&&liveRowsValid(rows,plan.ids)&&rows.every(r=>r.enabled===(plan.variant==='candidate')));
- check('follow-live-phases',applicable(summary));
+ check('follow-live-phases',applicable(summary,stop));
  check('follow-live-wall-span',end.at-begin.at<75000);
  check('follow-live-following-ui',await page.getByRole('button',{name:'Following',exact:true}).isVisible());
  await page.screenshot({path:join(paths.dir,'follow-live-final.png')});
