@@ -222,7 +222,7 @@
     "shape": {"round":15,"shapes":[{"kind":"extrude","at":[0,15,0],"polygon":[[-435,-285],[435,-285],[435,285],[-435,285]],"h":810,"tint":"cab"},{"kind":"extrude","at":[0,860,0],"polygon":[[-455,-305],[455,-305],[455,305],[-455,305]],"h":20,"tint":"top"},{"kind":"box","at":[0,860,40],"size":[560,50,380],"round":0,"tint":"basin"},{"kind":"box","at":[0,885,40],"size":[500,20,320],"round":0,"tint":"water","role":"fill"},{"kind":"cyl","at":[0,980,-220],"r":18,"h":200,"segments":6,"tint":"metal"},{"kind":"cyl","at":[0,1070,-160],"r":14,"h":140,"segments":5,"tint":"metal","pitch":90000},{"kind":"box","at":[-220,450,302],"size":[400,700,10],"round":0,"tint":"door"},{"kind":"box","at":[220,450,302],"size":[400,700,10],"round":0,"tint":"door"},{"kind":"cyl","at":[0,975,-90],"r":16,"h":180,"segments":6,"tint":"stream","role":"fill"}],"palette":{"cab":"#e9e4d8","top":"#9a6b43","basin":"#c9ced3","water":"#9fc3d6","metal":"#9aa0a6","door":"#ddd6c6","stream":"#3f8fd0"},"tags":["kitchen","sink","object"]}
   },
   "text": {
-    "card": "A kitchen sink with a tap: run the water, wash your hands or wash up a dish.",
+    "card": "Turn on tap; wash a held dish with 1,000 g of water; turn tap off afterward.",
     "kitchen_sink": "kitchen sink",
     "basin": "basin",
     "tap": "tap",

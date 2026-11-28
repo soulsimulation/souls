@@ -15,16 +15,18 @@
 // `geometry.palette`. A model (K3, #3725's design: an allowed upload named by its hash, `1220` and the SHA-256 in hex)
 // is `looks.model: "upload:<hash>"`; the old page fetches it from where the world serves uploads (`/v2/uploads/<hash>`,
 // gatewayd #3930). A record with neither draws its bounds as one box, so the thing is never invisible.
-import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
+import { defSchema, hashOf, coreLibrary, type StoredDef } from '@souls/world-compiler';
 import { KIT_ROLES } from '@souls/generators';
 import { drawnState, placedOf, thingState, tintState, turnOf, type LayerLike, type WorldDiff } from './world-state.ts';
 import { layerDraws } from './layer-draws.ts';
 import { placedDef, shapeOf } from './source/stream-scene.ts';
 import { kindState, type Fields } from './source/kinds-state.ts';
+import { entityId, setHeldKindResolver } from './held-kind.ts';
+export { entityId, heldKindOf } from './held-kind.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
-  slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array; tint?: [string, number][];
+  def?: string; defBodies?: [string,string][]; slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array; tint?: [string, number][];
   line?: number[][]; lineWidth?: number; outline?: number[][]; fields?: Record<number, unknown> };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 type Json = Record<string, unknown>;
@@ -112,7 +114,7 @@ function shapeLook(entry: Json): { make: Json; palette: Record<string, string>; 
  *  new def and the things placed from the old one keep theirs. Its look, in order: an uploaded model, its kit parts
  *  (`geometry.parts`), its own shape (`looks.shape`, with the state its `when`s and looks table read: `fields`), else its
  *  bounds as one box, named `…-box`, so a look that arrives later for the same kind is a new def. */
-export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; model: string | null; fields?: Record<string, EntryField> } | null {
+export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; model: string | null; fields?: Record<string, EntryField>; points?: Record<string, { role: string; at: [number, number, number] }> } | null {
   let entry: Json | null;
   try { entry = obj(JSON.parse(new TextDecoder().decode(bytes))); } catch { return null; }
   if (!entry || entry.format !== 'souls-entry/1') return null;
@@ -138,21 +140,14 @@ export function kindDef(full: string, bytes: Uint8Array): { def: StoredDef; mode
   const { budget: _b, ...hashable } = def;
   const fields = own ? Object.fromEntries(pictured(entry.state)) : undefined;
   return { def: { ...def, budget: { tris: 0, bytes: 0, textures: 0 }, hash: hashOf(hashable), ref: `${named}@1`, by: 'v2', born: 0 }, model: upload ? upload[1] : null,
-    ...(fields && Object.keys(fields).length ? { fields } : {}) };
+    ...(fields && Object.keys(fields).length ? { fields } : {}),
+    points: Object.fromEntries(Object.entries(obj(entry.points) ?? {}).flatMap(([name, value]) => { const p = obj(value); return p && typeof p.role === 'string' && point(p.at_mm) ? [[name, { role: p.role, at: p.at_mm.map(mm) as [number, number, number] }]] : []; })) };
 }
 
 /** The old page's entity id for a v2 node (`[eh]_` and 4 to 12 of [a-z0-9]): the node's own id when it is one already
  *  (an imported thing), else one made from it. */
-export function entityId(node: string): string {
-  if (/^[eh]_[a-z0-9]{4,12}$/.test(node)) return node;
-  let h = 2166136261;
-  for (let i = 0; i < node.length; i++) h = Math.imul(h ^ node.charCodeAt(i), 16777619);
-  let h2 = h ^ 0x9e3779b9;
-  for (let i = node.length - 1; i >= 0; i--) h2 = Math.imul(h2 ^ node.charCodeAt(i), 16777619);
-  return `e_v${((h >>> 0).toString(36) + (h2 >>> 0).toString(36)).slice(0, 11)}`;
-}
 
-type Drawn = NonNullable<ReturnType<typeof kindDef>>;
+type Drawn = NonNullable<ReturnType<typeof kindDef>> & { appearance?: {ref:string;hash:string;origins:readonly string[]} };
 const same = (a: Uint8Array | undefined, b: Uint8Array) => a === b || (!!a && a.length === b.length && a.every((x, i) => x === b[i]));
 /** A thing's state as its def's picture reads it, from its node's fields: plain values only (a timed value's is read
  *  where it is drawn, so it is left out here), a permille as a fraction. */
@@ -181,6 +176,8 @@ export class CreatorKinds {
   private gone = new Set<string>();
   /** W2: content kinds' own shapes (take-parts.ts), by full and plain name: after the old and library defs. */
   private shapes = new Map<string, Drawn>();
+  /** Parsed public source authority, rebuilt only when source declarations change, never on a draw lookup. */
+  private sourceHashes = new Map<string, string | null>();
   /** Each definition node's entry bytes as last read (a later look for the same kind is read again). */
   private readonly read = new Map<string, Uint8Array>();
   /** Where a model's bytes are, by its upload hash (gatewayd's `/v2/uploads/<hash>`, same origin). */
@@ -195,7 +192,9 @@ export class CreatorKinds {
   get seen(): ReadonlyMap<string, NodeLike> { return this.nodes; }
 
   apply(nodes: NodeLike[], removed: string[]): void {
+    let sourcesChanged = false;
     for (const id of removed) {
+      sourcesChanged ||= this.nodes.get(id)?.defBodies !== undefined;
       const o = this.nodes.get(id)?.origin;
       if (o && !o.includes('/')) this.gone.add(o);
       this.nodes.delete(id);
@@ -203,10 +202,13 @@ export class CreatorKinds {
       if (full === undefined) continue;
       this.definers.delete(id);
       this.read.delete(id);
-      if (![...this.definers.values()].includes(full)) this.defs.delete(full);
-      if (![...this.definers.values()].some((f) => f.split('@')[0] === full.split('@')[0])) this.defs.delete(full.split('@')[0]);
+      const shape = id.startsWith('entry:'), into = shape ? this.shapes : this.defs;
+      const remaining = [...this.definers].filter(([other]) => other.startsWith('entry:') === shape).map(([, name]) => name);
+      if (!remaining.includes(full)) into.delete(full);
+      if (!remaining.some(f => f.split('@')[0] === full.split('@')[0])) into.delete(full.split('@')[0]);
     }
     for (const n of nodes) {
+      sourcesChanged ||= this.nodes.get(n.id)?.defBodies !== n.defBodies;
       this.nodes.set(n.id, n);
       if (n.kind.split('@')[0] !== DEFINITION || !n.defines || !n.entry || (this.definers.get(n.id) === n.defines && same(this.read.get(n.id), n.entry))) continue;
       const d = kindDef(n.defines, n.entry);
@@ -220,6 +222,45 @@ export class CreatorKinds {
       into.set(n.defines.split('@')[0], d);
       if (d.model && d.def.make.kind === 'mesh') this.onModel(d.def.make.asset, this.uploadUrl(d.model));
     }
+    if (sourcesChanged) {
+      this.sourceHashes.clear();
+      for (const n of this.nodes.values()) for (const [ref, body] of n.defBodies ?? []) {
+        let hash: string | null = null;
+        try { const d = JSON.parse(body); if (d?.ref === ref && /^[a-f0-9]{64}$/.test(d?.hash)) hash = d.hash; } catch { /* Malformed declarations remain unknown. */ }
+        if (this.sourceHashes.has(ref) && this.sourceHashes.get(ref) !== hash) hash = null;
+        this.sourceHashes.set(ref, hash);
+      }
+    }
+  }
+
+  /** Definition-only registration from the verified active world's appearance asset; scenery ownership is unchanged. */
+  appearances(rows: import('./canonical-appearance.ts').AppearanceRow[]): void {
+    for (const row of rows) {
+      const id = `entry:appearance:${row.kind}`, bytes = new TextEncoder().encode(JSON.stringify(row.entry));
+      this.apply([{id,kind:'souls:kind',parent:null,defines:row.kind,entry:bytes}], []);
+      const drawn = this.shapes.get(row.kind);
+      if (drawn) drawn.appearance = {ref:row.sourceDef.ref,hash:row.sourceDef.sha256,origins:row.origins};
+    }
+  }
+
+  /** An exact recorded revision, using the same loaded definition and state conversion as scenery. */
+  held(entry: import('../../../../mars/viewer/app/engine-view/held-entry.ts').HeldEntry) {
+    if (!entry.kind.includes('@')) return null;
+    const d = this.defs.get(entry.kind) ?? this.shapes.get(entry.kind);
+    if (!d || d.def.ref.endsWith('-box@1')) return null;
+    if (d.appearance) {
+      if (entry.def !== d.appearance.ref || !entry.origin || !d.appearance.origins.includes(entry.origin)) return null;
+      const hash = this.sourceHashes.has(d.appearance.ref) ? this.sourceHashes.get(d.appearance.ref) : coreLibrary().get(d.appearance.ref)?.hash;
+      if (hash !== d.appearance.hash) return null;
+    }
+    const grips = Object.values(d.points ?? {}).filter(p => p.role === 'grip');
+    if (grips.length !== 1) return null;
+    // Recorded JSON preserves big/timed values losslessly, but this look converter has no recorded clock/decoder.
+    // Refuse that representation rather than silently showing default contents.
+    if (entry.fields && Object.values(entry.fields).some(value => value === null || typeof value === 'object' || typeof value === 'number' && !Number.isSafeInteger(value))) return null;
+    const tint = tintState(entry.tint?.map(([name, colour]) => [name, colour]));
+    const state: Record<string, boolean | number | string> = { ...(d.fields ? lookState(entry.fields as Fields | undefined, d.fields) : entry.state ?? {}), ...(tint !== undefined ? {tint} : {}) };
+    return { def: d.def, grip: grips[0].at, points: d.points ?? {}, state };
   }
 
   /** Whether a node the stream still holds has this origin (a thing removed and placed again under it: the layer's still). */
@@ -299,3 +340,6 @@ export class CreatorKinds {
     return { type: 'edge', kind: 'world-diff', seq: Math.max(seq, after ?? seq) + 1, at, by: 'engine', diff: { upserts, removes, defs, tiles: [] } };
   }
 }
+
+// A callback into the live hook's existing catalogue; no duplicate registry or definition ownership.
+export const setHeldKinds = (kinds: CreatorKinds | null) => setHeldKindResolver(kinds ? entry => kinds.held(entry) : null);

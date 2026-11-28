@@ -13,6 +13,7 @@
         {"act": {"this": "p1", "form": "cook"}, "receipt": "rs5", "expect": {"verdict": "no", "reason": "field_differs", "need": 0}}
       ],
       "after": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"vegetables": 0, "water": 0, "fuel": 0, "cooked": 1, "soup": 4}, "slots": {"shelf": []}}, "sb1": {"kind": "eden:soup_bowl", "fields": {"soup": 1}}, "b1": {"hands": {"left": "sb1", "right": null}}}
-    }
+    },
+    {"name": "meet_replay_keeps_food_and_holding", "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot"}, "b1": {"hands": {"left": "sb1", "right": null}}, "sb1": {"kind": "eden:soup_bowl", "fields": {"soup": 2}}}}, "do": [{"act": {"this": "p1", "form": "meet", "args": {"position": "serving_side"}}, "receipt": "meeting1", "expect": {"verdict": "yes", "changes": [], "events": [], "timers": []}}, {"act": {"this": "p1", "form": "meet", "args": {"position": "serving_side"}}, "receipt": "meeting2", "expect": {"verdict": "yes", "changes": [], "events": [], "timers": []}}], "after": {"sb1": {"kind": "eden:soup_bowl", "fields": {"soup": 2}}, "b1": {"hands": {"left": "sb1", "right": null}}}}
   ]
 }
