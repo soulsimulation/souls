@@ -423,7 +423,9 @@ fn outer_side(tree: &Tree, part: Id) -> i64 {
         let other = sim::ground::scene::slot_points(tree, bh, bh)
             .ok()?
             .into_iter()
-            .filter(|(n, p)| *n != k && p.y == own.y && p.z != own.z && (p.x - own.x).abs() < 100_000)
+            .filter(|(n, p)| {
+                *n != k && p.y == own.y && p.z != own.z && (p.x - own.x).abs() < 100_000
+            })
             .min_by_key(|(_, p)| (p.z - own.z).abs())?
             .1;
         // Into the part's frame: its turn in the slot.
@@ -1886,13 +1888,8 @@ impl Engine {
             }
             return Ok(());
         }
-        if let Err(r) = self.broke_off(&mut carry,
-            tree,
-            now,
-            None,
-            "souls:partner-left",
-            Some(by),
-        ) {
+        if let Err(r) = self.broke_off(&mut carry, tree, now, None, "souls:partner-left", Some(by))
+        {
             self.unhold(activity);
             return Err(r);
         }
@@ -2228,7 +2225,8 @@ impl Engine {
                 .iter()
                 .find_map(|m| stands(c, m.body).ok())
                 .map(|(_, at)| at.y);
-            match self.broke_off(&mut carry,
+            match self.broke_off(
+                &mut carry,
                 tr,
                 now,
                 Some((here, floor)),
@@ -2406,13 +2404,7 @@ impl Engine {
                 let Some(mut carry) = self.carries.remove(&a) else {
                     continue;
                 };
-                match self.broke_off(&mut carry,
-                    tr,
-                    now,
-                    None,
-                    "souls:carry-blocked",
-                    None,
-                ) {
+                match self.broke_off(&mut carry, tr, now, None, "souls:carry-blocked", None) {
                     // A crew's part set down is no longer its own (0.135 A2).
                     Ok(()) => {
                         if carry.lowering() {
@@ -2711,7 +2703,8 @@ impl Engine {
                 }
                 continue;
             }
-            match self.broke_off(&mut carry,
+            match self.broke_off(
+                &mut carry,
                 tree,
                 now,
                 None,
@@ -3664,10 +3657,16 @@ impl Engine {
     /// faces its post once it is there.
     fn stance_walks(&mut self, live: &Tree, c: &mut Controller, town: &sim::walk::town::Town) {
         for activity in std::mem::take(&mut self.stances) {
-            let Some(h) = holds_on(live, activity) else { continue };
-            let Some(half) = self.half_width(live, h.load) else { continue };
+            let Some(h) = holds_on(live, activity) else {
+                continue;
+            };
+            let Some(half) = self.half_width(live, h.load) else {
+                continue;
+            };
             for hold in &h.holds {
-                let Ok((ground, feet)) = stands(c, hold.body) else { continue };
+                let Ok((ground, feet)) = stands(c, hold.body) else {
+                    continue;
+                };
                 let Some(x) = live
                     .handle(h.load)
                     .zip(live.handle(ground))
@@ -3683,7 +3682,8 @@ impl Engine {
                     let inv = replica::pose::Quat::new(w, -qx, -qy, -qz)
                         .or_else(|_| replica::pose::Quat::new(-w, qx, qy, qz));
                     inv.ok().and_then(|q| {
-                        q.rotate(Vec3::new(feet.x - x.pos.x, 0, feet.z - x.pos.z)).ok()
+                        q.rotate(Vec3::new(feet.x - x.pos.x, 0, feet.z - x.pos.z))
+                            .ok()
                     })
                 };
                 let Some(local) = local else { continue };
@@ -3704,7 +3704,10 @@ impl Engine {
                     {
                         vec![round, to]
                     } else {
-                        eprintln!("worldd: {} holds from where it stands: no ground to its stance", show(hold.body));
+                        eprintln!(
+                            "worldd: {} holds from where it stands: no ground to its stance",
+                            show(hold.body)
+                        );
                         continue;
                     };
                     let track = sim::controller::Track {
@@ -3716,7 +3719,10 @@ impl Engine {
                         hold: false,
                     };
                     if let Err(e) = c.carry_on(hold.body, track) {
-                        eprintln!("worldd: {} was not walked to its stance: {e}", show(hold.body));
+                        eprintln!(
+                            "worldd: {} was not walked to its stance: {e}",
+                            show(hold.body)
+                        );
                         continue;
                     }
                 }
@@ -3739,7 +3745,8 @@ impl Engine {
         // One that never gets there is forgotten once it no longer stands, or no longer holds the part (review of #5268).
         self.stance_face.retain(|b, (a, _, _)| {
             stands(c, *b).is_ok()
-                && holds_on(live, *a).is_some_and(|h| h.phase == grips::HELD && h.holds.iter().any(|x| x.body == *b))
+                && holds_on(live, *a)
+                    .is_some_and(|h| h.phase == grips::HELD && h.holds.iter().any(|x| x.body == *b))
         });
     }
 
@@ -3934,9 +3941,14 @@ impl Engine {
                         match carry.hoist.as_mut().filter(|_| unseat) {
                             Some(h) => {
                                 let d = |a: i64, b: i64| i128::from(a - b).pow(2);
-                                let far = (d(h.to.0.x, h.from.0.x) + d(h.to.0.y, h.from.0.y) + d(h.to.0.z, h.from.0.z))
-                                    .isqrt();
-                                h.t1 = now + crate::assembly::set_in_time(i64::try_from(far).unwrap_or(i64::MAX));
+                                let far = (d(h.to.0.x, h.from.0.x)
+                                    + d(h.to.0.y, h.from.0.y)
+                                    + d(h.to.0.z, h.from.0.z))
+                                .isqrt();
+                                h.t1 = now
+                                    + crate::assembly::set_in_time(
+                                        i64::try_from(far).unwrap_or(i64::MAX),
+                                    );
                                 (times.0, h.t1)
                             }
                             None => times,
