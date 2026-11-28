@@ -82,6 +82,15 @@
 //!   not cut. A part moved to a new parent with its boxes (a transfer, not a creator's edit) touches its old ground and
 //!   its new, so the commit that seats or takes it asks for G3's rebuild (`crate::activity::seating::Seating::write`).
 //!   A body standing where a part would be seated is found by [`scene::stands_in`].
+//! - **A floor made by a seating** (racks T9). A part may hold a floor of its own, as a building or a boat does: a
+//!   floor node under it, its surfaces in the part's frame (a sheet's top), and a flight its stairs' rows. Nothing
+//!   else is needed for it to be ground: lying within [`STEP`] of the ground it is ground cover; seated in a bay's
+//!   slot it is a floor at the slot's height, shrunk at its edges like any floor, and at [`BODY_HIGH`] or more above
+//!   the ground the open ground under it stays open (a deck one walks under); carried it is no floor at all
+//!   ([`scene::carried`]: the route map does not read a carried thing as a building). The commit that seats or takes
+//!   it touches its floor and the open ground ([`changed`]), so G3 cuts both again and installs them with the commit.
+//!   A flight's top lands on the floor it meets at its height, as a roof stair's does (`crate::links`), and its foot
+//!   on the open ground. The floor is never stored apart from the part: it is where the part is.
 //!
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
@@ -359,7 +368,27 @@ fn sector(g: &[P; 16], v: (i64, i64)) -> usize {
 /// reflex corner, where the bands leave a gap, the 16-gon's fan from the one band's end to the other's, from the
 /// corner before the gap to the corner after it. A convex corner needs none: there the two bands overlap.
 fn edges_grown(shapes: &IntShapes<i32>, d: i64, out: &mut Vec<Vec<P>>) {
+    edges_grown_but(shapes, d, &[], out);
+}
+
+/// [`edges_grown`], less the band of each edge that lies on one of `seams` (within [`scene::SEAM`], on the grid).
+fn edges_grown_but(shapes: &IntShapes<i32>, d: i64, seams: &[(P, P)], out: &mut Vec<Vec<P>>) {
     let g = sixteen(d);
+    let near = (scene::SEAM / 1000).max(1);
+    let on_seam = |a: P, b: P| {
+        seams.iter().any(|&(c, e)| {
+            let (ex, ez) = (i64::from(e.x - c.x), i64::from(e.y - c.y));
+            let len = (ex * ex + ez * ez).isqrt();
+            if len == 0 {
+                return false;
+            }
+            let off = |p: P| (ex * i64::from(p.y - c.y) - ez * i64::from(p.x - c.x)).abs() / len;
+            let along = |p: P| (ex * i64::from(p.x - c.x) + ez * i64::from(p.y - c.y)) / len;
+            [a, b]
+                .iter()
+                .all(|&p| off(p) <= near && along(p) >= -near && along(p) <= len + near)
+        })
+    };
     for c in shapes.iter().flatten() {
         let n = c.len();
         let normal = |a: P, b: P| {
@@ -375,12 +404,14 @@ fn edges_grown(shapes: &IntShapes<i32>, d: i64, out: &mut Vec<Vec<P>>) {
                 continue;
             }
             let (nx, nz) = normal(a, b);
-            out.push(vec![
-                a,
-                b,
-                P::new(b.x + nx as i32, b.y + nz as i32),
-                P::new(a.x + nx as i32, a.y + nz as i32),
-            ]);
+            if !on_seam(a, b) {
+                out.push(vec![
+                    a,
+                    b,
+                    P::new(b.x + nx as i32, b.y + nz as i32),
+                    P::new(a.x + nx as i32, a.y + nz as i32),
+                ]);
+            }
             let (ex, ez) = (i64::from(b.x - a.x), i64::from(b.y - a.y));
             let (fx, fz) = (i64::from(o.x - b.x), i64::from(o.y - b.y));
             let turn = ex * fz - ez * fx;
@@ -879,6 +910,12 @@ fn square_ring(w: [i32; 4]) -> Vec<P> {
 
 /// The patch of a floor scene for one radius, turned by `t` before it is put on the grid.
 pub fn cut_floor(s: &Scene, radius: i64, t: Turn) -> Result<Patch, String> {
+    // A seam (racks T9) is no edge: the cut does not take the floor back from it, so the two floors meet there.
+    let q = quat(t.yaw_mdeg)?;
+    let mut seams = Vec::with_capacity(s.seams.len());
+    for (y, [a, b]) in &s.seams {
+        seams.push((*y, on_grid(&q, &t, *a)?, on_grid(&q, &t, *b)?));
+    }
     let g = prepare(s, radius, t)?;
     let mut patch = Patch {
         radius,
@@ -888,7 +925,12 @@ pub fn cut_floor(s: &Scene, radius: i64, t: Turn) -> Result<Patch, String> {
     for (y, rings) in &g.levels {
         let floor = op(rings, &[], OverlayRule::Union);
         let mut shrink = Vec::new();
-        edges_grown(&floor, g.d, &mut shrink);
+        let here: Vec<(P, P)> = seams
+            .iter()
+            .filter(|(sy, ..)| (sy - y).abs() <= scene::SEAM)
+            .map(|&(_, a, b)| (a, b))
+            .collect();
+        edges_grown_but(&floor, g.d, &here, &mut shrink);
         let floor = shapes_op(&floor, &shrink, OverlayRule::Difference);
         let shapes = cut_level(&g, floor, *y, None);
         let first = patch.pieces.len() as u32;
@@ -1280,15 +1322,44 @@ pub fn changed(before: &Tree, part: &Part) -> Vec<Id> {
         let changes = match &e.body {
             Body::Changes(changes) => changes,
             // A thing with boxes moved to a new parent (a part seated or taken out, N19 #3341): its old ground and
-            // its new. A body or a crew's node has none, so a body's hop through a doorway touches nothing.
-            Body::Transfer(TransferRec::Leave { node, .. }) => {
+            // its new. So is one that holds a floor of its own (racks T9: a sheet seated becomes a floor where it
+            // sits, a flight a way up). A body or a crew's node has neither, so a body's hop through a doorway touches
+            // nothing.
+            Body::Transfer(TransferRec::Leave { node, pose, .. }) => {
                 let solid = |h| {
                     before
                         .node(h)
                         .is_some_and(|n| n.fields().contains_key(&scene::F_SOLIDS))
+                        || before.children(h).unwrap_or(&[]).iter().any(|&c| {
+                            before
+                                .node(c)
+                                .is_some_and(|n| plain(n.kind().as_str()) == scene::FLOOR)
+                        })
                 };
                 if before.handle(*node).is_some_and(solid) {
                     ids.push(*node);
+                }
+                // A standing place beside it, in the parent it leaves or the one it goes to, is there only while
+                // nothing lies over it (racks T6, `scene::braced`): its thing's ground is read again.
+                let from = before
+                    .handle(*node)
+                    .and_then(|h| before.node(h))
+                    .and_then(|n| n.parent());
+                for p in [from, Some(pose.frame.node)].into_iter().flatten() {
+                    for &c in before
+                        .handle(p)
+                        .and_then(|h| before.children(h))
+                        .unwrap_or(&[])
+                    {
+                        let held = before.children(c).unwrap_or(&[]).iter().any(|&f| {
+                            before
+                                .node(f)
+                                .is_some_and(|n| n.fields().contains_key(&scene::F_WHILE_JOINED))
+                        });
+                        if let Some(n) = before.node(c).filter(|_| held) {
+                            ids.push(n.id());
+                        }
+                    }
                 }
                 continue;
             }

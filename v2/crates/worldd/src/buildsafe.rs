@@ -7,7 +7,8 @@
 //! - **A Soul** is a node whose kind the world's kinds give the owner `family` (a body; `replica::world_model`). A
 //!   Soul's intents name its body (`answers`'s `body_of`), so the body's id names the Soul. Its pose is where it
 //!   stands, sits or lies: its frame (parent and slot) and its place there. What it holds, G2 reads from its slots on
-//!   the same tree. Its abilities are today's walking body's, hands (`sim::walk::town` routes with them).
+//!   the same tree. Its abilities are today's walking body's, hands and the climb (`sim::walk::water::WALKER`, which
+//!   `sim::walk::town` routes with).
 //!
 //! - **Moving bodies** (G1d, #3462). The world's bodies ([`crate::bodies`], I4b) are not written to the tree, so the
 //!   clock thread hands off, each tick, every body the controller holds as the controller has it ([`moving`]): where
@@ -47,7 +48,6 @@ use sim::edit::safety::Who;
 use sim::ground::Versions;
 use sim::ground::scene::{F_SLOTS, F_SOLIDS, GROUND};
 use sim::links::Doors;
-use sim::routes::HANDS;
 use sim::walk::town::{Basis, Rebuilt, Town};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -323,7 +323,7 @@ pub fn souls(copy: &Replica, kinds: &BTreeMap<String, Kind>) -> Vec<Who> {
                 orientation: place.orientation,
                 support: place.support,
             },
-            has: HANDS,
+            has: sim::walk::water::WALKER,
             crossing: None,
         });
     }
@@ -834,7 +834,7 @@ pub fn moving(bodies: &Bodies) -> Vec<Who> {
             soul: b.id,
             body: b.id,
             pose: b.pose,
-            has: HANDS,
+            has: sim::walk::water::WALKER,
             crossing: runner.controller.carrying(b.id),
         };
         out.push(who);

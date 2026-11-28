@@ -11,7 +11,7 @@
 // (`kinds`): `content/kinds/construction/loading_spot.json`. A bay is taken while a thing on the ground has its middle
 // inside the bay's footprint; a load another crew is carrying there takes it only once it is set down.
 
-import { REACH, turn } from './carry.mjs';
+import { SIDE_REACH, turn } from './carry.mjs';
 
 const M = 1_000_000;
 const ONE = 2 ** 30;
@@ -29,7 +29,7 @@ export const crewOf = (entry) => entry?.state?.carry_crew?.default ?? entry?.sta
 
 /**
  * Where a side carrier stands at a load (µm on the plan): beside its `n`-th grip between its ends, counted from its back
- * (its − end), REACH off its side (`sim::activity::carry::Load::side_places`), on its right (+ its own x, or + its own z
+ * (its − end), SIDE_REACH off its side (`sim::activity::carry::Load::side_places`), on its right (+ its own x, or + its own z
  * when it lies along x) or its left. Null when it has no such grip.
  */
 export function sideSpot(at, load, side, n) {
@@ -38,7 +38,7 @@ export function sideSpot(at, load, side, n) {
   const rot = at.rot ?? [ONE, 0, 0, 0], mid = turn(rot, load.middle).map((c, k) => c + at.pos[k]);
   const along = unit([turn(rot, load.long)[0], turn(rot, load.long)[2]]) ?? [0, 1];
   const x = turn(rot, load.axis === 0 ? [0, 0, M] : [M, 0, 0]), across = unit([x[0], x[2]]) ?? [1, 0];
-  const d = (load.halfWidth + REACH) * (side === 'right' ? 1 : -1);
+  const d = (load.halfWidth + SIDE_REACH) * (side === 'right' ? 1 : -1);
   return [mid[0] + along[0] * g + across[0] * d, mid[2] + along[1] * g + across[1] * d];
 }
 
