@@ -113,6 +113,13 @@ const SCENES = {
     sixbeam: { bay: 'rack-bay', frames: [['rack-frame-1', 'ada', 'bo', 'upright_a'], ['rack-frame-2', 'cy', 'di', 'upright_b']],
       beams: ['ed', 'fi', [['rack-beam-1', ['4.978,20'], 'beam_low_l'], ['rack-beam-2', ['4,16', '8,16', '7.022,20'], 'beam_low_r']]],
       six: { load: 'rack-beam-3', front: 'ada', back: 'bo', sides: [['cy', 'right', 1], ['di', 'left', 2], ['ed', 'right', 3], ['fi', 'left', 4]], mouth: '4.978,20', slot: 'beam_high_l' } } },
+  // A two-person carry interrupted (N5; CARRY_SCENE=interrupt): two lift the loose rack beam 4 and walk it south; the
+  // back carrier sends a walk of its own away (`carry to <crew> x,z` from a carrier who is not the front), the carriers
+  // come apart, the world breaks the carry off and sets the beam down (carriers-apart); both come back to its ends,
+  // lift it again and carry it on, and set it down.
+  interrupt: { who: ['ada', 'bo'], kind: 'mars:rack_beam', entry: 'content/kinds/construction/rack_beam.json',
+    view: 'post=0&hour=12:00&eye=-1,5,33&at=-1,.6,24',
+    interrupt: { load: 'rack-beam-4', front: 'ada', back: 'bo', first: ['-3.1,25', 2500], away: '2,30', then: [['1,25', 7000]] } },
   // The deck walk (B5, attempt 24; CARRY_SCENE=deckwalk; #5284's creator-placed ways): the world's creator places the
   // finished deck bay in one `souls-god.mjs batch`, a part of each slot's kind into each of deck_bay's slots in the
   // entry's order (frames, four beams, five joists, two sheets, the stair); then Ada walks up the stair onto the first
@@ -780,6 +787,35 @@ async function sixBeamSurvey({ state, page, paths, signal, check, arm, root }) {
     save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: [] });
   }
 }
+/** A two-person carry interrupted (N5): lifted, walked, broken off by one carrier walking away, set down by the world,
+ *  lifted again and carried on. The break's answer and the load's state are measured. */
+async function interruptSurvey({ state, page, paths, signal, check, arm, root }) {
+  const I = SCENE.interrupt, wait = ms => delay(ms, signal), shot = async step => { await page.screenshot({ path: join(paths.dir, step + '.png') }); (state.steps ??= []).push({ step, at: new Date().toISOString() }); };
+  check('candidate-arm', arm === 'candidate'); const manifest = await verifyAssets(state, check);
+  const load = await find(state, I.load);
+  await setupGate(state, page, signal);
+  check('setup-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  const out = {};
+  try {
+    state.crew = await crewOf(state, I.front, I.back);
+    await Promise.all([gripAt(state, I.front, load.id, 'front'), gripAt(state, I.back, load.id, 'back')]);
+    await watchBeam({ state, page, check, beam: load, manifest, root, carriers: [I.front, I.back] });
+    await retried(state, I.front, 'carry', 'lift', state.crew, load.id); await wait(2500); await shot('lifted');
+    await retried(state, I.front, 'carry', 'to', state.crew, I.first[0]); await wait(I.first[1]); await shot('walking');
+    const away = await asked(state, I.back, 'carry', 'to', state.crew, I.away); await wait(5000); await shot('carriers-apart');
+    out.away = { ok: away.ok === true, carry: away.carry ?? null, next: away.next ?? null };
+    await Promise.all([gripAt(state, I.front, load.id, 'front'), gripAt(state, I.back, load.id, 'back')]); await shot('back-at-its-ends');
+    await retried(state, I.front, 'carry', 'lift', state.crew, load.id); await wait(2500); await shot('lifted-again');
+    for (const [i, [to, ms]] of I.then.entries()) { await retried(state, I.front, 'carry', 'to', state.crew, to); await wait(ms); await shot(`carried-on-${i + 1}`); }
+    await retried(state, I.front, 'carry', 'set-down', state.crew); await wait(3000); await shot('set-down');
+    for (const w of [I.front, I.back]) await asked(state, w, 'carry', 'leave', state.crew);
+    check('no-page-errors', state.pageErrors.length === 0, state.pageErrors.join('\n'));
+  } finally {
+    const observer = await page.evaluate(() => { const o = window.__carryContactObserver; return o ? { counts: o.counts, failures: o.failures.length, failedWitnesses: o.failedWitnesses.length } : null; }).catch(() => null);
+    save(state, 'survey-measurement.json', { note: 'A carry broken off by its carriers coming apart, then lifted again: the break\'s answer, and the oracle as a measurement.', ...out, observer, watch: state.watch ?? null });
+    save(state, 'carry-phases.json', { survey: true, steps: state.steps ?? [], phases: state.phases ?? [] });
+  }
+}
 /** A load carried by two as a survey: taken, walked its legs, set down. Its checks: every command accepted, no page error;
  *  the contact oracle on its crew is a measurement. */
 async function carrySurvey({ state, page, paths, signal, check, arm, root }) {
@@ -848,6 +884,7 @@ export default async function ({ page, paths, signal, fixture, check, expectHttp
   if (SCENE.third) return firstThird({ state, page, paths, signal, check, arm, root });
   if (SCENE.carry) return carrySurvey({ state, page, paths, signal, check, arm, root });
   if (SCENE.deckwalk) return deckWalk({ state, page, paths, signal, check, arm });
+  if (SCENE.interrupt) return interruptSurvey({ state, page, paths, signal, check, arm, root });
   if (SCENE.sixbeam) return sixBeamSurvey({ state, page, paths, signal, check, arm, root });
   if (SCENE.crews) return crewsSurvey({ state, page, paths, signal, check, arm });
   await offer(state);
