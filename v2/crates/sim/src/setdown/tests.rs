@@ -402,6 +402,8 @@ impl Eden {
     }
 
     /// Plans a set-down, judges it by G2's rule for the bodies as they stand, and commits it.
+    // The way-out check's time (E16 A5) is real time.
+    #[allow(clippy::disallowed_methods)]
     fn set_down(
         &mut self,
         body: Id,
@@ -412,16 +414,20 @@ impl Eden {
     ) -> Result<(Chosen, Rebuild), Refusal> {
         let (sd, p) = self.plan(body, what, word, anchor, facing)?;
         let (whos, _) = self.bodies();
-        let whole = judge(
-            &self.town.tree,
-            &self.header(),
-            Some(self.ground),
-            &p,
-            &whos,
-        );
+        let hd = self.header();
+        let t0 = Instant::now();
+        let whole = judge(&self.town.tree, &hd, Some(self.ground), &p, &whos);
+        let whole_us = t0.elapsed().as_micros();
         // G2b (#3488): the guard on the town judges as the whole world's.
         let known = Known::of(&self.town);
-        let on = judge_on(&self.town.tree, &self.header(), &p, &whos, &known);
+        let t0 = Instant::now();
+        let on = judge_on(&self.town.tree, &hd, &p, &whos, &known);
+        let on_us = t0.elapsed().as_micros();
+        // E16 (#2787) A5: the way-out check's time, per set-down (the world runs `judge_on`, off the clock thread).
+        println!(
+            "way-out check: {} bodies, {whole_us} µs on the whole world, {on_us} µs on the town",
+            whos.len()
+        );
         assert_eq!(format!("{on:?}"), format!("{whole:?}"), "G2b: same verdict");
         whole?;
         Ok((sd.chosen, self.commit(p)))

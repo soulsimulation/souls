@@ -705,6 +705,17 @@ impl Cx<'_> {
             }
             Bound::Take { what } => {
                 let thing = self.of(*what);
+                // E16 (#2787): never out of another body's hand (or off what it wears). The holder is not named.
+                let tree = self.view.tree;
+                if let Some(f) = self.view.at(thing)
+                    && f.node != self.body
+                    && tree
+                        .links_at(f.node)
+                        .iter()
+                        .any(|e| tree.ty(e).as_str().split('@').next() == Some("souls:body-of"))
+                {
+                    return refuse("in_hand", format!("{} is in another's hand", show(thing)));
+                }
                 self.not_in_use(thing)?;
                 let to = self.free_hand()?;
                 self.transfer(m, thing, to)

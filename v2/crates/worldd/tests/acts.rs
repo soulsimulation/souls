@@ -1461,10 +1461,14 @@ fn i4575_two_souls_asking_for_a_place_at_once_are_given_different_places() {
 mod attend;
 #[path = "acts/borrowed.rs"]
 mod borrowed;
+#[path = "acts/carried_gap.rs"]
+mod carried_gap;
 #[path = "acts/effect_refused.rs"]
 mod effect_refused;
 #[path = "acts/named_args.rs"]
 mod named_args;
+#[path = "acts/refusals.rs"]
+mod refusals;
 #[path = "acts/timer_world_form.rs"]
 mod timer_world_form;
 
