@@ -239,6 +239,7 @@ fn kill_child() {
 }
 
 #[test]
+#[allow(clippy::disallowed_methods)] // A child process on the real clock: the wait for its rewrites is real time.
 fn a_writer_killed_mid_write_leaves_no_broken_part() {
     let h = header();
     let base = scratch("kill");
@@ -252,13 +253,24 @@ fn a_writer_killed_mid_write_leaves_no_broken_part() {
             .stdout(std::process::Stdio::null())
             .spawn()
             .expect("the child");
-        std::thread::sleep(Duration::from_millis(150 + (round * 37) % 250));
+        // On the child, not the wall clock (on a loaded machine a debug child takes longer than a fixed sleep to pack its
+        // parts): killed once it is rewriting the last part (its part 4 is there), at a moment that varies by round.
+        let dir = root.join(stream::dir(&h, &key(&h)));
+        let until = std::time::Instant::now() + Duration::from_secs(60);
+        while !dir.join("4").exists() {
+            assert!(
+                child.try_wait().expect("the child's state").is_none(),
+                "the child ended before its rewrites"
+            );
+            assert!(
+                std::time::Instant::now() < until,
+                "the child rewrites its last part"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis((round * 37) % 50));
         child.kill().expect("killed");
         let _ = child.wait();
-        let dir = root.join(stream::dir(&h, &key(&h)));
-        if !dir.exists() {
-            continue;
-        }
         let hb = fs::read(root.join(stream::header_path(&h))).expect("the header");
         Header::read(&hb).expect("the header is whole");
         for (name, bytes) in files(&dir) {
