@@ -1026,7 +1026,10 @@ fn windowed(
 ) -> Option<replica::sync::Synced> {
     let scope = [world_id(0)];
     let now = w.hashes(&scope).unwrap();
-    let mut d = copy.compare(&scope, now.into_iter().map(|h| h.map(Hash::to_bytes)).collect());
+    let mut d = copy.compare(
+        &scope,
+        now.into_iter().map(|h| h.map(Hash::to_bytes)).collect(),
+    );
     let (mut x, mut left) = (seed, cut);
     let mut out: Vec<Vec<Vec<u8>>> = Vec::new();
     loop {
@@ -1045,7 +1048,9 @@ fn windowed(
             copy.abandon(d);
             return None;
         }
-        x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        x = x
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         let asked = out.swap_remove((x >> 33) as usize % out.len());
         let got = w.records(&asked).unwrap();
         for h in &asked {
@@ -1063,7 +1068,19 @@ fn windowed(
 fn many_rounds_in_flight_with_a_connection_dropped_mid_way_resume_and_copy_each_record_once() {
     // A root, 20 rooms of 200 things (4,020 records, 64 to a request): one thing is in two rooms.
     let rooms: Vec<Node> = (0..20u64)
-        .map(|r| Node(1_000_000 + r, (0..200).map(|t| Node(r * 1000 + t + u64::from(r == 7 && t == 0) * 5000, Vec::new())).collect()))
+        .map(|r| {
+            Node(
+                1_000_000 + r,
+                (0..200)
+                    .map(|t| {
+                        Node(
+                            r * 1000 + t + u64::from(r == 7 && t == 0) * 5000,
+                            Vec::new(),
+                        )
+                    })
+                    .collect(),
+            )
+        })
         .collect();
     let mut w = Made::default();
     w.set(&Node(9_999_999, rooms));
@@ -1071,26 +1088,47 @@ fn many_rounds_in_flight_with_a_connection_dropped_mid_way_resume_and_copy_each_
     let one = alone.sync(&[world_id(0)], &mut w).unwrap();
     whole(&alone, one.held);
 
-    for (seed, cut) in [(1, 7), (2, 30), (3, 1), (4, 62)] {
+    for (seed, cut) in [(1, 7), (2, 30), (3, 1), (4, 40)] {
         let mut answered = std::collections::BTreeMap::new();
         let mut copy = Copy::default();
         assert!(windowed(&mut copy, &mut w, 16, seed, Some(cut), &mut answered).is_none());
-        assert!(copy.roots().is_empty(), "the scope's hashes are the copy's only once it finishes");
+        assert!(
+            copy.roots().is_empty(),
+            "the scope's hashes are the copy's only once it finishes"
+        );
         assert_eq!(copy.reach().unwrap().len(), 0, "the copy is as it was");
         let first: usize = answered.values().sum();
         let s = windowed(&mut copy, &mut w, 16, seed + 100, None, &mut answered).unwrap();
         assert_eq!(s.in_flight, 16, "seed {seed}: many requests in flight");
-        assert!(s.reused > 0, "seed {seed}: the cut sync's records are taken, not asked again");
-        assert_eq!(s.fetched + s.reused, s.held, "seed {seed}: each record copied once");
-        assert!(answered.values().all(|n| *n == 1), "seed {seed}: no record is asked for twice");
+        assert!(
+            s.reused > 0,
+            "seed {seed}: the cut sync's records are taken, not asked again"
+        );
+        assert_eq!(
+            s.fetched + s.reused,
+            s.held,
+            "seed {seed}: each record copied once"
+        );
+        assert!(
+            answered.values().all(|n| *n == 1),
+            "seed {seed}: no record is asked for twice"
+        );
         assert_eq!(answered.len(), first + s.fetched);
         assert_eq!(s.held, one.held);
         assert_eq!(copy.roots(), alone.roots());
-        assert_eq!(copy.reach().unwrap(), alone.reach().unwrap(), "seed {seed}: the same copy");
+        assert_eq!(
+            copy.reach().unwrap(),
+            alone.reach().unwrap(),
+            "seed {seed}: the same copy"
+        );
         whole(&copy, s.held);
         // Current: one round, nothing fetched, nothing loose left over.
         let again = windowed(&mut copy, &mut w, 16, seed, None, &mut answered).unwrap();
         assert_eq!((again.fetched, again.reused, again.rounds), (0, 0, 1));
     }
     assert!(one.rounds > 60, "one at a time: {} rounds", one.rounds);
+    assert_eq!(
+        one.in_flight, 1,
+        "the library's own sync asks one at a time"
+    );
 }

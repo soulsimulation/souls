@@ -451,8 +451,7 @@ impl Copy {
             if d.want.is_empty() {
                 // A child named twice, or asked for already, is fetched once.
                 d.want = std::mem::take(&mut d.next);
-                d.want
-                    .retain(|c| !self.holds(c) && !d.pending.contains(c));
+                d.want.retain(|c| !self.holds(c) && !d.pending.contains(c));
                 d.want.sort();
                 d.want.dedup();
                 d.want.reverse(); // taken from the end, in order
