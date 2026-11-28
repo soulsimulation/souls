@@ -167,7 +167,9 @@ export class FollowCamera{
   const points=[centre,top.clone().lerp(centre,.25)];let tested=0;
   const query=(eye:Vector3,shift?:Vector3,coreOnly=false):number|null=>{const y=ground(eye.x,eye.z);if(y===null||!Number.isFinite(y))return null;if(eye.y<y+1.2)return-1;let clear=0;for(const p of coreOnly?[centre]:points){const s=geometry.segment(eye,shift?p.clone().add(shift):p);if(s==='unknown')return null;clear+=s==='clear'?1:0;}return clear/(coreOnly?1:points.length);};
   const interiorGoal=this.interior.sync(context,manual,geometry.generation),interiorActive=!manual&&context?.status==='enclosed';
-  if(this.wasInterior&&!interiorActive)this.offset.copy(this.eye).sub(root);this.wasInterior=interiorActive;
+  // Ordinary exit resumes the retained outdoor desired offset through the same
+  // bounded sweep. Manual cancellation instead adopts the actual user view.
+  if(this.wasInterior&&!interiorActive&&manual)this.offset.copy(this.eye).sub(root);this.wasInterior=interiorActive;
   const segment=(from:Vector3,to:Vector3,radius=0)=>geometry.segmentAuthored(from,to,radius);
   let reason='tracking';
   if(geometry.stats.complete){

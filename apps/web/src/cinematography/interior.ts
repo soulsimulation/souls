@@ -4,10 +4,10 @@ import type {EnclosureResult} from './enclosure.ts';
 import type {FollowGeometry,Sight} from './follow-camera.ts';
 export type InteriorDiagnostic={status:string;key:string|null;anchor:number[]|null;proposal:number[]|null;visibility:Sight|null;passage:Sight|null;tested:number;validation:'full-authored-building-surfaces-and-current-obstacles';containment:'unproved'};
 export class InteriorView{
- private key='';private region:EnclosureResult['region']=null;private anchor:Vector3|null=null;private proposals:Vector3[]=[];private cursor=0;private next=0;
+ private key='';private region:EnclosureResult['region']=null;private anchor:Vector3|null=null;private proposals:Vector3[]=[];private cursor=0;private next=0;private retried=false;
  diagnostic:InteriorDiagnostic=this.blank();
  private blank():InteriorDiagnostic{return{status:'inactive',key:null,anchor:null,proposal:null,visibility:null,passage:null,tested:0,validation:'full-authored-building-surfaces-and-current-obstacles',containment:'unproved'};}
- reset(){this.key='';this.region=null;this.anchor=null;this.proposals=[];this.cursor=0;this.next=0;this.diagnostic=this.blank();}
+ reset(){this.key='';this.region=null;this.anchor=null;this.proposals=[];this.cursor=0;this.next=0;this.retried=false;this.diagnostic=this.blank();}
  sync(context:EnclosureResult|null|undefined,manual:boolean,generation:number){
   if(manual||context?.status!=='enclosed'||!context.region||!context.worldMatrix){this.reset();this.diagnostic.status=manual?'manual':'inactive';return null;}
   const key=JSON.stringify([context.building,context.room,context.floor,context.revision,context.sourceRevision,context.worldMatrix,generation]);
@@ -33,14 +33,14 @@ export class InteriorView{
   // Keep a readable exterior or previously selected room-world eye. This is the
   // actual eye, not the old outdoor root-relative goal.
   d.visibility=sight(eye);if(d.visibility==='unknown'){d.status='visibility-unknown';return;}
-  if(d.visibility==='clear'){if(!this.anchor)this.anchor=eye.clone();d.anchor=this.anchor.toArray();d.status='holding';return;}
+  if(d.visibility==='clear'&&eye.distanceTo(points[0])>=2){this.retried=false;if(!this.anchor)this.anchor=eye.clone();d.anchor=this.anchor.toArray();d.status='holding';return;}
   this.anchor=null;d.anchor=null;if(!this.proposals.length){d.status='no-proposals';return;}
-  const proposal=this.proposals[this.cursor++%this.proposals.length];d.proposal=proposal.toArray();d.tested=1;
-  const r=radius(proposal),y=ground(proposal.x,proposal.z);if(r===null||y===null||!Number.isFinite(y)){d.status='proposal-unavailable';return;}
-  if(proposal.y<y+1.2||proposal.distanceTo(points[0])<2){d.status='proposal-shot-too-close';return;}
-  const envelope=geometry.segmentAuthored(proposal,proposal,r);if(envelope!=='clear'){d.status=envelope==='unknown'?'proposal-unknown':'proposal-surface-overlap';return;}
-  d.visibility=sight(proposal);if(d.visibility!=='clear'){d.status=d.visibility==='unknown'?'proposal-unknown':'proposal-occluded';return;}
-  d.passage=geometry.segmentAuthored(eye,proposal,r);if(d.passage!=='clear'){d.status=d.passage==='unknown'?'passage-unknown':'readable-proposal-unreachable';return;}
-  this.anchor=proposal.clone();d.anchor=proposal.toArray();d.status='selected';
+  const proposal=this.proposals[this.cursor%this.proposals.length],advance=()=>{this.cursor++;this.retried=false;},unknown=()=>{if(this.retried)advance();else this.retried=true;};d.proposal=proposal.toArray();d.tested=1;
+  const r=radius(proposal),y=ground(proposal.x,proposal.z);if(r===null||y===null||!Number.isFinite(y)){d.status='proposal-unavailable';unknown();return;}
+  if(proposal.y<y+1.2||proposal.distanceTo(points[0])<2){d.status='proposal-shot-too-close';advance();return;}
+  const envelope=geometry.segmentAuthored(proposal,proposal,r);if(envelope!=='clear'){d.status=envelope==='unknown'?'proposal-unknown':'proposal-surface-overlap';if(envelope==='unknown')unknown();else advance();return;}
+  d.visibility=sight(proposal);if(d.visibility!=='clear'){d.status=d.visibility==='unknown'?'proposal-unknown':'proposal-occluded';if(d.visibility==='unknown')unknown();else advance();return;}
+  d.passage=geometry.segmentAuthored(eye,proposal,r);if(d.passage!=='clear'){d.status=d.passage==='unknown'?'passage-unknown':'readable-proposal-unreachable';if(d.passage==='unknown')unknown();else advance();return;}
+  advance();this.anchor=proposal.clone();d.anchor=proposal.toArray();d.status='selected';
  }
 }
