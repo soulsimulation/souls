@@ -164,9 +164,13 @@ export class WorldBroadcast {
     const started = performance.now();
     const shot = this.direct(frame, records, scene, tick, dt, aspect, wallSeconds, movementDt, renderRoots);
     this.shown = shot?.pose ?? null;
-    // #2202: the camera's own cost per frame (ms), last 600 frames, for the cost budget (docs/design/auto-camera.md §5).
-    const cost = ((globalThis as unknown as { __soulsBroadcastCost?: number[] }).__soulsBroadcastCost ??= []); cost.push(performance.now() - started); if (cost.length > 600) cost.shift();
-    return shot?.pose ? { ...shot, pose: { ...shot.pose, target: liftHorizon(shot.pose.position, shot.pose.target) } } : shot;
+    const result = shot?.pose ? { ...shot, pose: { ...shot.pose, target: liftHorizon(shot.pose.position, shot.pose.target) } } : shot;
+    // Complete sample computation through final lift/return construction; diagnostic append and caller work excluded.
+    const ms = performance.now() - started;
+    const diagnostic = globalThis as unknown as { __soulsBroadcastCost?: number[]; __soulsBroadcastCostSequence?: number };
+    const cost = (diagnostic.__soulsBroadcastCost ??= []); cost.push(ms); if (cost.length > 600) cost.shift();
+    diagnostic.__soulsBroadcastCostSequence = (diagnostic.__soulsBroadcastCostSequence ?? 0) + 1;
+    return result;
   }
   private direct(frame: Record<string, SampledEntity>, records: Record<string, Entity>, scene: SpatialScene | null,
     tick: number, dt: number, aspect: number, wallSeconds: number, movementDt: number,renderRoots:readonly THREE.Object3D[]=[] ) {
