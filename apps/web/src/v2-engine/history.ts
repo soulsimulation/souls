@@ -93,6 +93,8 @@ export class V2History {
    *  taken to be no later than now. It is the world's own clock, which for a world made through New world began at 0. */
   async chunks(from: number, to: number, limit: number, signal?: AbortSignal, nowTick?: number | null): Promise<RecordedChunk[]> {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
+    // the bundle feed (native carry playback, history-feed.ts) is loaded on the first past window, not with the page
+    const { feedBundle } = await import('./history-feed.ts');
     const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
     const parts=this.parts?.fork(),bodies=new Map<string,string>();
     const now = (nowTick ?? to) * TICK_US;
@@ -106,26 +108,7 @@ export class V2History {
       // the bundle's time, and the quiet after it until the next bundle: a world with no records writes no bundle, so
       // past the newest one (no next yet) the world is as that bundle left it, and a minute ago is played from there
       const until = Math.min(s.next ?? Infinity, endUs + 2 * STEP_US);
-      // A validated timeline starts with an as-at baseline, then exact source-ordered replacements/removals.
-      // Do not apply future births, frames or membership to the baseline; collect bridge chunks as each change lands.
-      const feed=(time:number,nodes:Seeked['nodes'],removed:string[],samples:Seeked['samples'],carryChanges:Seeked['carryChanges'])=>{
-        const message={t:'part' as const,p:{number:0,from:time,to:time,nodes,removed,samples,carryChanges,...(s.courses?{courses:s.courses}:{})}};
-        bridge.receive(message);parts?.receive(message);take();
-      };
-      if(s.timeline){
-        const origin=s.timeline.from,changes=s.carryChanges??[];
-        // Initial nodes already include every effect <= origin. Earlier carry events retain assignment provenance only.
-        feed(origin,s.nodes,[],s.samples,changes.filter(c=>c.at<=origin&&!c.pose));
-        let last=origin;
-        for(const t of s.timeline.transitions){
-          for(let q=last+STEP_US;q<t.at;q+=STEP_US){bridge.receive({t:'pointer',p:{newest:null,newestTo:null,period:0,anchorWorld:0,anchorWallMs:0,quietUntil:q}});take();}
-          feed(t.at,t.nodes,t.removed,t.samples,changes.filter(c=>last<c.at&&c.at<=t.at));last=t.at;
-        }
-        const remaining=changes.filter(c=>c.at>last);if(remaining.length)feed(Math.max(last,...remaining.map(c=>c.at)),[],[],[],remaining);
-      }else{
-        if(parts)throw Error('history: validated node timeline required for native carry playback');
-        feed(first?s.at:s.start,s.nodes,[],s.samples,s.carryChanges);
-      }
+      feedBundle(s, bridge, parts, take, first, STEP_US);
       first = false;
       for (let t = (s.timeline?.transitions.at(-1)?.at ?? s.start) + STEP_US; t < until + STEP_US && got.size < limit; t += STEP_US) {
         bridge.receive({ t: 'pointer', p: { newest: null, newestTo: null, period: 0, anchorWorld: 0, anchorWallMs: 0, quietUntil: Math.min(t, until) } });
