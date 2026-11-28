@@ -474,11 +474,16 @@ impl Bay {
         k
     }
 
-    /// Souls `who` walk clear of the bay, each to its own place south-west of it.
+    /// Souls `who` walk clear of the bay, each to its own place: north-west of it (the flight, seated or let go, lies
+    /// along its south-west side and walls off the west ends of the sheets and 2x4s from the south: Soul 1 stopped
+    /// 714 mm short of sheet 2's west end), Soul 7 south-west, by the ladder it climbs.
     fn clear(&mut self, who: &[usize]) {
         let to: Vec<(usize, Vec3)> = who
             .iter()
-            .map(|s| (*s, Bay::at(-3_000 - 700 * *s as i64, -4_000)))
+            .map(|s| {
+                let z = if *s == 6 { -4_000 } else { 4_000 };
+                (*s, Bay::at(-3_000 - 700 * *s as i64, z))
+            })
             .collect();
         self.walk(&to, "standing clear");
     }
