@@ -2789,6 +2789,20 @@ impl Engine {
                     Err(r) => eprintln!("worldd: a retiring holder's hold was not kept: {r}"),
                 }
             }
+            // One of a crew whose other holders do not hold the part up alone (`support.holders`, N4): it leaves the
+            // crew at once, the member list and the tree agreeing, and the part is laid down beside its bay by the
+            // rest, as a lone holder lays it ([`Engine::holder_retired`]).
+            if left.as_ref().is_err_and(|r| r.name == "support.holders")
+                && let Some(part) = tree
+                    .handle(activity)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|n| n.parent())
+            {
+                match self.holder_retired(&mut tree, c, ask, body, activity, part, now) {
+                    Ok(()) => continue,
+                    Err(r) => eprintln!("worldd: a retiring holder did not leave its crew: {r}"),
+                }
+            }
             if let Err(r) = left {
                 eprintln!(
                     "worldd: {} did not leave {} as it retired: {r}",
@@ -2812,6 +2826,68 @@ impl Engine {
                 e
             })
             .collect()
+    }
+
+    /// Holder `body` of crew `activity` leaves the world while the rest of the crew do not hold `part` up alone (N4,
+    /// the coordinator's decision of 28 Nov): its share of the hold is kept on the crew's node at once
+    /// ([`sim::structure::F_KEPT`], one more), so the bay stays as B18 has it, and it leaves the crew, its membership
+    /// link with it: no hold lives only in the engine's member list. Then the first holder left lays the part down beside
+    /// its bay ([`Engine::lay_down`], a lone holder's lay-down, through the walkers' maps), its entries caused by the
+    /// retire and acted by the retiring Soul. When it cannot be laid down (another part hangs by it, no side has room),
+    /// the rest hold it on with the kept share, and another Soul may join them (`souls:hold-kept`).
+    #[allow(clippy::too_many_arguments)]
+    fn holder_retired(
+        &mut self,
+        tree: &mut Tree,
+        c: &mut Controller,
+        ask: Ask,
+        body: Id,
+        activity: Id,
+        part: Id,
+        now: Micros,
+    ) -> R<()> {
+        let audience = tree
+            .handle(activity)
+            .and_then(|h| tree.node(h))
+            .map(|n| n.audience())
+            .ok_or_else(|| refusal("activity-missing", show(activity)))?;
+        let kept = tree
+            .handle(activity)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| match n.fields().get(&sim::structure::F_KEPT) {
+                Some(Value::Uint(k)) => Some(*k),
+                _ => None,
+            })
+            .unwrap_or(0);
+        self.mark(tree, now, activity, audience, kept + 1)?;
+        self.activities.next = tree.next();
+        self.activities.leave(
+            tree,
+            c,
+            &mut self.moves,
+            &mut self.due,
+            &mut self.mint,
+            ask,
+            body,
+            activity,
+        )?;
+        let by = (ask.intent, ask.soul);
+        let rest = self
+            .activities
+            .members(activity)
+            .and_then(|m| m.iter().find(|m| c.body(m.body).is_some()).map(|m| m.body));
+        let laid = match rest {
+            Some(holder) => self.lay_down(tree, c, by, activity, holder, part, now),
+            None => Err(refusal("crew.size", show(activity))),
+        };
+        if let Err(r) = laid {
+            eprintln!(
+                "worldd: {} not laid down at its holder's retire: {r}; held on by the rest",
+                show(part)
+            );
+            self.kept_word(tree, activity, part, now, by)?;
+        }
+        Ok(())
     }
 
     /// The last holder `body` of crew `activity` leaves the world while it holds `part` in its bay (0.135 A2), for
