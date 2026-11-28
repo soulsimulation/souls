@@ -122,7 +122,10 @@ pub fn stand_as_kinds(
 
 /// A building placed new brings its rooms (#5006, row 20): each place of a kind whose entry keeps a `building` section
 /// (`import_eden::placed`) gets, in the same batch, its walls, floors, rooms, windows, doors, doorways and stairs, as
-/// a template's building has them, so a Soul can walk in, up and out of one a creator placed. The operations are added
+/// a template's building has them, so a Soul can walk in, up and out of one a creator placed. A place of a kind whose
+/// entry declares ways instead (`geometry.floors`, `stairs`, `ladders`: a frame, a sheet, a stair flight) gets the
+/// floors and the stair and ladder links the import gives a seeded thing of it (`import_eden::placed::way_ops`), so
+/// a Soul walks up a creator-placed bay's stair onto its deck and climbs its frames. The operations are added
 /// after the batch's own, so a refusal still names the creator's operations by their places; the world then checks,
 /// judges (BUILDSAFE: a Soul standing where a wall or floor would go refuses the whole place) and records the batch
 /// as one edit, and one undo takes it all back.
@@ -197,12 +200,39 @@ pub fn with_buildings(
         else {
             continue;
         };
-        let Some(entry) = entries
-            .get(import_eden::entry_name(kind.as_str(), fields))
-            .filter(|e| e.get("building").is_some())
-        else {
+        let Some(entry) = entries.get(import_eden::entry_name(kind.as_str(), fields)) else {
             continue;
         };
+        // A kind that declares ways (racks, lane C: a frame's ladders and standing places, a sheet's top, a stair
+        // flight) brings the floors and the stair and ladder links the import gives a seeded thing of it.
+        if entry.get("building").is_none() {
+            if fields.contains_key(&F_SOLIDS)
+                || floored.contains(name)
+                || !admits(kind.as_str(), FLOOR, None)
+            {
+                continue;
+            }
+            let more = import_eden::placed::way_ops(entry, Ref::New(*name), floor, &mut next)
+                .map_err(|detail| replica::edit::Refused {
+                    op: Some(k),
+                    name: "edit.building-plan",
+                    detail: format!("{}: its ways could not be read: {detail}", plain(kind.as_str())),
+                })?;
+            if edit_len + added.len() + more.len() > replica::edit::OPS_MOST {
+                return Err(replica::edit::Refused {
+                    op: Some(k),
+                    name: "edit.too-many-operations",
+                    detail: format!(
+                        "{} brings {} parts (its floors and their ways), which takes this batch over {}: place fewer in one batch",
+                        plain(kind.as_str()),
+                        more.len(),
+                        replica::edit::OPS_MOST
+                    ),
+                });
+            }
+            added.extend(more);
+            continue;
+        }
         if fields.contains_key(&F_SOLIDS)
             || floored.contains(name)
             || !admits(kind.as_str(), FLOOR, None)
@@ -272,7 +302,7 @@ pub fn ids_most(entries: &Json) -> BTreeMap<String, u64> {
                 .get("links")
                 .and_then(Json::obj)
                 .is_some_and(|l| !l.is_empty());
-            let parts = import_eden::placed::ids_most(e);
+            let parts = import_eden::placed::ids_most(e).or_else(|| import_eden::placed::way_ids_most(e));
             match (parts, joins) {
                 (None, false) => None,
                 (p, j) => Some((k.clone(), p.unwrap_or(0) + if j { bay_slots } else { 0 })),
