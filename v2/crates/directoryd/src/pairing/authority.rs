@@ -798,20 +798,28 @@ impl Pairing {
             self.owe(None);
         }
         for world in &owed.worlds {
-            let written = match self.authority(Some(world)) {
-                Ok(Some(a)) => {
-                    let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
-                    self.publish_world(&db, &a).is_ok() && a.fresh
-                }
-                Ok(None) | Err("world-unplaced") => true,
-                Err(_) => false,
-            };
-            if !written {
-                self.owe(Some(world));
-            }
+            self.publish_placed(world);
         }
         let owed = self.owed.lock().unwrap_or_else(|e| e.into_inner());
         owed.full || !owed.worlds.is_empty()
+    }
+
+    /// One world's files, from its owner read now (before the pairing store is locked), or owed to the copier when
+    /// the owner cannot be had fresh. Also what the directory's own create calls once its world is placed (27 Nov):
+    /// a new world's tokens file is the fork's, with no creator marker, so its gateway (`--creator-authority-required`)
+    /// refused its creator's page God Mode until the directory next started or the creator's agent paired there.
+    pub fn publish_placed(&self, world: &str) {
+        let written = match self.authority(Some(world)) {
+            Ok(Some(a)) => {
+                let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+                self.publish_world(&db, &a).is_ok() && a.fresh
+            }
+            Ok(None) | Err("world-unplaced") => true,
+            Err(_) => false,
+        };
+        if !written {
+            self.owe(Some(world));
+        }
     }
 
     // A registry upgrade must preserve an already-delivered legacy token, never assign it to every world.
