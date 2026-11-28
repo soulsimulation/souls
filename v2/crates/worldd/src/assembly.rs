@@ -71,9 +71,10 @@
 //!   way takes it there but through a frame or a beam. So when the straight set-in is not admitted, a put of a resting
 //!   part tries the feed: the crew stands in line beside the bay, the part pointing at its slot; the set-in first
 //!   raises it straight up to the slot's height, then slides it level to the slot along its track, over the top of
-//!   what it will rest on. Both legs are swept against the ground's fixed geometry at the part's own height
-//!   (`sim::activity::carry::node_way`: touching the top of a bearer is not meeting it), so a fed part passes through
-//!   nothing. A carrier behind the part walks beside it as on any set-in. A carrier whose hold the slide takes out of
+//!   what it will rest on. Both legs are swept at the part's own height against the ground's fixed geometry and
+//!   every other part seated in the bay, each by its kind's bounds (a beam, too low to be cut out of a walker's ground,
+//!   is still met: `crate::engine`, `sim::activity::carry::node_way`; touching the top of a bearer is not meeting
+//!   it), so a fed part passes through nothing. A carrier behind the part walks beside it as on any set-in. A carrier whose hold the slide takes out of
 //!   its reach (the one nearest the bay: the part goes on over the beam, it cannot follow) **lets go there**, which is
 //!   admitted only when from then on the part rests on a fixed part under it and another carrier holds it to the end:
 //!   it is held, or borne and held, at every sample. Refused, the put says why and where it would be fed from
@@ -663,6 +664,8 @@ pub struct Feed<'a> {
     pub clear: &'a dyn Fn((Vec3, Quat), (Vec3, Quat)) -> R<()>,
     /// Whether the part, its node there, rests on a fixed part under it.
     pub bears: &'a dyn Fn((Vec3, Quat)) -> bool,
+    /// Whether a carrier may walk the straight way beside the part: ground it stands on, through no part of the bay.
+    pub walk: &'a dyn Fn(Id, Vec3, Vec3) -> bool,
 }
 
 /// A fed set-in, admitted: its turn (the node raised, and how long that takes), how long its slide takes, who walks
@@ -684,15 +687,10 @@ const FEED_COS: i128 = 966;
 
 /// The feed of a part from its crew's node at `from` to `to` (see the module's notes): raised straight up to `to`'s
 /// height, then slid level. Each leg swept by `feed.clear`; every carrier reaches its hold through the rise; on the
-/// slide each stands within reach, or walks beside the part (`walkable`), or lets go where its reach ends, the part
+/// slide each stands within reach, or walks beside the part (`feed.walk`), or lets go where its reach ends, the part
 /// borne from then on (`feed.bears`) and another carrier holding it to the end. Else refused by name, saying why.
-pub fn fed(
-    carriers: &[Carrier],
-    from: (Vec3, Quat),
-    to: (Vec3, Quat),
-    feed: &Feed,
-    walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
-) -> R<Fed> {
+pub fn fed(carriers: &[Carrier], from: (Vec3, Quat), to: (Vec3, Quat), feed: &Feed) -> R<Fed> {
+    let walkable = feed.walk;
     let (dx, dz) = (to.0.x - from.0.x, to.0.z - from.0.z);
     let far = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
     if far > i128::from(feed.most) {
@@ -1502,7 +1500,7 @@ impl Assembly {
         let mut feeding = None;
         let mut walks = match (straight, feed.filter(|_| rests)) {
             (Ok(w), _) => w,
-            (Err(mut r), Some(feed)) => match fed(carriers, from, end, feed, walkable) {
+            (Err(mut r), Some(feed)) => match fed(carriers, from, end, feed) {
                 Ok(f) => {
                     let w = f.walks.clone();
                     feeding = Some(f);
@@ -1982,8 +1980,9 @@ mod tests {
             place: 1_082_000,
             clear: &clear,
             bears: &borne,
+            walk: &ground,
         };
-        let f = fed(&crew, from, to, &feed, &ground).expect("fed");
+        let f = fed(&crew, from, to, &feed).expect("fed");
         assert_eq!(f.via, (Vec3::new(2_200_000, 1_946_000, 0), Quat::IDENTITY));
         assert_eq!((f.rise, f.slide), (2_250_000, 5_500_000));
         assert_eq!(f.walks.iter().map(|w| w.body).collect::<Vec<_>>(), [id(1)]);
@@ -2000,11 +1999,15 @@ mod tests {
             bears: &|_| false,
             ..Feed { ..feed }
         };
-        let r = fed(&crew, from, to, &bare, &ground).expect_err("unborne");
+        let r = fed(&crew, from, to, &bare).expect_err("unborne");
         assert_eq!(r.name, "part.feed-unborne");
         assert!(r.detail.contains(&show(id(2))), "{}", r.detail);
         // Nobody behind it: both by the bay.
-        let r = fed(&crew, from, to, &feed, &|_, _, _| false).expect_err("unheld");
+        let nowhere = Feed {
+            walk: &|_, _, _| false,
+            ..Feed { ..feed }
+        };
+        let r = fed(&crew, from, to, &nowhere).expect_err("unheld");
         assert_eq!(
             r.name, "part.feed-unborne",
             "the one behind would let go off the beam"
@@ -2015,25 +2018,19 @@ mod tests {
             ..Feed { ..feed }
         };
         assert_eq!(
-            fed(&crew, from, to, &shut, &ground)
-                .map_err(|r| r.name)
-                .err(),
+            fed(&crew, from, to, &shut).map_err(|r| r.name).err(),
             Some("part.way-blocked")
         );
         // Too far to slide, and held across its slot's line.
         let far = (Vec3::new(3_000_000, HEIGHT, 0), Quat::IDENTITY);
         let far_crew = [c(1, 4_082_000, 732_000), c(2, 1_918_000, -732_000)];
         assert_eq!(
-            fed(&far_crew, far, to, &feed, &ground)
-                .map_err(|r| r.name)
-                .err(),
+            fed(&far_crew, far, to, &feed).map_err(|r| r.name).err(),
             Some("part.out-of-reach")
         );
         let across = (to.0, Quat::from_yaw_mdeg(90_000).unwrap());
         assert_eq!(
-            fed(&crew, from, across, &feed, &ground)
-                .map_err(|r| r.name)
-                .err(),
+            fed(&crew, from, across, &feed).map_err(|r| r.name).err(),
             Some("part.feed-turned")
         );
         // Where from: on the line of its length, its leading carrier 0.2 m clear of its end; with the east side shut,

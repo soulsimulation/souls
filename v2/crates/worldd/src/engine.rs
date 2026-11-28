@@ -691,6 +691,48 @@ fn way_is_ground(
     })
 }
 
+/// What a part fed into bay `bay` must not meet (FOR-FABLE 6): `ground`'s fixed geometry, and every other part
+/// seated in the bay by its kind's bounds as `loads` has them, each with the heights it spans above the ground. A
+/// beam or a joist is too low to be cut out of a walker's ground where it lies, so the ground's own geometry leaves
+/// it out; seated at knee or head height it is still there to a part slid past it. The crew's own node is not read.
+fn bay_fixed(
+    tree: &Tree,
+    loads: &BTreeMap<String, Load>,
+    ground: Id,
+    bay: Id,
+    but: Id,
+) -> Option<Fixed> {
+    let fixed = Fixed::of(tree, ground).ok()?;
+    let (mut quads, mut heights) = (fixed.quads, fixed.heights);
+    let (bh, gh) = (tree.handle(bay)?, tree.handle(ground)?);
+    for &c in tree.children(bh)?.iter() {
+        let n = tree.node(c)?;
+        if n.id() == but {
+            continue;
+        }
+        let Some(l) = loads.get(plain(n.kind().as_str())) else {
+            continue;
+        };
+        let x = sim::ground::scene::xform_to(tree, c, gh).ok()?;
+        let (m, h) = (l.middle, l.half);
+        let corner = |sx: i64, sz: i64| {
+            x.point(Vec3::new(m.x + sx * h.x, m.y, m.z + sz * h.z))
+                .ok()
+                .map(|p| [p.x, p.z])
+        };
+        let q = [
+            corner(1, 1)?,
+            corner(1, -1)?,
+            corner(-1, -1)?,
+            corner(-1, 1)?,
+        ];
+        let y = x.point(m).ok()?.y;
+        quads.push(q);
+        heights.push([y - h.y, y + h.y]);
+    }
+    Some(Fixed::with_heights(quads, heights))
+}
+
 /// How far apart two carriers stand along the ground, µm.
 fn apart(f: Vec3, k: Vec3) -> i64 {
     let (dx, dz) = (i128::from(f.x - k.x), i128::from(f.z - k.z));
@@ -1453,7 +1495,9 @@ impl Engine {
                     let floor = from.0.y - load.carried;
                     let fixed = std::cell::OnceCell::new();
                     let swept = tree.frozen();
-                    let geometry = || fixed.get_or_init(|| Fixed::of(&swept, ground).ok());
+                    let loads = &self.loads;
+                    let geometry =
+                        || fixed.get_or_init(|| bay_fixed(&swept, loads, ground, to, activity));
                     let clear = |a: (Vec3, replica::pose::Quat), b: (Vec3, replica::pose::Quat)| {
                         match geometry() {
                             Some(fx) => sim::activity::carry::node_way(fx, &load, floor, a, b),
@@ -1465,12 +1509,35 @@ impl Engine {
                             sim::activity::carry::node_bears(fx, &load, floor, at).unwrap_or(false)
                         })
                     };
+                    // A carrier walks beside a fed part over ground, and through no part of the bay at a body's height.
+                    let walk = |body: Id, a: Vec3, b: Vec3| {
+                        walkable(body, a, b)
+                            && geometry().as_ref().is_some_and(|fx| {
+                                let r = sim::ground::HUMAN_RADIUS * 1000;
+                                let n = (apart(a, b) / WALK_STEP).max(1);
+                                (0..=n).all(|k| {
+                                    let at = |u: i64, v: i64| {
+                                        u + (i128::from(v - u) * i128::from(k) / i128::from(n))
+                                            as i64
+                                    };
+                                    let (x, z) = (at(a.x, b.x), at(a.z, b.z));
+                                    let q = [
+                                        [x - r, z - r],
+                                        [x + r, z - r],
+                                        [x + r, z + r],
+                                        [x - r, z + r],
+                                    ];
+                                    fx.hit(&q).is_none()
+                                })
+                            })
+                    };
                     let feed = crate::assembly::Feed {
                         most: 2 * load.half_length + crate::assembly::PUT_REACH,
                         half_length: load.half_length,
                         place: load.places()[1],
                         clear: &clear,
                         bears: &bears,
+                        walk: &walk,
                     };
                     let (effects, walks) = asm.put(
                         &mut tree,

@@ -1214,7 +1214,12 @@ mod each_step {
         ];
         let fixed = Fixed::with_heights(vec![beam], vec![[1_800_000, 1_902_000]]);
         let half = load.held_half().unwrap().y;
-        let at = |x: i64, low: i64| (Vec3::new(x, low + half, 0), Quat::IDENTITY);
+        let at = |x: i64, low: i64| {
+            (
+                replica::pose::Vec3::new(x, low + half, 0),
+                replica::pose::Quat::IDENTITY,
+            )
+        };
         let (out, top) = (2_200_000, 1_902_000);
         assert!(node_way(&fixed, &load, 0, at(out, 1_005_500), at(out, top)).is_ok());
         assert!(node_way(&fixed, &load, 0, at(out, top), at(0, top)).is_ok());
