@@ -13,6 +13,7 @@ import {provenCases} from '../../entry/prove.mjs';
 import {chunkOf,TICK_US} from '../../../apps/web/src/v2-engine/takes.ts';
 import {TakePeople} from '../../../mars/viewer/app/engine-view/take-replay.ts';
 import {idPhase} from '../../../mars/viewer/app/engine-view/activity-poses.ts';
+import {WorldIdleLife} from '../../../apps/web/src/WorldIdleLife.ts';
 
 const entry=JSON.parse(await readFile(new URL('../../../content/kinds/hall/lecture.json',import.meta.url),'utf8'));
 const rigDir=process.env.HUMAN_RIG_DIR??fileURLToPath(new URL('../../../mars/viewer/public/modular/environment/',import.meta.url));
@@ -93,28 +94,29 @@ function storyReturnTake(id,fromTick=1000*1e6/TICK_US,ticks=120){
     standing:[{at:at(0),heading:-Math.PI/2,from:-Math.PI/2}],samples:[{at:at(0),p},{at:at(6),p}],
     gestures:[{start:at(.8),end:at(STORY_END),activity:'tell-story'}]}],fromTick,{rulesVersion:'story-return/1',datetime:null},ticks).take;
 }
-function submittedArmSkin(views,id){
+function submittedSkin(views,id){
   const rows=[],root=views.bodyObject(id);root.updateMatrixWorld(true);
   let draws=0;
   root.traverse(mesh=>{
     if(!mesh.isSkinnedMesh||!mesh.userData.bodyDraw)return;
     assert(mesh.visible,'the measured production body is submitted');draws++;
+    // A merged production body has one material; groups cannot silently hide a mixed-weight witness.
+    assert(!Array.isArray(mesh.material)&&mesh.material.visible&&mesh.material.opacity>0&&mesh.material.colorWrite,'the full merged draw has one visible material');
     const geometry=mesh.geometry,index=geometry.index,si=geometry.attributes.skinIndex,sw=geometry.attributes.skinWeight;
     assert(index&&si&&sw,'production draw has indexed, attributed skin');
     const refs=new Set();for(let n=geometry.drawRange.start;n<Math.min(index.count,geometry.drawRange.start+geometry.drawRange.count);n++)refs.add(index.getX(n));
     for(const i of refs){
       let k=0;for(let n=1;n<4;n++)if(sw.getComponent(i,n)>sw.getComponent(i,k))k=n;
       const bone=mesh.skeleton.bones[si.getComponent(i,k)].name;
-      if(!/^(LowerArm|Wrist|Index|Middle|Ring|Pinky|Thumb)/.test(bone))continue;
       rows.push({index:i,bone,p:mesh.getVertexPosition(i,new THREE.Vector3()).applyMatrix4(mesh.matrixWorld).toArray()});
     }
   });
   assert.equal(draws,1,'measure the actual merged production bodyDraw');
-  for(const side of ['L','R'])assert(rows.filter(p=>p.bone.endsWith(side)).length>100,'both full hands/forearms have nonempty submitted skin');
+  for(const side of ['L','R'])assert(rows.filter(p=>/^(LowerArm|Wrist|Index|Middle|Ring|Pinky|Thumb)/.test(p.bone)&&p.bone.endsWith(side)).length>100,'both full hands/forearms have nonempty submitted skin');
   return rows;
 }
 
-test('immutable story return keeps complete submitted hands and forearms outside the unchanged top',async t=>{
+test('immutable story return keeps all submitted body skin outside the unchanged top',async t=>{
   setHumanGround(()=>0);
   try{for(const name of ['casual','punk','woman'])await t.test(name,async()=>{
     const id='synthetic-story-return-'+name,source=await template(name),take=storyReturnTake(id),people=new TakePeople(take);people.setTemplates([source]);
@@ -122,7 +124,7 @@ test('immutable story return keeps complete submitted hands and forearms outside
     const clockEnd=300/23*100+STORY_END_PHASE/.23-idPhase(id)*7;
     let sampled;const set=people.humans.setFrame.bind(people.humans);people.humans.setFrame=(samples,...args)=>{sampled=samples[0];return set(samples,...args);};
     let maxInside=0,worst=null,lengths;
-    const skinAt=(player,age,offset=0)=>{player.show(STORY_END+age-offset,clockEnd+age);return submittedArmSkin(player.humans,id);};
+    const skinAt=(player,age,offset=0)=>{player.show(STORY_END+age-offset,clockEnd+age);return submittedSkin(player.humans,id);};
     try{for(const age of [0,...Array.from({length:18},(_,i)=>(i+1)*.02),.35]){
       people.show(STORY_END+age,clockEnd+age);
       assert.equal(sampled.activity,'idle');assert.equal(sampled.prevActivity,'tell-story');
@@ -135,7 +137,7 @@ test('immutable story return keeps complete submitted hands and forearms outside
       });
       // Translation tracks are Float32;1micrometre covers accumulated roundoff, not anatomical stretching.
       if(!lengths)lengths=segments;else segments.forEach((length,i)=>assert(Math.abs(length-lengths[i])<1e-6,'fixed anatomical upper/forearm lengths are preserved '+JSON.stringify({age,i,length,before:lengths[i],delta:length-lengths[i]} )));
-      const skin=submittedArmSkin(people.humans,id),hits=skin.filter(v=>inside([-v.p[0],v.p[1],4-v.p[2]],entry.looks.shape.shapes[3]));
+      const skin=submittedSkin(people.humans,id),hits=skin.filter(v=>inside([-v.p[0],v.p[1],4-v.p[2]],entry.looks.shape.shapes[3]));
       if(hits.length>maxInside){maxInside=hits.length;worst={age,point:hits[0]};}
     }
     for(const age of [.12,.18,.2,.34]){
@@ -144,7 +146,23 @@ test('immutable story return keeps complete submitted hands and forearms outside
     }
     const chunks=[storyReturnTake(id,20000,95),storyReturnTake(id,20095,25)],adjacent=new TakePeople(chunks[0]);adjacent.setTemplates([source]);adjacent.setWaterHistory(chunks);
     try{adjacent.show(4.7,clockEnd-.1);adjacent.setTake(chunks[1]);adjacent.setWaterHistory(chunks);assert(separation(skinAt(people,.2),skinAt(adjacent,.2,4.75))<1e-8,'adjacent chunks retain the same immutable palm origin');}finally{adjacent.dispose();}
-    t.diagnostic(JSON.stringify({name,maxInside,worst}));assert.equal(maxInside,0,'every complete story-return hand/forearm draw clears the unchanged tabletop');
+    const idle=new WorldIdleLife();let overlayMaxInside=0,overlayWorst=null;
+    // The real page applies this separate accumulated clock after posing. Warm it from29s in20ms
+    // steps (one second before the boundary), then inspect the complete return before restore.
+    const peers=[[-1.8,0,.02],[-1,0,.02],[1,0,.02],[1.8,0,.02]].map((p,i)=>({id:'synthetic-audience-'+i,p,yaw:Math.PI/2,activity:'sit',speaking:false,root:null}));
+    for(let n=-50;n<=18;n++){
+      const age=n*.02;people.show(STORY_END+age,clockEnd+age);
+      const root=people.humans.bodyObject(id),before=submittedSkin(people.humans,id);
+      idle.apply([{id:'synthetic-story-presenter',root,p:sampled.p,yaw:sampled.yaw,activity:sampled.activity,speaking:false,attention:[]},...peers],30+age,.02,false);
+      try{if(age>=0){
+        assert.deepEqual(root.position.toArray(),sampled.p,'the final page overlay preserves the native root');
+        const skin=submittedSkin(people.humans,id),hits=skin.filter(v=>inside([-v.p[0],v.p[1],4-v.p[2]],entry.looks.shape.shapes[3]));
+        if(hits.length>overlayMaxInside){overlayMaxInside=hits.length;overlayWorst={age,point:hits[0]};}
+        for(const p of skin.filter(v=>/^(Foot|Toe)/.test(v.bone)))assert(p.p[1]>=.099,'the complete final shoe skin stays above its100mm support');
+      }}finally{idle.restore();}
+      assert(separation(before,submittedSkin(people.humans,id))<1e-8,'the actual overlay restore preserves all submitted skin');
+    }
+    t.diagnostic(JSON.stringify({name,maxInside,worst,overlayMaxInside,overlayWorst}));assert.equal(maxInside,0,'every story-return body draw clears the unchanged tabletop');assert.equal(overlayMaxInside,0,'the final draw after idle life also clears the unchanged tabletop');
     }finally{people.dispose();}
   });}finally{setHumanGround(null);}
 });
