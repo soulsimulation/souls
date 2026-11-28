@@ -2130,11 +2130,8 @@ impl Bodies {
                 // #5254: a walk to a point that ended short of it is sent again while bodies may be moving off its way,
                 // [`WALK_AGAIN`] times (some three seconds); then it answers how far short it stopped, and why.
                 // #5254: one that came to the place it was granted off the point it was sent to is done there and says
-                // so (`goal_moved`): that point in a doorway's or a stair's clearance, moved only as far as clears the
-                // passage itself, however far that is; or off its ground, nearer than a walker's goal tolerance. Never
-                // one a crowd held off (A2-4, A2-5: done as near as the crowd allows), nor one granted a place outside
-                // the passage's clearance (the full rings' or an overflow point): the spot tables admit a place in the
-                // clearance only as one that clears the passage itself, nearest first.
+                // so (`goal_moved`): that point in a doorway's or a stair's clearance, moved out to [`sim::spots::CLEAR`]
+                // off the passage (A3), however far that is; or off its ground, nearer than a walker's goal tolerance.
                 if how.is_ok()
                     && !self.short.contains(&id)
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
@@ -2145,10 +2142,9 @@ impl Bodies {
                     && there <= 50
                 {
                     match self.town.passage_at(t, p) {
-                        Some(why) if self.town.passage_at(t, g).is_some() => {
+                        Some(why) => {
                             self.goal_moved.insert(id, (asked, Some(why)));
                         }
-                        Some(_) => {}
                         None if asked <= STOPPED_SHORT_MM => {
                             self.goal_moved.insert(id, (asked, None));
                         }

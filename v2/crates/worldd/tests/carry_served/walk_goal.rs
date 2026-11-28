@@ -1,6 +1,6 @@
 //! #5254, walks that stop short of their goal, on a served world by Souls' own intents through a real gateway: a goal
-//! in a doorway is moved off only as far as clears the doorway itself (the body's radius and margin, not the 0.7 m a
-//! walker is kept from a passage) and the walk's end says how far and which passage (`walk.goal-moved`); two crews
+//! in a doorway is moved out to the 0.7 m a walker is kept from a passage (A3: no standing place narrows a doorway for
+//! others) and the walk's end says how far and which passage (`walk.goal-moved`); two crews
 //! carrying past each other both arrive within 0.4 m of their goals; on the Mars camp, a crew walks from the rack pile
 //! to beside the deck bay and arrives within 0.4 m.
 
@@ -67,11 +67,10 @@ fn gap(a: Vec3, b: Vec3) -> i64 {
 }
 
 /// A Soul sent to the middle of the hall's front doorway, on the open ground's side of its wall (N2's test world): the
-/// walk is done where it stands clear of the doorway itself, nearer than the 0.7 m a walker is kept from a passage, and
-/// its end says `walk.goal-moved`, how far (field 7, the gap it stands from the point it was sent to) and the doorway
+/// walk is done where it stands at or beyond the 0.7 m a walker is kept from a passage, and its end says `walk.goal-moved`, how far (field 7, the gap it stands from the point it was sent to) and the doorway
 /// it cleared (field 10).
 #[tokio::test(flavor = "multi_thread")]
-async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
+async fn walk_goal_a_goal_in_a_doorway_is_moved_out_to_a_walkers_clearance() {
     let d = scratch("wgdoor");
     let facts = world(&d);
     let socket = d.join("s");
@@ -107,14 +106,13 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
         (mm - off / 1000).abs() <= 2,
         "field 7 ({mm} mm) is how far it stands from its goal ({off} µm)"
     );
-    // Clear of the doorway itself (at least the body's radius and margin, 0.34 m, off the goal in it), yet still within
-    // the 0.7 m a walker is kept from it: moved only as far as needed, never the full clearance.
-    assert!(mm >= 340, "moved clear of the doorway itself: {mm} mm");
+    // At or beyond the 0.7 m a walker is kept from the doorway (A3).
+    assert!(mm >= 700, "moved out to a walker's clearance: {mm} mm");
     let end = stood(&dir)[&body];
     let town = town_of(&facts);
     assert!(
-        town.passage_at(ground, end).is_some(),
-        "it stands within the 0.7 m a walker is kept from the doorway, not moved the full clearance: {end:?}"
+        town.passage_at(ground, end).is_none(),
+        "it stands clear of the doorway's 0.7 m: {end:?}"
     );
     assert!(
         town.passage_at(ground, goal).is_some(),
@@ -129,10 +127,8 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
         f.contains_key(&9),
         "the thing the doorway belongs to: {f:?}"
     );
-    // Two more sent to the same goal at once, its nearest place held. An end that says it was moved off the doorway
-    // says how far it truly stands from the goal, a body's room from the others, in the doorway's clearance where
-    // only that move puts a body; one the others keep off its goal says so (`walk.stopped-short`, or A2-4's done as
-    // near as the crowd allows), never moved and never stuck.
+    // Two more sent to the same goal at once, its nearest place held: each is moved off the doorway, says how far it
+    // truly stands from the goal, at or beyond a walker's clearance, a body's room from the others; never stuck.
     let mut more = Vec::new();
     for k in 1..3 {
         more.push(Soul::connect(&url, ids[k], lineage, &tokens[k]).await);
@@ -151,29 +147,22 @@ async fn walk_goal_a_goal_in_a_doorway_is_moved_off_only_as_far_as_clears_it() {
             "another to the doorway: {got:?}, {} mm off; its end {f:?}",
             off / 1000
         );
-        match word.as_deref() {
-            Some("walk.goal-moved") => {
-                assert!(got.is_ok(), "done: {got:?}");
-                let Some(Value::Uint(mm)) = f.get(&7) else {
-                    panic!("how far, field 7: {f:?}")
-                };
-                assert!(
-                    (i64::try_from(*mm).unwrap() - off / 1000).abs() <= 2,
-                    "field 7 is how far it stands"
-                );
-                assert!(
-                    town.passage_at(ground, end).is_some(),
-                    "moved off the doorway only as far as needed: {end:?}"
-                );
-            }
-            Some("done.as-near-as-the-crowd-allows") => assert!(got.is_ok(), "done: {got:?}"),
-            Some("walk.stopped-short") => {
-                assert_eq!(got, Err("walk.stopped-short".to_owned()), "refused by name")
-            }
-            other => panic!(
-                "a walk to a held doorway goal ends moved, stopped short or held off by the crowd: {other:?}"
-            ),
-        }
+        assert_eq!(
+            word.as_deref(),
+            Some("walk.goal-moved"),
+            "its end's word: {f:?}"
+        );
+        assert!(got.is_ok(), "done: {got:?}");
+        let Some(Value::Uint(mm)) = f.get(&7) else {
+            panic!("how far, field 7: {f:?}")
+        };
+        let mm = i64::try_from(*mm).unwrap();
+        assert!((mm - off / 1000).abs() <= 2, "field 7 is how far it stands");
+        assert!(mm >= 700, "moved out to a walker's clearance: {mm} mm");
+        assert!(
+            town.passage_at(ground, end).is_none(),
+            "it stands clear of the doorway's 0.7 m: {end:?}"
+        );
     }
     // No two bodies stand within a body's room of each other (0.56 m: two radii).
     let at = stood(&dir);
