@@ -1,6 +1,6 @@
-// Racks V: a Soul climbs a built bay's frame by the name its own copy gives the place. N2's test world with the camp's
-// deck bay (`content/kinds/construction`: the bay, its two 12 ft frames and its two 1.8 m beams) at the site, served by
-// worldd, gatewayd and directoryd; five Souls paired and joined through the gateway. Four build the frames and the high
+// Racks V: a Soul climbs a built bay's frame by the name its own copy gives the place. N2's test world with worldd's
+// deck test bay (`sim/src/structure/fixtures`: the bay, its two frames, its four beams) at the site, served by worldd,
+// gatewayd and directoryd; five Souls paired and joined through the gateway. Four build the frames and the four
 // beams with the thin command's `carry` and `part` steps; the fifth reads `object <frame>`, finds the climb to the
 // frame's outer standing place there, and sends that offer by its name alone (`object <frame> climb to <name>`): its
 // walk goes to the standing place's node with the place's own point, and the body ends on the place, 1.8 m up. Run from
@@ -18,7 +18,7 @@ import { request } from '../src/daemon/client.mjs';
 import { runtimeOf } from '../src/home/home.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const content = resolve(v2, '../content/kinds');
+const content = resolve(v2, '../content/kinds'), fixtures = join(v2, 'crates/sim/src/structure/fixtures');
 const scratch = process.env.CLIMB_SCRATCH ?? resolve(v2, '../.local/served-climb');
 mkdirSync(scratch, { recursive: true });
 const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -29,17 +29,17 @@ const CLI = join(v2, 'client/src/cli/souls.mjs'), DAEMON = join(v2, 'client/src/
 // testworld's site (`testworld::SITE_X`, `YARD_Z`), mm.
 const SITE_X = 65_000, YARD_Z = -24_000;
 
-/** N2's facts with the camp's deck bay at the site: the bay with its slots, its two frames standing loose on their
- *  slots' places and its two 1.8 m beams lying 1 m outside their columns (as worldd's deck test lays them). */
+/** N2's facts with the deck bay at the site, as worldd's deck test (`Bay`) lays it: the bay with its slots, its two
+ *  frames standing loose on their slots' places, its 0.5 m beams lying 0.5 m outside their columns, the 1.8 m ones 1 m. */
 function bayFacts(text) {
-  const f = JSON.parse(text), bay = JSON.parse(readFileSync(join(content, 'construction/deck_bay.json'), 'utf8'));
-  const refs = [['testworld-deck-bay@1', 'mars:deck_bay'], ['testworld-frame-12ft@1', 'mars:rack_upright_12ft'], ['testworld-deck-beam@1', 'mars:deck_beam']];
+  const f = JSON.parse(text), bay = JSON.parse(readFileSync(join(fixtures, 'test_deck_bay.json'), 'utf8'));
+  const refs = [['testworld-test-deck-bay@1', 'mars:test_deck_bay'], ['testworld-test-deck-frame@1', 'mars:test_deck_frame'], ['testworld-test-deck-beam@1', 'mars:test_deck_beam']];
   for (const [ref, name] of refs) f.kinds.push({ ref, hash: hash(`souls/testworld/${ref}`), name, form: 'point' });
   const slots = Object.values(bay.slots).map((s, k) => ({ n: k + 1, at: s.at_mm, yaw: 0, capacity: 1 }));
   const thing = (id, r, [x, z]) => ({ id, def: refs[r][0], ref: refs[r][0], parent: null, pose: [SITE_X + x, 0, YARD_Z + z, 0], scale_ppm: 1_000_000, name: id });
   f.things.push({ ...thing('bay', 0, [0, 0]), slots },
     thing('frame-1', 1, [0, -1_448]), thing('frame-2', 1, [0, 1_448]),
-    thing('beam-high-l', 2, [-1_572, 0]), thing('beam-high-r', 2, [1_572, 0]));
+    thing('beam-low-l', 2, [-1_072, 0]), thing('beam-low-r', 2, [1_072, 0]), thing('beam-high-l', 2, [-1_572, 0]), thing('beam-high-r', 2, [1_572, 0]));
   return JSON.stringify(f);
 }
 
@@ -69,7 +69,7 @@ test('served: after the bay is built, a Soul climbs to the standing place its ow
   const facts = join(base, 'bay.facts.json'), entries = join(base, 'entries');
   writeFileSync(facts, bayFacts(readFileSync(join(base, 'testworld-s1-t0.facts.json'), 'utf8')));
   mkdirSync(entries);
-  for (const f of readdirSync(join(content, 'construction')).filter((n) => n.endsWith('.json'))) copyFileSync(join(content, 'construction', f), join(entries, f));
+  for (const d of [join(content, 'construction'), fixtures]) for (const f of readdirSync(d).filter((n) => n.endsWith('.json'))) copyFileSync(join(d, f), join(entries, f));
   copyFileSync(join(content, 'body/humanoid.json'), join(entries, 'humanoid.json'));
   await run(bin('worldd'), ['seed', '--facts', facts, '--dir', 'world', '--souls', '0', '--at', `${(SITE_X - 4_000) / 1000},${(YARD_Z - 5_000) / 1000}`, '--entries', entries]);
   await run(bin('worldd'), ['serve', '--dir', 'world'], /listening /);
@@ -103,7 +103,7 @@ test('served: after the bay is built, a Soul climbs to the standing place its ow
   // A thing's public name reaches the copy in the background after a find asks for it.
   const idOf = async (s, name) => until(async () => (await cli(s, 'find', name)).found?.find((f) => f.name === name)?.id, 30_000, `find ${name}`);
   const ids = {};
-  for (const n of ['bay', 'frame-1', 'frame-2', 'beam-high-l', 'beam-high-r']) ids[n] = await idOf(a, n);
+  for (const n of ['bay', 'frame-1', 'frame-2', 'beam-low-l', 'beam-low-r', 'beam-high-l', 'beam-high-r']) ids[n] = await idOf(a, n);
   const ground = (await cli(a, 'query', JSON.stringify([{ kind: 'eden:ground', limit: 1 }]))).answers[0].found[0].id;
   const receipt = async (s, sequence) => until(async () => { const r = await request(s.rt.socket, { op: 'receipt', sequence }); const last = r?.receipt?.answers?.at(-1); return last && last.answer !== 'accepted' ? last : null; }, 120_000, `receipt ${sequence}`);
   const walk = async (pairs) => {
@@ -127,13 +127,14 @@ test('served: after the bay is built, a Soul climbs to the standing place its ow
     ok(await cli(a, 'carry', 'leave', hold), 'the front lets go');
     holds.push([holder, hold]);
   }
-  // The 1.8 m beams: Souls a and d at a beam's ends, carried in to 0.5 m outside its slot and put, joining both frames.
+  // The beams: Souls a and d at a beam's ends, a 1.8 m one carried in to 0.5 m outside its slot, each put joining both frames.
   let beams = null;
-  for (const [beam, from, to, slot] of [['beam-high-l', -1_572, -1_072, 'beam_high_l'], ['beam-high-r', 1_572, 1_072, 'beam_high_r']]) {
+  for (const [beam, from, to, slot] of [['beam-low-l', -1_072, -1_072, 'beam_low_l'], ['beam-low-r', 1_072, 1_072, 'beam_low_r'],
+    ['beam-high-l', -1_572, -1_072, 'beam_high_l'], ['beam-high-r', 1_572, 1_072, 'beam_high_r']]) {
     await walk([[a, [from, -1_547]], [d, [from, 1_547]]]);
     beams ??= await crew(a, d);
     ok(await cli(a, 'part', 'take', beams, ids[beam]), `${beam} taken`);
-    await walk([[a, [to, -1_547]], [d, [to, 1_547]]]);
+    if (to !== from) await walk([[a, [to, -1_547]], [d, [to, 1_547]]]);
     ok(await cli(a, 'part', 'put', beams, ids.bay, slot), `${beam} in ${slot}`);
   }
   for (const [holder, hold] of holds) ok(await cli(holder, 'carry', 'leave', hold), 'a holder lets go');
