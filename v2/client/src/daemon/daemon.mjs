@@ -199,7 +199,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote, offerPlace } from '../converse/converse.mjs';
 import { KIND as GIVE_KIND, giveIntents } from '../give/give.mjs';
 import { activitiesIn, activityNamed, kindsListed, touchOf } from '../together/together.mjs';
-import { GO_MOST_MS, NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, workLines } from '../carry/carry.mjs';
+import { GO_MOST_MS, NEAR_WORDS, byName, carryIntents, crewNeeds, isCrew, crewOffered, crewsIn, loadOf, nextStep, offerNear, openCrewOffers, placer, pointOf, workLines } from '../carry/carry.mjs';
 import { MEMBER_EVENTS, activityCard, doingLines, memberNotes, nameIn, shownEvent, slotsCard } from '../together/members.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
@@ -1660,6 +1660,15 @@ function actsOf(words) {
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
     } else if (ID.test(w)) out.push({ verb: `${NS}:walk`, this: w });
+    // FOR-FABLE 14: `walk:<x>,<z>` (metres, x east and z south) walks to that point: the world stands the Soul on the
+    // ground there, or the floor there nearest its own level (down a ladder, `walk.no-ground-there` off any)
+    else if (/^walk:/.test(w) && pointOf(w.slice(5))) {
+      rows ??= rowsOf(copy);
+      // The open ground, else (a copy that holds no row of it) the node the Soul's body stands in.
+      const ground = groundIn(rows) ?? own().row?.parent ?? null;
+      if (!ground) throw Object.assign(new Error('no open ground in the copy yet: look first'), { code: 'walk-no-ground' });
+      out.push({ verb: `${NS}:walk`, this: ground, point: pointOf(w.slice(5)) });
+    }
     // #3178: `sit:<kind>` (sit:bench, sit:chair) is any free one of that kind where the Soul is, nearest it
     else if (/^sit:/.test(w) && by(w)) out.push(by(w));
     else if (k > 0 && ID.test(tail) && CARRIER.test(w.slice(0, k))) out.push({ verb: w.slice(0, k), this: tail, carrier: true });
@@ -2112,6 +2121,10 @@ async function answer(req, conn = null) {
         if (req.for !== undefined) serving.set(sequence, req.for);
         return closing({ ok: true, sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
       }
+      // FOR-FABLE 14: a walk to a point goes as parameter 1, [x, 0, z] µm on the open ground; the intent's parameters
+      // are its first act's, so only the first may be one (its fallbacks walk to things).
+      if (keep.slice(1).some((c) => c.point)) return closing({ ok: false, code: 'act-walk-point-first', sent: false, detail: 'walk:<x>,<z> goes first: a fallback walks to a thing (an id), not a point' }, null, { now: true });
+      if (keep[0].point) req.params = { ...(req.params ?? {}), 1: [keep[0].point[0], 0, keep[0].point[1]] };
       // 0.135 G1: a walk's `gait=walk|jog|run` goes as parameter 2, `gait:<name>`; the world refuses any other by name.
       const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
       if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }

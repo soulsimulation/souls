@@ -269,6 +269,15 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
         assert.equal(after.follows, before.follows + 1);
         assert.equal(proxy.scopeAnswers, scopesBefore + 1, 'one subsequent authoritative scope sync');
         console.log('successful join: held pre-birth reply crosses receipt; one later scope sync; linked-body Follow and grant');
+        // FOR-FABLE 14, the client's point walk end to end on N2's test world (its copy holds the open ground's row):
+        // `walk:<x>,<z>` goes as a walk on the open ground with the point, [x, 0, z] µm, and the world answers it; one 50
+        // km off any ground is refused by that name. A point walk is only an act's first.
+        client.stage = 'point-walk';
+        const far = await request(rt.socket, { op: 'act', acts: ['walk:50000,0'] });
+        assert.equal(far.ok, true, JSON.stringify(far));
+        const refused = await until(async () => (await request(rt.socket, { op: 'read' })).events?.find((e) => e.sequence === far.sequence && e.answer === 2));
+        assert.equal(refused.reason, 'walk.no-ground-there', JSON.stringify(refused));
+        assert.equal((await request(rt.socket, { op: 'act', acts: ['walk:1,2', 'walk:3,4'] })).code, 'act-walk-point-first');
       } else {
         await sleep(250);
         const after = await status();
