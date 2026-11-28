@@ -121,6 +121,24 @@ for (const mode of ['lost-context', 'missing-observer']) test(`finalization pres
   assert(readFileSync(join(paths.dir, 'command-meal-finalization-error.json'), 'utf8').includes(mode === 'lost-context' ? 'lost context' : 'collection missing'));
 });
 
+for (const mode of ['draw-rejected', 'incomplete', 'cleanup-failed']) test(`finalization retains receipts and payload even when final draw is ${mode}`, async () => {
+  const scratch = resolve(import.meta.dirname, '../../../.local'); mkdirSync(scratch, { recursive: true });
+  const paths = { dir: mkdtempSync(join(scratch, 'meal-draw-finalize-test-')) }, state = { rows: [{ words: ['receipt'], answer: { phase: 'done' } }], checkpoints: [], installed: true, drawInstalled: true, result: {} };
+  const calls = [], draw = { checkpoints: [], samples: ['retained'], failures: [], ...(mode === 'cleanup-failed' ? { cleanupError: 'owned hook changed' } : {}) };
+  mealFinalization({ evaluate: async fn => {
+    calls.push(fn.name); assert.deepEqual(JSON.parse(readFileSync(join(paths.dir, 'command-meal-sequence.json'))).rows, state.rows);
+    if (fn.name === 'mealDrawStop') { if (mode === 'draw-rejected') throw Error('draw context lost'); return draw; }
+    return { failures: [], messages: ['retained public payload'] };
+  } }, paths, state);
+  try {
+    const first = state.finalize(); assert.equal(state.finalize(), first); await assert.rejects(first);
+    assert.deepEqual(calls, ['mealDrawStop', 'mealBrowserStop']);
+    assert.deepEqual(JSON.parse(readFileSync(join(paths.dir, 'command-meal-public-payload.json'))).messages, ['retained public payload']);
+    if (mode !== 'draw-rejected') assert.deepEqual(JSON.parse(readFileSync(join(paths.dir, 'command-meal-final-draw.json'))).samples, ['retained']);
+    assert(readFileSync(join(paths.dir, 'command-meal-draw-finalization-error.json'), 'utf8'));
+  } finally { rmSync(paths.dir, { recursive: true }); }
+});
+
 test('public world discovery rejects an unrelated or duplicate fixture and never leaves its origin', async () => {
   const original = globalThis.fetch;
   try {

@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { nativeCameraMode } from './camera-native-page.mjs';
 import { meal, foundId } from '../../playtest/meal/meal.mjs';
 import { requireConferenceRecipe, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator } from '../../playtest/conference/owned-seats.mjs';
+import { mealDrawInstall, mealDrawGoal, mealDrawCheckpoint, mealDrawStop } from './meal-final-draw.mjs';
 
 const states = new Map();
 // Private archive encoding only; delivered Worker objects and selected checkpoint spelling stay unchanged.
@@ -307,22 +308,45 @@ export function mealFinalization(page, paths, state) {
   };
   state.finalize = () => state.finalization ??= (async () => {
     state.persist(); // Receipts survive lost browser context or rejected collection.
+    let drawError;
+    if (state.drawInstalled) {
+      try {
+        const draw = await page.evaluate(mealDrawStop);
+        assert(draw, 'meal installed final-draw collection missing');
+        save(paths, 'command-meal-final-draw.json', draw);
+        assert(!draw.cleanupError && draw.failures.length === 0, 'meal final-draw observation/cleanup failed');
+        if (state.result) assert.deepEqual(draw.checkpoints.map(c => `${c.phase}:${c.soup}`), ['diner-held:2', 'seated:2', 'bitten:1', 'bitten:0', 'risen:0'], 'meal positive final-draw checkpoints incomplete');
+      } catch (error) { drawError = error; save(paths, 'command-meal-draw-finalization-error.json', { error: String(error) }); }
+    }
     try {
       const payload = await page.evaluate(mealBrowserStop);
       assert(payload || !state.installed, 'meal installed observer collection missing');
       if (payload) { save(paths, 'command-meal-public-payload.json', payload); assert.equal(payload.failures.length, 0, 'meal public payload observation failed'); }
+      if (drawError) throw drawError;
       return payload;
     } catch (error) { save(paths, 'command-meal-finalization-error.json', { error: String(error) }); throw error; }
   })();
 }
 
-export async function beforeNavigation({ paths, page }) {
+export async function beforeNavigation({ paths, page, base }) {
   const state = states.get(paths.dir); assert(state, 'meal preparation missing');
+  state.helperURL = new URL('/__proof/meal-final-draw.mjs', base).href;
+  state.oracleURL = new URL('/__proof/meal-oracle.mjs', base).href;
+  await page.route(state.helperURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: readFileSync(new URL('./meal-final-draw.mjs', import.meta.url), 'utf8') }));
+  await page.route(state.oracleURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: readFileSync(new URL('../../playtest/carry-contact/oracle.mjs', import.meta.url), 'utf8') }));
+  const entryBytes = readFileSync(new URL('../../../content/kinds/food/soup_bowl.json', import.meta.url));
+  state.bowlEntry = JSON.parse(entryBytes); state.bowlEntrySHA = createHash('sha256').update(entryBytes).digest('hex');
+  const response = r => { const url = new URL(r.url()); if (url.origin === new URL(base).origin && /\/people-kit-[^/]+\.js$/.test(url.pathname)) state.kitURL = r.url(); };
+  page.on('response', response);
   const identities = { bowl: mealNodeIdentity(state.bowl), bodies: state.seats.map(s => mealNodeIdentity(s.body)) };
   await page.addInitScript(mealBrowserInstall, { bowl: identities.bowl.worker, bodies: identities.bodies.map(i => i.worker), identities });
   state.installed = true;
   mealFinalization(page, paths, state);
-  return async () => { try { if (!page.isClosed()) await state.finalize(); } finally { state.persist(); states.delete(paths.dir); } };
+  return async () => {
+    page.off('response', response);
+    try { if (!page.isClosed()) await state.finalize(); }
+    finally { state.persist(); try { await page.unroute(state.helperURL); } finally { try { await page.unroute(state.oracleURL); } finally { states.delete(paths.dir); } } }
+  };
 }
 
 export default async function ({ page, paths, check, expectHttp, signal }) {
@@ -339,6 +363,11 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     state.bodyReadiness=await handle.jsonValue();await handle.dispose();save(paths,'command-meal-body-readiness.json',{wear:state.declaredBody,observed:state.bodyReadiness});
     check('meal-declared-body-and-default-control',!!state.bodyReadiness,state.bodyReadiness);
   }
+  assert(state.declaredBody && state.kitURL, 'meal actual-draw proof needs the declared body and loaded production people kit');
+  const drawInstallation = await page.evaluate(mealDrawInstall, { helperURL: state.helperURL, oracleURL: state.oracleURL, kitURL: state.kitURL,
+    soul: state.seats[2].soul, entry: state.bowlEntry, entrySHA: state.bowlEntrySHA,
+    bodyBinding: { hash: state.declaredBody.hash, resources: state.declaredBody.resources } });
+  state.drawInstalled = true; save(paths, 'command-meal-draw-installation.json', drawInstallation);
 
   const observe = async row => {
     signal.throwIfAborted();
@@ -350,13 +379,19 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     const prior = state.checkpoints.at(-1);
     assert(!prior || checkpoint.depicted.tick > prior.depicted.tick, 'meal depicted clock must advance between phases');
     state.checkpoints.push(checkpoint);
+    if (row.role === 'diner') {
+      await page.evaluate(mealDrawGoal, checkpoint);
+      const drawn = await page.waitForFunction(mealDrawCheckpoint, null, { timeout: 5000 });
+      checkpoint.finalDraw = await drawn.jsonValue(); await drawn.dispose();
+    } else checkpoint.finalDraw = { status: 'unsupported-default-body-control', hand: null };
     if (['seated', 'bitten', 'risen'].includes(row.phase)) await page.waitForTimeout(2000);
+    if (row.role === 'diner') await page.evaluate(mealDrawGoal, null);
     signal.throwIfAborted();
   };
   try {
     state.result = await meal({ seats: state.seats, report: { complete: false, steps: [] }, endpoint: 'empty-bowl-risen', observe });
     check('meal-same-bowl-payload', state.result.portionComplete === true && state.result.complete === false && state.checkpoints.length === 6,
-      'Ordinary consent/quantities plus raw and depicted metadata; visual shape/contact and creator acceptance remain unproved.');
+      'Ordinary consent/quantities plus same-bowl final-draw witnesses for the declared diner; unsupported default body, full contact/clearance and independent-agent acceptance remain unproved.');
   } catch (error) { state.failure = String(error.stack ?? error); throw error; }
   finally { await state.finalize(); }
 }

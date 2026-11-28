@@ -1,4 +1,4 @@
 ---
 type: internal
 ---
-Souls discover serving positions and confirm they are close enough before offering the same shared meal bowl.
+Meal rehearsals use public serving positions and record the drawn bowl, contents, hand and foot geometry.
