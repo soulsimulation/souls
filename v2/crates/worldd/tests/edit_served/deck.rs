@@ -1173,3 +1173,100 @@ fn deck_bay_a_soul_climbs_a_frame_to_its_1_8_m_standing_place_and_the_frame_stay
     k.ok(got, "the climb down ends on the ground");
     assert_eq!(body_on(&k.w, walker).0, g, "on the open ground");
 }
+
+/// Every motion sample written on body `body`'s node, in order: when, the node its frame is, its place there, its
+/// velocity and its support.
+fn samples_of(w: &Seeded, body: Id) -> Vec<(i64, Id, Vec3, Vec3, replica::pose::Support)> {
+    use replica::effects::{Body, Change};
+    let mut out = Vec::new();
+    for p in logged(w) {
+        for e in &p.effects {
+            if let Body::Changes(cs) = &e.body {
+                for c in cs {
+                    if let Change::Motion(h) = &c.change
+                        && h.node == body
+                    {
+                        out.push((
+                            h.at,
+                            h.pose.frame.node,
+                            h.pose.position,
+                            h.linear,
+                            h.pose.support,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// FOR-FABLE 8: a body walking up the stair flight (a track across its link) writes its place as it goes, as a walk
+/// does: a body row every tick it moves on the track, with the link it is on and how far along it, and motion samples
+/// on its node all the way up, so the page draws it moving up the flight.
+#[test]
+fn deck_bay_a_soul_walking_up_the_stair_writes_its_place_every_tick_on_the_flight() {
+    let mut k = Bay::serve("deck-rows", 5);
+    k.frame();
+    k.deck();
+    let (flight, decks) = (k.flight, k.decks);
+    let (fx, fz) = (STAIR_AT[0] - FLIGHT_OFF, STAIR_AT[1]);
+    k.walk(
+        &[(0, Bay::at(fx - 1_350, fz)), (1, Bay::at(fx + 1_350, fz))],
+        "Souls 1 and 2 to the flight's ends",
+    );
+    let c = k.crew(0, &[1]);
+    let got = k.act(0, "part:take", c, flight);
+    k.ok(got, "Souls 1 and 2 take the flight");
+    let got = k.put(0, c, "stair", Some(&[k.joists[0]]));
+    k.ok(got, "the flight in the stair slot, hooked onto j2");
+    k.leave(0, c);
+    k.leave(1, c);
+    k.walk(
+        &[(0, Bay::at(-5_000, -3_500)), (1, Bay::at(-6_000, -3_500))],
+        "Souls 1 and 2 step away",
+    );
+    k.walk(
+        &[(4, Bay::at(-4_500, STAIR_AT[1]))],
+        "Soul 5 to the flight's foot",
+    );
+    let walker = body_of(&k.w, k.w.souls[4]);
+    let (rows0, samples0) = (
+        body_ticks(&k.w, walker).len(),
+        samples_of(&k.w, walker).len(),
+    );
+    let to = BTreeMap::from([(1, Value::Array(vec![int(400_000), int(19_000), int(0)]))]);
+    k.hands[4].send("eden:walk", decks[0], to);
+    let got = socket_end(&mut k.hands[4].s);
+    k.ok(got, "Soul 5 up onto the first sheet");
+    let rows = body_ticks(&k.w, walker);
+    let samples = samples_of(&k.w, walker);
+    println!("the walk's body rows (tick, node, place):");
+    for r in &rows[rows0..] {
+        println!("  {} {} {:?}", r.0, show(r.1), r.2);
+    }
+    println!("the walk's motion samples (µs, node, place, velocity, support):");
+    for s in &samples[samples0..] {
+        println!("  {} {} {:?} {:?} {:?}", s.0, show(s.1), s.2, s.3, s.4);
+    }
+    // On the flight: the rows between its last on the ground at the foot and its first on the deck.
+    let walk = &rows[rows0..];
+    let first_deck = walk
+        .iter()
+        .position(|r| r.1 == decks[0])
+        .expect("a row on the deck");
+    let climb: Vec<_> = walk[..first_deck]
+        .iter()
+        .skip_while(|r| r.2.y == 0)
+        .collect();
+    println!("{} rows on the flight", climb.len());
+    assert!(
+        climb.len() >= 20,
+        "a row every tick on the flight: {}",
+        climb.len()
+    );
+    for w in climb.windows(2) {
+        assert_eq!(w[1].0, w[0].0 + 1, "one a tick: {w:?}");
+        assert!(w[1].2.y >= w[0].2.y, "rising: {w:?}");
+    }
+}
