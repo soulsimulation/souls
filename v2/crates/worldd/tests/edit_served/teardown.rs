@@ -523,6 +523,13 @@ impl Bay {
         self.leave(0, c);
         self.leave(1, c);
         assert_eq!(where_is(&self.w, self.flight).0, Some(self.w.ground), "the flight on the ground");
+        let (_, _, at) = where_is(&self.w, self.flight);
+        let o = Bay::at(0, 0);
+        println!(
+            "the flight let go at {} mm, {} mm from the bay's middle",
+            (at.x - o.x) / 1000,
+            (at.z - o.z) / 1000
+        );
         self.clear(&[0, 1]);
     }
 
