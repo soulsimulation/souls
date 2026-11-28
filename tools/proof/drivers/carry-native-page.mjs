@@ -269,8 +269,10 @@ const crewOf = async (state, a, b) => { const crew = (await cli(state, a, 'carry
 const gripEnds = (state, thing, back, front) => Promise.all([[back, 'back'], [front, 'front']].map(([who, end]) => cli(state, who, 'carry', 'grip', thing, end)));
 // A command the world refuses for a moment (a way out still blocked by the crew ahead, a body that moved while the
 // change was prepared) is asked again, as a Soul's own agent asks again.
+// A take refused out of reach while its carriers are still walking to their ends (attempt 19: a grip's answer comes as
+// its walk starts, and the walk from the camp takes about 18 s) is asked for up to 36 s.
 async function retried(state, who, ...words) {
-  for (let i = 0; ; i++) { const a = await asked(state, who, ...words); if (a.ok === true) return a; if (i >= 8) throw Error(`carry-proof.command-refused: ${who} ${words.join(' ')} ${a.code ?? ''}`); await delay(1500, state.signal); }
+  for (let i = 0; ; i++) { const a = await asked(state, who, ...words); if (a.ok === true) return a; if (i >= (a.code === 'part.grip-out-of-reach' ? 24 : 8)) throw Error(`carry-proof.command-refused: ${who} ${words.join(' ')} ${a.code ?? ''}`); await delay(1500, state.signal); }
 }
 /** The survey scene's frames: each from the stand into its upright slot, the stand's first frame first and the second six
  *  seconds behind it (attempt 12: the second crew, first to its frame, found its way out blocked); its east carrier stays holding it. */
