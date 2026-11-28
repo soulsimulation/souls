@@ -910,6 +910,7 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
     // Soul 5 walks up onto the first sheet, then across onto the second.
     k.walk(&[(4, Bay::at(-4_500, STAIR_AT[1]))], "Soul 5 to the flight's foot");
     let walker = body_of(&k.w, k.w.souls[4]);
+    println!("decks {} {}, flight {}", show(decks[0]), show(decks[1]), show(flight));
     let up = |k: &mut Bay, node: Id, p: Vec3, what: &str| {
         let to = BTreeMap::from([(1, Value::Array(vec![int(p.x), int(p.y), int(p.z)]))]);
         k.hands[4].send("eden:walk", node, to);

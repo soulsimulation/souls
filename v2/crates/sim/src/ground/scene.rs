@@ -710,10 +710,17 @@ fn joined_at(tree: &Tree, floor: Handle) -> bool {
         let Some(o) = tree.node(oh) else {
             return false;
         };
-        if o.parent() != parent || o.slot().is_none() || parent.is_none() {
+        let Some(ph) = parent.filter(|p| o.parent() == Some(*p) && o.slot().is_some()) else {
             return false;
-        }
-        let Ok(at) = xform_to(tree, oh, th) else {
+        };
+        let Some(ph) = tree.handle(ph) else {
+            return false;
+        };
+        // Both read in the parent's frame: the part's place, and the floor's height on its thing.
+        let (Ok(at), Ok(on)) = (xform_to(tree, oh, ph), xform_to(tree, th, ph)) else {
+            return false;
+        };
+        let Ok(level) = on.point(Vec3::new(0, y, 0)) else {
             return false;
         };
         // Half the part's own height, from its walk boxes ([cx, cz, hx, hz, yaw, y0, y1, ...] mm).
@@ -732,7 +739,7 @@ fn joined_at(tree: &Tree, floor: Handle) -> bool {
                     / 2
             })
             .unwrap_or(0);
-        (at.pos.y - y).abs() <= half
+        (at.pos.y - level.y).abs() <= half
     })
 }
 

@@ -1292,7 +1292,7 @@ pub fn changed(before: &Tree, part: &Part) -> Vec<Id> {
             // its new. So is one that holds a floor of its own (racks T9: a sheet seated becomes a floor where it
             // sits, a flight a way up). A body or a crew's node has neither, so a body's hop through a doorway touches
             // nothing.
-            Body::Transfer(TransferRec::Leave { node, .. }) => {
+            Body::Transfer(TransferRec::Leave { node, pose, .. }) => {
                 let solid = |h| {
                     before
                         .node(h)
@@ -1305,6 +1305,24 @@ pub fn changed(before: &Tree, part: &Part) -> Vec<Id> {
                 };
                 if before.handle(*node).is_some_and(solid) {
                     ids.push(*node);
+                }
+                // A standing place beside it, in the parent it leaves or the one it goes to, is there only while
+                // nothing lies over it (racks T6, `scene::braced`): its thing's ground is read again.
+                let from = before
+                    .handle(*node)
+                    .and_then(|h| before.node(h))
+                    .and_then(|n| n.parent());
+                for p in [from, Some(pose.frame.node)].into_iter().flatten() {
+                    for &c in before.handle(p).and_then(|h| before.children(h)).unwrap_or(&[]) {
+                        let held = before.children(c).unwrap_or(&[]).iter().any(|&f| {
+                            before
+                                .node(f)
+                                .is_some_and(|n| n.fields().contains_key(&scene::F_WHILE_JOINED))
+                        });
+                        if let Some(n) = before.node(c).filter(|_| held) {
+                            ids.push(n.id());
+                        }
+                    }
                 }
                 continue;
             }
