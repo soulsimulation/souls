@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BYTES_SHARE, FIRST_FRAME, STARTED, WORLD_DATA, arrivalFraction, reasonDelayMs } from './viewer-arrival.ts';
-import { ARRIVAL_CATCH_MS, ARRIVAL_NOW_MS, ARRIVAL_SPAN_MS, ARRIVAL_STALE_MS, ArrivalLag, arrivalCatching } from './arrival-catching.ts';
+import { ARRIVAL_AT_MS, ARRIVAL_CATCH_MS, ARRIVAL_NOW_MS, ARRIVAL_SPAN_MS, ARRIVAL_STALE_MS, ArrivalLag, arrivalCatching } from './arrival-catching.ts';
 import { STREAM_CATCHING, STREAM_NOTICE } from './v2-engine/stream-health.ts';
 import type { InitialWorldProgress } from './InitialWorldReadiness.ts';
 
@@ -77,6 +77,7 @@ test('N8: the pill waits for the picture to be at now, not for it to come within
   assert.equal(arrivalCatching(now - 5900, now, 5000, true), true, 'within a few seconds but still gaining');
   assert.equal(arrivalCatching(now - 5900, now, 5000, false), false, 'within a few seconds and holding');
   assert.equal(arrivalCatching(now - 5900, now, ARRIVAL_CATCH_MS, true), false, 'never for good');
+  assert.equal(arrivalCatching(now - ARRIVAL_AT_MS, now, 5000, true), false, 'and within 5 s it is at now, though the clock still eases in');
   const fast = new ArrivalLag();
   const seen = [0, 250, 500, 750, 1000, 1250].map((t) => fast.gaining(t, 8000 - t));  // the lag falls 1 s a second
   assert.deepEqual(seen, [false, false, false, false, true, true], 'gaining once seen for a span');

@@ -9,14 +9,15 @@ export const ARRIVAL_NOW_MS = 6000, ARRIVAL_STALE_MS = 24 * 3600_000, ARRIVAL_CA
  *  of a moved world's tick), `nowMs` the clock, `drawnMs` how long a picture has been drawn. */
 export function arrivalCatching(shownMs: number, nowMs: number, drawnMs: number, gaining = false): boolean {
   const behind = nowMs - shownMs;
-  return (behind > ARRIVAL_NOW_MS || gaining) && behind <= ARRIVAL_STALE_MS && drawnMs < ARRIVAL_CATCH_MS;
+  return (behind > ARRIVAL_NOW_MS || (gaining && behind > ARRIVAL_AT_MS)) && behind <= ARRIVAL_STALE_MS && drawnMs < ARRIVAL_CATCH_MS;
 }
 
-/** N8 (28 Nov): the picture is at now once it stops gaining on the clock, not when it first comes within ARRIVAL_NOW_MS:
- *  a cold Verdelis Eden said Live 6 s behind while the picture still played on fast to now (1 of 5 runs). Gaining is
- *  the lag falling by more than ARRIVAL_GAIN of the time over at least ARRIVAL_SPAN_MS; a picture playing at the clock's
- *  pace holds its lag. */
-export const ARRIVAL_SPAN_MS = 1000, ARRIVAL_GAIN = 0.2;
+/** N8 (28 Nov): between ARRIVAL_AT_MS and ARRIVAL_NOW_MS behind, the picture is at now only once it stops gaining on
+ *  the clock: a cold Verdelis Eden said Live 5.6 s behind while the picture still played on fast to now (every run on
+ *  the slow words reads). Within ARRIVAL_AT_MS it is at now, as the cold-arrival runs measure it, though the clock may
+ *  still ease in the last seconds. Gaining is the lag falling by more than ARRIVAL_GAIN of the time over at least
+ *  ARRIVAL_SPAN_MS; a picture playing at the clock's pace holds its lag. */
+export const ARRIVAL_AT_MS = 5000, ARRIVAL_SPAN_MS = 1000, ARRIVAL_GAIN = 0.2;
 export class ArrivalLag {
   private seen: [atMs: number, lagMs: number][] = [];
   /** `lagMs`, how far the moment drawn is behind the clock at `atMs`: whether it is still falling. False until it has
