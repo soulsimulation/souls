@@ -88,8 +88,12 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   from the disk, and removes the temporary files a write killed midway left. One wait is still the disk's time: at
   1,000 agents on a disk shared with heavy build writes (27 Nov 2026, about 2.5 GB a minute) it took about 0.2 s a
   part and the stream fell up to five minutes behind at the start of the load; on a disk the builds did not write
-  to it kept within 1.3 s (p99), bound by the stream thread's processor time, not the disk.
-  `STREAM_PROFILE=1` prints each stage's time, bytes, syncs and waits every 10 s to the journal.
+  to it kept within 1.3 s (p99), bound by the stream thread's processor time, not the disk. From 28 Nov 2026 a part
+  takes about 0.36 s of that thread at 1,000 agents in even load (1.05 s before): it reads its records' sequences, the
+  words' references and its deltas in place. On a disk others wrote up to 10 GB a minute to, the stream kept up within
+  1.4 s at p90 and 12.8 s at p99 (117.6 s before), its worst moments in the minutes of heaviest writes.
+  `STREAM_PROFILE=1` prints each stage's time, bytes, syncs and waits every 10 s to the journal, and in
+  `structural-by` how many cuts were published by rows (`rows`) and why the others were worked out whole (`whole:…`).
   Before this (November 2026) every waiting record was held in memory: at 1,000 agents on a busy disk that was
   about 2 GB an hour.
 - **A store that stalls after the stream serves** (R15). Viewers read the stream from the machine's disk. Each part,
