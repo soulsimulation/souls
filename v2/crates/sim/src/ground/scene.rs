@@ -154,12 +154,24 @@ fn seams_of(tree: &Tree, floor: Handle) -> Vec<(i64, [Xz; 2])> {
         }
     }
     let edges = |r: &[Xz]| -> Vec<[Xz; 2]> { (0..r.len()).map(|k| [r[k], r[(k + 1) % r.len()]]).collect() };
+    let middle = |r: &[Xz]| {
+        let n = r.len().max(1) as i64;
+        let (x, z) = r.iter().fold((0, 0), |(x, z), p| (x + p[0] / n, z + p[1] / n));
+        [x, z]
+    };
     for m in &mine {
         for o in theirs.iter().filter(|o| (o.y - m.y).abs() <= SEAM) {
+            let (cm, co) = (middle(&m.ring), middle(&o.ring));
             for [a, b] in edges(&m.ring) {
                 let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
                 let l2 = ex * ex + ez * ez;
                 if l2 == 0 {
+                    continue;
+                }
+                // Beside it, not over it: the other floor lies on the far side of the edge from this one (a landing
+                // laid over a deck's edge is no seam).
+                let side = |p: Xz| (ex * i128::from(p[1] - a[1]) - ez * i128::from(p[0] - a[0])).signum();
+                if side(cm) == side(co) {
                     continue;
                 }
                 let l = l2.isqrt();
