@@ -2331,6 +2331,9 @@ async fn a_seated_soul_stretches_and_slumps_from_its_seat_and_its_jump_is_refuse
     assert_eq!(rose.kind, 1, "still seated, so it rises: {rose:?}");
 }
 
+#[path = "edit_served/deck_kinds.rs"]
+mod deck_kinds;
+
 #[path = "edit_served/k18d.rs"]
 mod k18d;
 
@@ -3244,7 +3247,8 @@ async fn b20_a_running_world_refuses_a_part_left_hanging() {
     println!("{joined}");
     assert_eq!(
         joined,
-        "joined parts: bays [mars:rack_bay], standing [mars:rack_upright], bearing [mars:rack_beam]"
+        "joined parts: bays [mars:deck_bay, mars:rack_bay], standing [mars:rack_upright, mars:rack_upright_12ft], \
+         bearing [mars:deck_beam, mars:plywood_sheet, mars:rack_beam, mars:stair_flight, mars:two_by_four]"
     );
     s.line("listening ", 120);
     let (_, rules) = served_copy(&w);
@@ -5178,18 +5182,17 @@ fn a_frame_is_raised_into_its_bays_upright_slot_and_held_from_outside_the_bay() 
     }
 }
 
-/// #5067 (raise into a slot): a creator places a rack bay and a rack frame lying with its foot 80 mm from the bay's
-/// `upright_a`, its length outward. Raised with no slot named it would stand on the ground; raised into `upright_a` it
-/// stands, slides the 80 mm into the slot a sample a tick, and is seated there, held by both: its holders' hands on its
-/// posts' outward faces at 1.05 and 1.35 m, on the side away from `upright_b`, and they walk round to stand behind its
-/// posts. A raise into `upright_b`, 2.9 m off, is refused `raise.not-at-slot` before anything moves.
+/// #5067 (a part the same either way, `symmetry` `front_back`): a creator places a deck bay and a 12 ft frame lying at
+/// its `upright_b`, its top away from the bay and turned so that, stood up, it faces opposite to the slot. Raised into
+/// `upright_b` it is admitted (the slot's turn or a half turn from it, the nearer), slides in, and is seated there,
+/// held by both from outside the bay.
 #[test]
 fn a_frame_turned_a_half_turn_is_raised_into_upright_b_the_same_either_way() {
     use replica::effects::{Body, Change};
     use sim::activity::carry::grips::{GRIPS, HELD, HOLD_HANDS, Holds};
     use sim::activity::carry::raise::{SIDE, Spec};
     let d = scratch("raiseintob");
-    let (facts, slots) = yard_world(&d);
+    let (facts, _) = yard_world(&d);
     let w = seed_entries(&d, &facts, 2, (52, -20), Some(&d.join("entries")));
     let (creator_id, creator_actor) = creator(0xaa);
     static_creator(&w, creator_id);
@@ -5226,8 +5229,14 @@ fn a_frame_turned_a_half_turn_is_raised_into_upright_b_the_same_either_way() {
         audience: Audience::Everyone,
         fields: BTreeMap::new(),
     };
-    let got = creator_edit(place("mars:rack_bay@", Vec3::new(56 * M, 0, -24 * M), Quat::IDENTITY));
-    assert_eq!(got.kind, 1, "a bay: {got:?}");
+    let got = creator_edit(place("mars:deck_bay@", Vec3::new(56 * M, 0, -24 * M), Quat::IDENTITY));
+    assert_eq!(got.kind, 1, "a deck bay: {got:?}");
+    // Its slots by number, in its entry's order.
+    let deck: BTreeMap<String, u64> = match json::parse(&std::fs::read_to_string(d.join("entries/deck_bay.json")).unwrap()).unwrap().get("slots") {
+        Some(json::Value::Obj(o)) => o.iter().enumerate().map(|(k, (n, _))| (n.clone(), k as u64 + 1)).collect(),
+        _ => panic!("its slots"),
+    };
+    let slots = deck;
     let bay = got.names[&1];
     let (copy, _) = served_copy(&w);
     let t = copy.tree();
@@ -5237,11 +5246,11 @@ fn a_frame_turned_a_half_turn_is_raised_into_upright_b_the_same_either_way() {
     drop(copy);
     // Lying on its face at upright_b, its length along +z from its foot (outward from the bay), turned so its own x runs
     // along -x: stood up, it faces opposite to the slot (#5067: the 12 ft frame raised with its top away from the bay).
-    let spec = Spec::of(&json::parse(&std::fs::read_to_string(d.join("entries/rack_upright.json")).unwrap()).unwrap()).unwrap();
+    let spec = Spec::of(&json::parse(&std::fs::read_to_string(d.join("entries/rack_upright_12ft.json")).unwrap()).unwrap()).unwrap();
     let half = 759_250_125;
     let lie = Quat::from_yaw_mdeg(180_000).unwrap().then(Quat::new(half, -half, 0, 0).unwrap()).unwrap();
     let foot = Vec3::new(ub.x + 80_000, spec.half_thick, ub.z);
-    let got = creator_edit(place("mars:rack_upright@", foot, lie));
+    let got = creator_edit(place("mars:rack_upright_12ft@", foot, lie));
     assert_eq!(got.kind, 1, "a frame lying: {got:?}");
     let frame = got.names[&1];
 
