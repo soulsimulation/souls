@@ -397,7 +397,7 @@ impl Yard {
 ///   lays it back where it lay.
 #[test]
 fn deck_two_carry_a_plywood_sheet_and_a_crew_seats_a_two_by_four_across_two_seated_beams() {
-    let mut y = Yard::serve("deck", 6);
+    let mut y = Yard::serve("deckyard", 6);
     let sheet = y.id("plywood-sheet");
     // The sheet: Souls 2 and 3 at its ends (its grips on its short edges, 0.91 m from its middle), 0.35 m beyond.
     y.walk(

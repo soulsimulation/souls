@@ -16,7 +16,10 @@
 //!   does not hold: `not-held`. A put target filled at the check, or filled since (at contact): `slot-occupied`, and
 //!   the thing stays in the hand. A thing a body sits in (a vehicle and its rider): `thing-occupied`, at the take and
 //!   again at contact. A filled slot is asked of the one slot model ([`super::Slots::occupant`]): a seat a
-//!   body holds is filled too. A thing gone by contact: `thing-missing`. A refusal at contact cancels the move.
+//!   body holds is filled too. A thing gone by contact: `thing-missing`. A thing in another body's hand:
+//!   `held-by-another`, naming the holder, at the take and again at contact, on every take into a hand
+//!   ([`not_held_by_another`], the forms' too); only the holder's give moves it (#5275). A refusal at contact cancels
+//!   the move.
 //! - **A held tool's tip.** Reach is measured from the effector: the hand, or the named tip of the tool held in it
 //!   (`crate::moves::Reach::tip`), so a body holding a pole presses what its bare hand cannot reach.
 //! - **Before retiring.** A parent is lifetime, so a body that retires puts down what it holds first
@@ -110,6 +113,33 @@ pub fn free_hands(tree: &Tree, rules: &Rules, body: Id, all: &[Hand]) -> Vec<Han
     }
     free.truncate(free.len().saturating_sub(second));
     free
+}
+
+/// The body other than `body` whose hand `at` is (#5275): a thing there is that body's, and only its give
+/// (`crate::activity::offer`) moves it into another hand.
+pub fn holder_other_than(c: &Controller, at: Frame, body: Id) -> Option<Id> {
+    let slot = at.slot?;
+    let held = at.node != body
+        && c.claims(at.node)
+            .is_some_and(|b| hands(b.family()).iter().any(|h| h.slot == slot));
+    held.then_some(at.node)
+}
+
+/// `held-by-another`, naming the holder, when `thing`, at `at`, is in the hand of a body other than `body` (#5275).
+/// Every take into a hand asks it before anything changes, and again where it transfers.
+pub fn not_held_by_another(c: &Controller, at: Option<Frame>, body: Id, thing: Id) -> R<()> {
+    match at.and_then(|f| holder_other_than(c, f, body)) {
+        Some(holder) => refuse(
+            "held-by-another",
+            format!(
+                "{} is in {}'s hand; next: ask {} to give it",
+                show(thing),
+                show(holder),
+                show(holder)
+            ),
+        ),
+        None => Ok(()),
+    }
 }
 
 /// `mv` steered to `hands`: its claims of any one manipulator name these hands, in order, and a hand left over is
@@ -266,6 +296,15 @@ fn node_of(tree: &Tree, id: Id) -> R<(Name, Audience, Option<Id>, Option<u64>)> 
     Ok((n.kind().clone(), n.audience(), n.parent(), n.slot()))
 }
 
+/// Where `thing` is on the tree: its parent and slot.
+fn frame_of(tree: &Tree, thing: Id) -> Option<Frame> {
+    let n = tree.handle(thing).and_then(|h| tree.node(h))?;
+    Some(Frame {
+        node: n.parent()?,
+        slot: n.slot(),
+    })
+}
+
 fn family(c: &Controller, body: Id) -> R<Family> {
     c.claims(body)
         .map(|b| b.family().clone())
@@ -291,7 +330,8 @@ impl Holding {
 
     /// Starts `mv`, steered to free hands, for `body` to take `thing` at `now`: at contact the thing becomes a child of
     /// the first of those hands' slots. Refused, with nothing changed: `take-needs-hands`, `thing-missing`,
-    /// `thing-not-carried`, `thing-occupied` (a body sits in it, here or by contact), `hands-full`, then the move's own
+    /// `thing-not-carried`, `thing-occupied` (a body sits in it, here or by contact), `held-by-another` (in another
+    /// body's hand, here or by contact), `hands-full`, then the move's own
     /// refusals (`out-of-reach` among them).
     pub fn take<G: Reach>(
         &mut self,
@@ -313,6 +353,7 @@ impl Holding {
             );
         };
         seated_in(cx, thing)?;
+        not_held_by_another(cx.c, frame_of(cx.tree, thing), body, thing)?;
         let free = free_hands(cx.tree, &cx.log.rules, body, &all);
         if free.len() < usize::from(need) {
             return refuse(
@@ -422,6 +463,7 @@ impl Holding {
         let (_, audience, ..) = node_of(cx.tree, p.thing)?;
         if p.take {
             seated_in(cx, p.thing)?;
+            not_held_by_another(cx.c, frame_of(cx.tree, p.thing), p.to.node, p.thing)?;
         }
         occupied(cx.slots, cx.tree, p.to)?;
         let id = cx.mint.mint().map_err(|e| Refusal {
