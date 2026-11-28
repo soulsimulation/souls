@@ -2156,35 +2156,21 @@ impl Bodies {
                     && let Some(&(t, Some(p))) = self.walked_to.get(&id)
                     && let Some(mm) = self.gap_to(body, t, p).filter(|mm| *mm > STOPPED_SHORT_MM)
                 {
-                    {
-                        let g = self.runner.granted.get(&body).copied();
-                        let from = self.pose(body).unwrap();
-                        let (sn, sr, fine) = match self.town.view_for(body) {
-                            Ok(v) => (v.stand_near(t, p, 0, None), v.stand_reached(t, p, from), v.stand_near(t, p, 700_000, None)),
-                            Err(_) => (None, None, None),
-                        };
-                        let tb: Option<&sim::spots::Table> = None;
-                        let near: Vec<String> = self
-                            .live
-                            .keys()
-                            .chain(self.runner.granted.keys())
-                            .filter_map(|b| self.pose(*b).map(|(n, at)| (*b, n, at)))
-                            .filter(|(_, n, at)| *n == t && (i128::from(at.x - p.x).pow(2) + i128::from(at.z - p.z).pow(2)).isqrt() < 2_000_000)
-                            .map(|(b, _, at)| format!("{} at {:?}", replica::world_model::show(b), at))
-                            .collect();
-                        let all: Vec<String> = self.runner.controller.bodies().filter_map(|m| { let (n, at) = (m.pose.frame.node, m.pose.position); (n == t && (i128::from(at.x - p.x).pow(2) + i128::from(at.z - p.z).pow(2)).isqrt() < 2_000_000).then(|| format!("{} at {:?}", replica::world_model::show(m.id), at)) }).collect();
-                        let _ = (&near, &all);
-                        let _ = (&sn, &sr, &fine);
-                        use std::io::Write as _;
-                        let mut f = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/n4diag.log").unwrap();
-                        let _ = writeln!(
-                            f,
-                            "worldd: N4DIAG walk {} of {} to {:?} on {}: {mm} mm short; granted {:?} (there {:?}); passage_at {:?}; table clear {:?} places {:?}; pose {:?}; stand_near0 {:?} stand_reached {:?} near700 {:?}; near {:?}; all {:?}",
-                            replica::world_model::show(id), replica::world_model::show(body), p, replica::world_model::show(t), g, g.and_then(|g| self.gap_to(body, t, g)),
-                            self.town.passage_at(t, p), tb.map(|x| x.clear), tb.map(|x| x.places.len()), self.pose(body), sn, sr, fine, near, all
-                        );
-                    }
-                    let crowd = self.short.contains(&id);
+                    // Held off its point by others (A2-4): ended short as near as the crowd allows, or at the place it
+                    // was granted while the point itself is ground it may stand on and reach, clear of every doorway and
+                    // stair (the spot tables' own test, `View::stand_reached`): a body stood in its room there when it
+                    // was granted. Done as near as the crowd allows, never `walk.stopped-short`.
+                    let pushed = self
+                        .runner
+                        .granted
+                        .get(&body)
+                        .is_some_and(|g| self.gap_to(body, t, *g).is_some_and(|mm| mm <= 50))
+                        && self.pose(body).is_some_and(|from| {
+                            self.town
+                                .view_for(body)
+                                .is_ok_and(|v| v.stand_reached(t, p, from).is_some())
+                        });
+                    let crowd = self.short.contains(&id) || pushed;
                     let n = self.walked_again.get(&id).copied().unwrap_or(0);
                     // Sent again half a second after it stopped, so bodies in its way have time to move off.
                     let since = self
@@ -2206,6 +2192,9 @@ impl Bodies {
                             self.short.remove(&id);
                             continue;
                         }
+                    }
+                    if crowd {
+                        self.short.insert(id);
                     }
                     self.stopped_short.insert(id, (mm, crowd));
                 }
