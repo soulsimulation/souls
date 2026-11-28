@@ -219,7 +219,11 @@ impl Ways {
             list(
                 self.stairs
                     .iter()
-                    .map(|s| vec![s.from[0], s.from[1], s.to[0], s.to[1], s.bottom, s.top, s.width])
+                    .map(|s| {
+                        vec![
+                            s.from[0], s.from[1], s.to[0], s.to[1], s.bottom, s.top, s.width,
+                        ]
+                    })
                     .collect(),
             ),
             list(
