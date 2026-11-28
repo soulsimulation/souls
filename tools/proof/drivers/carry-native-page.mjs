@@ -46,6 +46,10 @@ const SCENES = {
   sheet: { who: ['ada', 'bo'], kind: 'mars:plywood_sheet', entry: 'content/kinds/construction/plywood_sheet.json',
     view: 'post=0&hour=12:00&eye=-21,4.4,33.5&at=-27,.6,25.5',
     carry: { load: 'plywood-sheet-1', back: 'ada', front: 'bo', legs: [['-27,25', 7000], ['-24,25', 7000]] } },
+  // A 2x4 joist carried by two (B4 item 5, attempt 18; CARRY_SCENE=joist): from the deck yard's pile east, then north.
+  joist: { who: ['ada', 'bo'], kind: 'mars:two_by_four', entry: 'content/kinds/construction/two_by_four.json',
+    view: 'post=0&hour=12:00&eye=-21,4.4,33.5&at=-27,.6,25.5',
+    carry: { load: 'two-by-four-1', back: 'ada', front: 'bo', legs: [['-25,27.2', 8000], ['-25,25', 8000]] } },
 };
 const SCENE = SCENES[process.env.CARRY_SCENE ?? 'beam'];
 if (!SCENE) throw Error('carry-proof.scene');
