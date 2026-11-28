@@ -7653,7 +7653,7 @@ async fn frame_home(
     // walk, a short one), and then the two carry it home as they brought it ([`frame_legs`]: out of its plane, across,
     // and in at its stand). Walked straight to its stand, each on its own walk, the one that passes the stand goes
     // round it and the two part (`souls:carriers-apart`); led there at their 1.143 m, the one behind stands on it.
-    walk_two(s, a, b, frame_ends(where_is(s.w, f).2), what).await;
+    walk_two(s, a, b, frame_ends_of(s.w, f), what).await;
     walk_two(s, a, b, frame_ends(home), what).await;
     let got = put_part(a, c, into_slot(stand, k)).await;
     assert_eq!(got.kind, 1, "{what}: on its stand: {got:?}");
