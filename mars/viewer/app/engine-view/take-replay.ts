@@ -43,6 +43,9 @@ import {NativeBoatViews} from './native-boat.ts';
 import type {NativeBoatLayoutV1} from '../../../../packages/engine-contract/src/boat.ts';
 import type {ShoreDesign} from './shore-preview.ts';
 
+/** Shared hand owners suppress both cosmetic origins and native carry; grip/walk and seated/paired exclusions stay at their own call sites. */
+const hasHandOwner=(p:SampledHuman):boolean=>!!(p.itemPose||p.handActuator||p.transfer||p.watering||p.cup||p.letGo||p.on||p.prop||p.instrument||p.handHold||p.rps||p.hands?.left||p.hands?.right||p.formPress?.length);
+
 export { takeLog, type LogLine, type TakeStep } from './take-log.ts';
 export type TakeManifestEntry = {
   id: string;
@@ -214,6 +217,11 @@ export class TakePeople {
   setViewer(v:HumanViewer|null){this.humans.viewer=v;}
   poseStats(){return this.humans.poseStats;}
   contactDiagnostics(){return this.humans.bones();}
+  private nativeCarry:Record<string,{hands:Hands;weight:number;crew?:string;load?:string;sinceUs?:number;preparing?:boolean}>={};
+  /** Native world-space palms sampled by the page at this exact depicted body clock. */
+  private nativeCarryOwner:((id:string,fromSeconds:number,toSeconds:number)=>boolean)|undefined;
+  setNativeCarry(contacts:Record<string,{hands:Hands;weight:number;crew?:string;load?:string;sinceUs?:number;preparing?:boolean}>,owner?:((id:string,fromSeconds:number,toSeconds:number)=>boolean)){this.nativeCarry=contacts;this.nativeCarryOwner=owner;}
+
   instrumentOf(id:string){return this.humans.instrumentOf(id);}
   activityAgeOf(id:string){return this.humans.activityAgeOf(id);}
   /** Seconds until `id`'s current activity ends at the depicted tick, when the take already records the change (#422:
@@ -362,10 +370,11 @@ export class TakePeople {
   }
 
   private clipOrigin(id: string, tick: number, current: SampledHuman): SampledHuman['clipOrigin'] {
-    if(current.itemPose||current.handActuator||current.transfer||current.watering||current.cup||current.letGo||current.grip||current.on||current.prop||current.instrument||current.handHold||current.rps||current.hands?.left||current.hands?.right||current.formPress?.length||current.walk>=.01)return undefined;
+    if(hasHandOwner(current)||current.grip||current.walk>=.01)return undefined;
     const a=this.acts.get(id);if(!a)return undefined;
     const index=this.runAt(a,tick),newest=a.t[index],boundary=(this.take.startTick+newest)*this.take.dt;
     const age=(tick-newest)*this.take.dt;
+    if(this.nativeCarryOwner?.(id,boundary-CLIP_FADE,(this.take.startTick+tick)*this.take.dt))return undefined;
     // An owner acquired/released during this fade is a different drawn origin. Yield the whole boundary
     // to the existing contact handoff, including after release; random seeks use the same recorded barrier.
     if(this.clipOwnerTicks.get(id)?.some(at=>at>=newest-CLIP_FADE/this.take.dt&&at<=tick))return undefined;
@@ -635,6 +644,14 @@ export class TakePeople {
       const publicSoulKey=(src.human as {soul?:unknown}|undefined)?.soul;
       const game=recordedGame(e.state.game);
       const person:SampledHuman={itemPose:itemPoseOf(e.state.itemTransferV1 as NonNullable<Entity['human']>['itemTransferV1'],e.state.heldItemsV1 as NonNullable<Entity['human']>['heldItemsV1'],this.take.startTick+frame.tick,this.take.dt),...(e.state.handActuator?{handActuator:e.state.handActuator as NonNullable<Entity['human']>['handActuator'],handActuatorTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.handTransferV1?{transfer:e.state.handTransferV1 as NonNullable<Entity['human']>['handTransferV1'],transferTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.wateringV1?{watering:e.state.wateringV1 as NonNullable<Entity['human']>['wateringV1'],wateringTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.letGoV1?{letGo:e.state.letGoV1 as NonNullable<Entity['human']>['letGoV1'],letGoTime:(this.take.startTick+frame.tick)*this.take.dt}:{}),...(e.state.cupV1?{cup:e.state.cupV1 as NonNullable<Entity['human']>['cupV1'],cupTime:(this.take.startTick+frame.tick)*this.take.dt}:{}), ...(body?.modelUrl?{bodyModel:admittedBodyUrl(body.modelUrl)??body.modelUrl}:body?.params&&typeof body.model==='string'?{bodyModel:body.model}:{}),...(typeof publicSoulKey==='string'?{publicSoulKey}:{}), ...(seatHeight!==undefined?{seatHeight}:{}), ...(shore.status==='recorded'?{shore:shore.contact}:{}), shoreTime:(this.take.startTick+t/this.take.dt)*this.take.dt,waterTransition:this.waterTransition(id,t), ...(Array.isArray(e.state.formPress)?{formPress:e.state.formPress as SampledHuman['formPress']}:{}), id, p: e.p, yaw: e.yaw, walk, walkDist: dist, activity: e.activity, grip: g?.entity, gripSlot: g?.slot, carryWeight, hands: e.hands, baseActivity: st.baseActivity ?? undefined, ...this.activityHistory(id, frame.tick, e.activity ?? 'idle', climbing ? 0 : walk), ...(typeof (st as {partner?: unknown}).partner==='string'?{partner:(st as {partner:string}).partner}:{}), ...(e.state.handHold||e.state.rps?{...(e.state.handHold?{handHold:e.state.handHold as HandHoldState}:{}),...(e.state.rps?{rps:e.state.rps as RpsState}:{}),handGameTick:this.take.startTick+frame.tick,handGameDt:this.take.dt}:{}), ...(typeof st.prop==='string'?{prop:st.prop}:{}), ...(typeof e.state.instrument==='string'?{instrument:e.state.instrument}:{}),...(game?{game,gameTick:this.take.startTick+frame.tick,gameDt:this.take.dt}:{}),...(Number.isFinite(speed)?{speed:Math.abs(speed)}:{}), on: st.on ?? undefined, ...(proneYaw !== undefined ? { proneYaw } : {}), ...(phaseK !== undefined ? { phaseK } : {}), ...(st.sleepPose ? { sleepPose: recordedSleepPose(this.take,id,frame.tick,st.sleepPose) } : {}) };
+      delete e.state.nativeCarryIdentity;
+      delete e.state.nativeCarry; // sampled frames may be reused: ownership must end on release/seek.
+      const nativeCarry=this.nativeCarry[id];
+      if(nativeCarry&&!hasHandOwner(person)&&!person.partner&&!person.shore&&!person.seatHeight&&person.baseActivity!=='sit'&&!/^(sit|sleep|lie|bench-press)(-|$)/.test(person.activity??'')){
+        person.hands=nativeCarry.hands;person.carryWeight=nativeCarry.weight;
+        e.state.nativeCarry=true;
+        if(nativeCarry.crew&&nativeCarry.load)e.state.nativeCarryIdentity={crew:nativeCarry.crew,load:nativeCarry.load,sinceUs:nativeCarry.sinceUs,preparing:!!nativeCarry.preparing};
+      }
       person.clipOrigin=this.clipOrigin(id,frame.tick,person);people.push(person);
     }
     this.stairs(comps);

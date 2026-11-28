@@ -5,6 +5,7 @@ import {createRequire} from 'node:module';
 import { readFileSync, writeFileSync, readdirSync, statSync, lstatSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { checkPort, portFree } from '../../e2e/local-smoke.mjs';
+import { runOwnedCommand } from '../playtest/arena/new-engine/world.mjs';
 import { startOldPage } from '../playtest/arena/new-engine/old-page.mjs';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = name => { throw Error('proof.native-page-' + name); };
@@ -45,13 +46,15 @@ export function nativePageBodyPackage(root,path,expected) {
   return result;
 }
 
-export function createNativePageArtifacts(checkout, { template = 'worlds/templates/hello-hamlet.json', caddy, bodies }) {
+export function createNativePageArtifacts(checkout, { template = 'worlds/templates/hello-hamlet.json', map = null, caddy, bodies }) {
   const root = resolve(checkout); if (git(root, 'status', '--porcelain')) fail('source-dirty');
   if (!git(root, 'ls-files', '--error-unmatch', '--', template)) fail('template-untracked');
-  const source = Object.fromEntries(git(root, 'ls-files', '--', 'apps/web', 'tools/world-launcher', 'v2/tools/dev', 'v2/tools/import-eden', 'v2/client/served', 'v2/tools/ops/proxy', template).split('\n').filter(Boolean).map(file => [file, hash(readFileSync(inside(root, file)))]));
+  if (map && (!map.startsWith('content/worlds/') || !git(root, 'ls-files', '--error-unmatch', '--', map))) fail('map-untracked');
+  if (map) inside(root, map);
+  const source = Object.fromEntries(git(root, 'ls-files', '--', 'apps/web', 'tools/world-launcher', 'v2/tools/dev', 'v2/tools/import-eden', 'v2/client/served', 'v2/tools/ops/proxy', template, ...(map ? [map] : [])).split('\n').filter(Boolean).map(file => [file, hash(readFileSync(inside(root, file)))]));
   const trees = Object.fromEntries(['apps/web/dist', 'v2/web/dist', 'mars/viewer/dist/client', 'v2/target/wasm-load/pkg'].map(path => [path, files(inside(root, path))]));
   const bins = Object.fromEntries(['worldd', 'gatewayd', 'directoryd', 'testworld', 'assets-check', 'register-world'].map(name => [name, { path: 'v2/target/release/' + name, hash: hash(readFileSync(join(root, 'v2/target/release', name))) }]));
-  return { schema: 'native-page-proof-artifacts/1', sourceHead: git(root, 'rev-parse', 'HEAD'), template, source, trees, bins, ...(bodies?{bodies:nativePageBodyPackage(root,bodies)}:{}), caddy: { path: resolve(caddy), hash: hash(readFileSync(caddy)) } };
+  return { schema: 'native-page-proof-artifacts/1', sourceHead: git(root, 'rev-parse', 'HEAD'), template, ...(map ? { map } : {}), source, trees, bins, ...(bodies?{bodies:nativePageBodyPackage(root,bodies)}:{}), caddy: { path: resolve(caddy), hash: hash(readFileSync(caddy)) } };
 }
 export function verifyNativePageArtifacts(checkout, pin) {
   const root = resolve(checkout); if (!pin?.file || !/^[a-f0-9]{64}$/.test(pin.hash)) fail('artifact-pin');
@@ -59,6 +62,8 @@ export function verifyNativePageArtifacts(checkout, pin) {
   const m = JSON.parse(bytes);
   if (m.schema !== 'native-page-proof-artifacts/1' || !/^[a-f0-9]{40}$/.test(m.sourceHead) || git(root, 'rev-parse', 'HEAD') !== m.sourceHead || git(root, 'status', '--porcelain')) fail('source-pin');
   if (!m.template?.startsWith('worlds/templates/') || !git(root, 'ls-files', '--error-unmatch', '--', m.template)) fail('template');
+  if (m.map && (!m.map.startsWith('content/worlds/') || !m.source?.[m.map] || !git(root, 'ls-files', '--error-unmatch', '--', m.map))) fail('map');
+  if (m.map) inside(root, m.map);
   for (const required of [m.template, 'apps/web/src/LiveWorld.tsx', 'tools/world-launcher/launcher.mjs', 'v2/tools/dev/run.sh']) if (!m.source?.[required]) fail('source-missing');
   for (const [file, expected] of Object.entries(m.source)) if (hash(readFileSync(inside(root, file))) !== expected) fail('source-file');
   for (const path of ['apps/web/dist', 'v2/web/dist', 'mars/viewer/dist/client', 'v2/target/wasm-load/pkg']) {
@@ -75,6 +80,25 @@ export function nativePagePorts(port) {
   const ports = [...Array.from({ length: 8 }, (_, i) => port + i), ...Array.from({ length: 21 }, (_, i) => port + 101 + i)];
   for (const p of ports) checkPort(p);
   return ports;
+}
+/** Same canonical exporter as the ordinary world helper; its subprocess is registered before waiting. */
+export function nativePageExportArgs(root, manifest, facts) {
+  return [join(root, 'v2/tools/import-eden/export/export.ts'), '--template', inside(root, manifest.template), '--out', facts, '--map', inside(root, manifest.map)];
+}
+/** Controllers stay live until the existing owner's global cleanup; finite commands are monitored as transients. */
+export function nativePageClientRegistration(children, onSpawn) {
+  return {
+    registerClient(child) { children.push(child); onSpawn(child, { processGroup: true }); },
+    registerCommand(child) { onSpawn(child, { transient: true }); },
+  };
+}
+/** Retain finite startup output before the existing owner can observe a nonzero child exit. */
+export function nativePageStartupRegistration(onSpawn, log) {
+  return (child, mode) => {
+    child.stdout?.on('data', bytes => log('startup stdout: ' + String(bytes)));
+    child.stderr?.on('data', bytes => log('startup stderr: ' + String(bytes)));
+    onSpawn(child, mode);
+  };
 }
 /** The recipe exposes the launched world's addresses and registers every later child with its owner. */
 export function nativePageRecipe(checkout, world, children, onSpawn, verify, bodies) {
@@ -93,7 +117,9 @@ export async function startNativePageFixture({ checkout, data, log, port, artifa
   const commandRecords = []; let ordinal = 0;
   const onCommand = event => { const id = ++ordinal; const record = { ...event, id }; commandRecords.push(record); writeFileSync(join(data, '..', `command-native-${id}.json`), JSON.stringify(record, null, 2), { flag: 'wx', mode: 0o600 }); return id; };
   writeFileSync(join(data, '..', 'native-page-provenance.json'), JSON.stringify({ artifactPin: artifacts, ...m }, null, 2), { flag: 'wx', mode: 0o600 });
-  const runtime = await startOldPage({ checkout: root, ...(m.bodies?{bodies:inside(root,m.bodies.path)}:{}), template: m.template, dir: data, port, bin: join(root, 'v2/target/release'),
+  const facts = m.map ? join(data, 'template.facts.json') : null;
+  if (facts) await runOwnedCommand(process.execPath, nativePageExportArgs(root, m, facts), { cwd: root, onCommand, onSpawn: nativePageStartupRegistration(onSpawn, text => writeFileSync(log, text, { flag: 'a', mode: 0o600 })), signal, timeoutMs: until - Date.now(), name: 'export-facts' });
+  const runtime = await startOldPage({ checkout: root, ...(m.bodies?{bodies:inside(root,m.bodies.path)}:{}), template: m.template, facts, dir: data, port, bin: join(root, 'v2/target/release'),
     marsWeb: join(root, 'mars/viewer/dist/client'), pkg: join(root, 'v2/target/wasm-load/pkg'), caddy: m.caddy.path, pinnedArtifacts: true, signal, timeoutMs: until - Date.now(),
     onCommand, onSpawn(child, mode) { if (!mode?.transient) children.push(child); onSpawn(child, mode); }, log: text => writeFileSync(log, text + '\n', { flag: 'a', mode: 0o600 }) });
   return { child: children[0], children, base: runtime.base, viewer: runtime.page, dataDir: resolve(data), recipe: nativePageRecipe(root, runtime.world, children, onSpawn, () => verifyNativePageArtifacts(root, artifacts),m.bodies) };

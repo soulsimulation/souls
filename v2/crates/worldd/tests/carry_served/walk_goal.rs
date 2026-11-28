@@ -342,3 +342,57 @@ async fn walk_goal_on_the_mars_camp_a_crew_walks_from_the_rack_pile_to_beside_th
     }
     drop(served);
 }
+
+/// N4 item 6 (#5279 follow-up): a walk a crowd holds off its point keeps A2-4, never `walk.stopped-short`. Soul 1 walks to
+/// a clear point on the square and stands there; Soul 2 is sent to the same point: its place is the nearest the crowd
+/// leaves it, a ring out, and its walk is done there, said `done.as-near-as-the-crowd-allows` with how far short (field
+/// 7) and the body that held it off (field 11), not moved off a passage nor stopped short.
+#[tokio::test(flavor = "multi_thread")]
+async fn walk_goal_a_walk_a_crowd_holds_off_its_point_is_done_as_near_as_the_crowd_allows() {
+    let d = scratch("wgcrowd");
+    let facts = world(&d);
+    let socket = d.join("s");
+    let (dir, ids, served) = seed_and_serve(&d, &facts, (0, 36), &socket, 2);
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let ground = im.nodes["ground"];
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &ids).await;
+    let mut a = Soul::connect(&url, ids[0], lineage, &tokens[0]).await;
+    let mut b = Soul::connect(&url, ids[1], lineage, &tokens[1]).await;
+    let goal = Vec3::new(0, 0, 30 * M);
+    a.act("eden:walk", ground, point(goal))
+        .await
+        .expect("Soul 1 at the point");
+    b.act("eden:walk", ground, point(Vec3::new(0, 0, 34 * M)))
+        .await
+        .expect("born");
+    let got = b.act("eden:walk", ground, point(goal)).await;
+    let body = body_of(&dir, ids[1]);
+    let f = move_ended(&dir, body);
+    let off = gap(stood(&dir)[&body], goal);
+    println!(
+        "Soul 2 to Soul 1's point: {got:?}, {} mm off; its end {f:?}",
+        off / 1000
+    );
+    assert!(got.is_ok(), "done: {got:?}");
+    assert_eq!(
+        text(f.get(&2)).as_deref(),
+        Some(worldd::answers::DONE_SHORT),
+        "its end's word: {f:?}"
+    );
+    assert!(off >= 500_000, "held off the point by Soul 1: {off} µm");
+    let Some(Value::Uint(mm)) = f.get(&7) else {
+        panic!("how far, field 7: {f:?}")
+    };
+    assert!(
+        (i64::try_from(*mm).unwrap() - off / 1000).abs() <= 2,
+        "field 7 is how far short it stands"
+    );
+    assert_eq!(
+        f.get(&11),
+        Some(&body_of(&dir, ids[0]).to_value()),
+        "field 11 names the other body nearest the point: {f:?}"
+    );
+    drop(served);
+}
