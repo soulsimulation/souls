@@ -1731,15 +1731,7 @@ impl Town {
     /// The doorway or stair whose passage `p` (µm, `node`'s frame) lies in, as the spot tables keep walkers out of it
     /// ([`passage_named`] with [`CLEAR`]): the thing it belongs to and the link's kind (#5254).
     pub fn passage_at(&self, node: Id, p: Vec3) -> Option<(Id, Kind)> {
-        passage_named(
-            &self.buildings,
-            &self.passages,
-            self.ground,
-            node,
-            p,
-            None,
-            CLEAR,
-        )
+        passage_named(&self.buildings, &self.passages, self.ground, node, p, None)
     }
 
     /// The world's entry as [`Town::set_entry`] took it, on dry ground: where the main ground is judged from. `None`:
@@ -2563,10 +2555,9 @@ fn passage_indexed(
 /// [`CLEAR`] past its width along its line.
 const CLEARS: (i64, i64) = (CLEAR, CLEAR / 2);
 
-/// The first link of `buildings` with an end on `node` whose passage `p` lies in, read with clearance `clear` (µm)
-/// round its ends and past its width instead of [`CLEAR`] (#5254): the thing it belongs to and the link's kind. With
-/// [`CLEAR`] it is the passage [`in_passage_indexed`] finds (its band then half [`CLEAR`]); with a body's radius and
-/// margin it is the passage itself, which a body standing there would be in.
+/// The first link of `buildings` with an end on `node` whose passage `p` lies in, read with a walker's clearance
+/// ([`CLEARS`]: [`CLEAR`] round its ends, half [`CLEAR`] past its width along its line, #5254; A3): the thing it
+/// belongs to and the link's kind. It is the passage [`in_passage_indexed`] finds.
 pub fn passage_named(
     buildings: &[Building],
     passages: &Passages,
@@ -2574,13 +2565,8 @@ pub fn passage_named(
     node: Id,
     p: Vec3,
     door: Option<Id>,
-    clear: i64,
 ) -> Option<(Id, Kind)> {
-    let clears = if clear == CLEAR {
-        CLEARS
-    } else {
-        (clear, clear)
-    };
+    let clears = CLEARS;
     for &(bi, li) in passages.on.get(&node).map_or(&[][..], |v| &v[..]) {
         let i = bi as usize;
         if node == ground
@@ -2808,7 +2794,6 @@ impl Grounds<'_> {
     /// [`CLEAR`] of a link's end or of its width along its line, as a walker is kept (A3: no standing place narrows a
     /// doorway or a stair for others; #5254).
     fn passage_within(&self, node: Id, p: Vec3, _size: Size) -> bool {
-        let clear = CLEAR;
         passage_named(
             self.buildings,
             self.passages,
@@ -2816,7 +2801,6 @@ impl Grounds<'_> {
             node,
             p,
             self.door,
-            clear,
         )
         .is_some()
     }
