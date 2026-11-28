@@ -769,6 +769,17 @@ fn face_holds(
 }
 
 /// Where the controller has a body: the node it stands on and its position there.
+/// The holders crew `activity`'s kept hold stands for ([`sim::structure::F_KEPT`]), 0 with none.
+fn kept_of(tree: &Tree, activity: Id) -> u64 {
+    tree.handle(activity)
+        .and_then(|h| tree.node(h))
+        .and_then(|n| match n.fields().get(&sim::structure::F_KEPT) {
+            Some(Value::Uint(k)) => Some(*k),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
 fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
     c.body(body)
         .map(|m| (sim::index::place_of(m).0, m.pose.position))
@@ -1296,7 +1307,7 @@ impl Engine {
                 // carrier's leave would say without it are taken back with it (#5067).
                 let said = self.activities.stream.len();
                 self.carrier_leaves(&mut tree, activity, a.body, now, (a.id, a.soul))?;
-                // Alone among the members whose bodies are in the world (one who retired keeps its place, N4 item 5).
+                // Alone among the members whose bodies are in the world (a body taken out at a restart keeps no place).
                 let lone = self
                     .activities
                     .members(activity)
@@ -1337,8 +1348,8 @@ impl Engine {
             }
             Verb::Take | Verb::Unseat | Verb::Put => {
                 // A lone holder of a seated part lays it down beside its bay (0.135 A2): it cannot carry it alone, and
-                // B18 would keep it holding the part for good. Alone counts the members whose bodies are in the world:
-                // one who retired leaves its place in the crew as the kept hold (N4 item 5), and no body to stand.
+                // B18 would keep it holding the part for good. Alone counts the members whose bodies are in the world
+                // (a retired one leaves the crew, `Engine::holder_retired`; a body taken out at a restart has none).
                 if a.verb == Verb::Unseat
                     && let Some(activity) = a.target
                     && let Some(members) = self.activities.members(activity)
@@ -2874,14 +2885,7 @@ impl Engine {
             .and_then(|h| tree.node(h))
             .map(|n| n.audience())
             .ok_or_else(|| refusal("activity-missing", show(activity)))?;
-        let kept = tree
-            .handle(activity)
-            .and_then(|h| tree.node(h))
-            .and_then(|n| match n.fields().get(&sim::structure::F_KEPT) {
-                Some(Value::Uint(k)) => Some(*k),
-                _ => None,
-            })
-            .unwrap_or(0);
+        let kept = kept_of(tree, activity);
         self.mark(tree, now, activity, audience, kept + 1)?;
         self.activities.next = tree.next();
         self.activities.leave(
@@ -2903,6 +2907,30 @@ impl Engine {
             Some(holder) => self.lay_down(tree, c, by, activity, holder, part, now),
             None => Err(refusal("crew.size", show(activity))),
         };
+        // In the same commit as the lay-down: the world's word of it, its reason the retire (acted by the retiring
+        // Soul), and the kept share given back, so the crew counts only who holds it (#5313 review).
+        if laid.is_ok() {
+            // Written on the same tree as the lay-down's own entries (`Engine::lay_down`), after them.
+            let n = self.activities.stream.len();
+            self.activities.next = tree.next();
+            self.activities.carry_set_down(
+                tree,
+                activity,
+                part,
+                "souls:holder-retired",
+                (now, Actor::Soul(by.1), Cause::Intent(by.0)),
+            )?;
+            let mut more: Vec<Effect> = self.activities.stream.drain(n..).collect();
+            self.mark(tree, now, activity, audience, kept)?;
+            more.extend(self.activities.stream.drain(n..));
+            for e in &mut more {
+                e.envelope.cause = Cause::Intent(by.0);
+                e.envelope.actor = Actor::Soul(by.1);
+            }
+            if let Some(r) = self.asm.as_mut().and_then(|a| a.ready.last_mut()) {
+                r.effects.extend(more);
+            }
+        }
         if let Err(r) = laid {
             eprintln!(
                 "worldd: {} not laid down at its holder's retire: {r}; held on by the rest",
@@ -2942,6 +2970,7 @@ impl Engine {
                 eprintln!("worldd: a retiring holder's part has no set-down: {r}");
                 None
             });
+        // Its members' links and the share already kept for those who retired before it (#5313 review).
         let holding = tree
             .handle(activity)
             .and_then(|h| tree.links_of(h))
@@ -2949,7 +2978,8 @@ impl Engine {
             .iter()
             .filter(|e| tree.ty(e).as_str() == replica::activity::MEMBER)
             .count()
-            .max(1) as u64;
+            .max(1) as u64
+            + kept_of(tree, activity);
         self.mark(tree, now, activity, crew_audience, holding)?;
         match (plan, self.asm.as_mut()) {
             (Some(effects), Some(asm)) => asm.ready.push(crate::assembly::Ready {
@@ -3951,6 +3981,23 @@ impl Engine {
                 }
             }
             return;
+        }
+        // A lay-down at a holder's retire refused at its commit (another part hangs by it, a body came where it would
+        // lie): the rest hold it on with the retired share kept, and the world says so (#5313 review).
+        if r.step == crate::assembly::Step::Laid && !written {
+            let mut tree = live.frozen();
+            if kept_of(&tree, r.activity) > 0
+                && let Some(part) = tree
+                    .handle(r.activity)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|n| n.parent())
+            {
+                match self.kept_word(&mut tree, r.activity, part, now, (r.intent, r.soul)) {
+                    Ok(()) => self.collect(Some((r.intent, r.soul))),
+                    Err(e) => eprintln!("worldd: a kept hold was not named: {e}"),
+                }
+                return;
+            }
         }
         if r.step != crate::assembly::Step::Taken {
             // A seating refused at its commit is stopped where its track ended.
