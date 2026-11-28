@@ -3635,13 +3635,20 @@ impl Engine {
 
     /// A part `r` (not a take) whose walkers' maps went stale before its commit (0.135 A2: a retiring holder's body
     /// left meanwhile; #5067: a raise's or a seating's end while bodies walk): prepared again from the world as it is
-    /// then, at most [`RETRIES`] times; `false` when it has been, and it is refused.
+    /// then, at most [`RETRIES`] times; `false` when it has been, and it is refused. A seating at the end of a raise's
+    /// or a set-in's track (FOR-FABLE 15) is under way: it is prepared again for as long as the maps go stale (another
+    /// body walking or on its own track meanwhile; a track always ends), never refused for it, so it is never turned
+    /// back midway, and its raise does not count the wait as a commit that never came back.
     pub fn retry(&mut self, r: crate::assembly::Ready) -> bool {
-        let n = self.retried.entry(r.activity).or_insert(0);
-        *n += 1;
-        if *n > RETRIES {
-            self.retried.remove(&r.activity);
-            return false;
+        if r.step == crate::assembly::Step::Seated {
+            self.raise_waits(r.activity);
+        } else {
+            let n = self.retried.entry(r.activity).or_insert(0);
+            *n += 1;
+            if *n > RETRIES {
+                self.retried.remove(&r.activity);
+                return false;
+            }
         }
         match self.asm.as_mut() {
             Some(asm) => {

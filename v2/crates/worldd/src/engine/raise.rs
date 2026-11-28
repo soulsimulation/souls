@@ -636,6 +636,14 @@ impl Engine {
         None
     }
 
+    /// Crew `activity`'s raise, if it is one, has its end's commit out again (FOR-FABLE 15: prepared again for a stale
+    /// map): it has come back, so the wait for it starts again.
+    pub(super) fn raise_waits(&mut self, activity: Id) {
+        if let Some(ra) = self.raising.get_mut(&activity) {
+            ra.waited = 0;
+        }
+    }
+
     /// The world's word that a raise turned back, and why: `souls:carry-track` with `souls:lower`.
     fn turned_back(
         &mut self,
