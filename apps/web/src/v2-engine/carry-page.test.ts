@@ -49,3 +49,14 @@ test('a raise\'s hands are placed by rule each frame: the lifter where its post 
  parts.receive({t:'part',p:{number:2,from:10000000,to:11000000,nodes:[],removed:[],samples:[],hash:true,carryChanges:[{at:10000000,node:'crew',grips:g('souls:held',10000000,own)}]}as PartRec});
  near(hands(10500000),[1.0,1.3]);
 });
+test('a held frame seated half turned in its slot: the world\'s hold points go through its seated pose, the half turn included, onto its outer face',()=>{
+ const parts=new CarriedParts({apply:()=>{}},bundledEntries({u:{kind:'fixture:upright',points:{foot:{role:'contact',at_mm:[0,0,0]}},geometry:{bounds_mm:[1219,3658,76]}}}));
+ const a=member('a'),b=member('b'),byBody=new Map([[a.body,'draw-a'],[b.body,'draw-b']]);
+ // the bay at z 20 m, its slot 2 at z +1.448 m (its side away from slot 1); the frame seated there turned a half turn about y
+ parts.receive({t:'snapshot',s:{nodes:[n('ground',null),n('bay','ground',{pos:[0,0,20000000],slots:[[1,0,0,-1448],[2,0,0,1448]]}),n('crew','ground'),n('frame','bay',{slot:2,kind:'fixture:upright',rot:[0,0,Q,0]}),n(a.body,'ground',{kind:'souls:body',soul:a.soul}),n(b.body,'ground',{kind:'souls:body',soul:b.soul})],removed:[]}});
+ const hold=(body:string,x:number)=>({body,grip:x>0?'point:grip_high':'point:foot',gripUm:[0,0,0]as[number,number,number],handsUm:[[x,1050000,-38000],[x,1350000,-38000]]as[[number,number,number],[number,number,number]]});
+ parts.receive({t:'part',p:{number:1,from:0,to:1000000,nodes:[],removed:[],samples:[],hash:true,carryChanges:[{at:0,node:'crew',members:[a,b]},{at:0,node:'crew',grips:{crew:'crew',load:'frame',phase:'souls:held',sinceUs:0,holds:[hold(a.body,571500),hold(b.body,-571500)]}}]}as PartRec});
+ const f=carryPageAt(500000,byBody,parts)!;assert.deepEqual(f.errors,[]);
+ for(const[who,x]of[['draw-a',-.5715],['draw-b',.5715]]as const)for(const p of[f.bodies[who].hands.left,f.bodies[who].hands.right]){
+  assert(Math.abs(p[0]-x)<1e-9,`${who} x ${p[0]}`);assert(Math.abs(p[2]-(20+1.448+.038))<1e-9,`${who} on the outer face, beyond the slot: z ${p[2]}`);}
+});
