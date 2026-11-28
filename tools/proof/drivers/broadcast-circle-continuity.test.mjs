@@ -27,3 +27,12 @@ test('post-event continuity cannot bridge an invalid middle input window or unor
  assert.equal(assessContinuity(p,broken,limited).selectedTalkAfter,false);
  const unordered=[...samples].reverse();assert.equal(assessContinuity(p,unordered,draws).progress,false);
 });
+
+test('live declaration and public mapping refuse guessed/missing/ambiguous actor identities',async()=>{
+ const{liveDeclaration,actorMapping}=await import('./broadcast-circle-continuity.mjs'),v={seconds:19,preMs:8000,activationMs:8000,labels:['listener-1','listener-2','listener-3']};assert.deepEqual(liveDeclaration(v),v);assert.throws(()=>liveDeclaration({...v,preMs:0}));assert.throws(()=>liveDeclaration({...v,labels:['listener-1','listener-1','listener-3']}));
+ const souls=v.labels.map((name,i)=>({name,entityId:'actual-'+i+'_look'}));assert.deepEqual(actorMapping(souls,v.labels).map(x=>x.id),souls.map(x=>x.entityId));assert.throws(()=>actorMapping(souls.slice(1),v.labels));assert.throws(()=>actorMapping([...souls,souls[0]],v.labels));assert.throws(()=>actorMapping(souls.map(x=>({...x,entityId:'one'})),v.labels));
+});
+test('live precondition requires depicted listeners, not accepted commands or an unrelated circle',async()=>{
+ const{observedCircle}=await import('./broadcast-circle-continuity.mjs'),s=data().samples[0];assert.ok(observedCircle(s,p.bodyIds));assert.equal(observedCircle({...s,bodies:s.bodies.map(b=>({...b,activity:'idle'}))},p.bodyIds),false);assert.equal(observedCircle({...s,bodies:[...s.bodies,{id:'x',p:[20,0,0],activity:'listen'},{id:'y',p:[21,0,0],activity:'listen'}]},p.bodyIds),false);
+ const{samples,draws}=data(),live=draws.map(d=>({...d,history:0}));assert.ok(assessContinuity({...p,live:true},samples,live).selectedTalkAfter);assert.equal(assessContinuity({...p,live:true},samples,draws).selectedTalkBefore,false);
+});
