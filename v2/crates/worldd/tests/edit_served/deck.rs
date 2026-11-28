@@ -1214,7 +1214,11 @@ fn deck_bay_a_soul_on_a_frames_standing_place_walks_to_a_point_on_the_ground_2_m
     let got = socket_end(&mut k.hands[4].s);
     k.ok(got, "Soul 5 sent to the point under it");
     let (on, at) = body_on(&k.w, walker);
-    assert_eq!((on, at.y), (perch, 1_800_000), "it stays up, on the standing place");
+    assert_eq!(
+        (on, at.y),
+        (perch, 1_800_000),
+        "it stays up, on the standing place"
+    );
 
     // Down to a point on the open ground 2 m out from the frame's foot (frame 1 stands at the bay's -z end).
     let foot = Bay::at(0, -1_448 - 2_000);
@@ -1231,8 +1235,15 @@ fn deck_bay_a_soul_on_a_frames_standing_place_walks_to_a_point_on_the_ground_2_m
     let nowhere = v3(foot.x + 50_000_000_000, 0, foot.z);
     k.hands[4].send("eden:walk", g, to(nowhere));
     let got = socket_end(&mut k.hands[4].s);
-    refused_as(&got, "walk.no-ground-there", "Soul 5 sent off the world's ground");
-    assert!(got.detail.contains("no ground to stand on"), "says so: {got:?}");
+    refused_as(
+        &got,
+        "walk.no-ground-there",
+        "Soul 5 sent off the world's ground",
+    );
+    assert!(
+        got.detail.contains("no ground to stand on"),
+        "says so: {got:?}"
+    );
     assert_eq!(body_on(&k.w, walker).0, g, "it stays where it was");
 
     // A point 2 m inside the ring's solid middle (`testworld`): refused, naming the nearest point to stand on, which
@@ -1244,19 +1255,34 @@ fn deck_bay_a_soul_on_a_frames_standing_place_walks_to_a_point_on_the_ground_2_m
     );
     k.hands[4].send("eden:walk", g, to(solid));
     let got = socket_end(&mut k.hands[4].s);
-    refused_as(&got, "walk.no-ground-there", "Soul 5 sent into the ring's solid middle");
+    refused_as(
+        &got,
+        "walk.no-ground-there",
+        "Soul 5 sent into the ring's solid middle",
+    );
     let named = got
         .detail
         .split("the nearest point to stand on: ")
         .nth(1)
         .unwrap_or_else(|| panic!("names the nearest point: {got:?}"));
     let mm = |k: &str| -> i64 {
-        named.split(k).nth(1).unwrap().split([' ', ';']).next().unwrap().parse().unwrap()
+        named
+            .split(k)
+            .nth(1)
+            .unwrap()
+            .split([' ', ';'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
     };
     let near = v3(mm("x=") * 1000, 0, mm("z=") * 1000);
     let off = (i128::from(near.x - solid.x).pow(2) + i128::from(near.z - solid.z).pow(2)).isqrt();
     println!("the nearest point named: {near:?}, {off} µm from the point asked");
-    assert!(off > 400_000 && off <= 7_000_000, "between 0.4 m and 7 m off: {off}");
+    assert!(
+        off > 400_000 && off <= 7_000_000,
+        "between 0.4 m and 7 m off: {off}"
+    );
     k.hands[4].send("eden:walk", g, to(near));
     let got = socket_end(&mut k.hands[4].s);
     k.ok(got, "Soul 5 walks to the point named");

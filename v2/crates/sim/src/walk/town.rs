@@ -3443,7 +3443,9 @@ impl<'a> View<'a> {
         let own = height(node_of(body), body.pose.position)?;
         let (has, _) = self.wet(body);
         // Where its walk leaves from: a level the map joins to it by no portal or link is not one it walks to.
-        let start = self.map.spot_near(node_of(body), body.pose.position, AT_EDGE);
+        let start = self
+            .map
+            .spot_near(node_of(body), body.pose.position, AT_EDGE);
         let joined = |s: &Spot| start.is_none_or(|a| self.map.may_reach(a.piece, s.piece));
         let mut best: Option<(i64, Id, Vec3)> = None;
         let mut keep = |node: Id, s: Spot, y: i64| {
