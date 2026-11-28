@@ -3,14 +3,16 @@ import{writeFileSync}from'node:fs';import{join}from'node:path';import{setTimeout
 import{beforeNavigation as observeNavigation,depictedBodyIds}from'./camera-observation.mjs';
 import{prepare as prepareSource,chooseFollow,resetFollow,readFollow,compositionConsistent}from'./camera-follow-source.mjs';
 import{openCostTime}from'./camera-observation-cost.mjs';
+import{receiptState}from'./camera-observation-cost-source.mjs';
 import{reduceFollow}from'./camera-follow-comparison.mjs';
 export const HANDOVER=Object.freeze({activationDelayMs:2000,trackingMs:3000,dragPixels:36,dragSteps:12,dragStepMs:100,settleMs:3500,zoomDelta:-180});
-export function lifecycleDeclaration(p){if(!p||!['moving-handover-1','lifecycle-transitions-1','eyes-ownership-1'].includes(p.protocol)||p.variant!=='candidate')throw Error('follow-lifecycle-declaration');return structuredClone(p);}
+export function lifecycleDeclaration(p){if(!p||!['moving-handover-1','lifecycle-transitions-1','eyes-ownership-1','explicit-partner-1'].includes(p.protocol)||p.variant!=='candidate')throw Error('follow-lifecycle-declaration');return structuredClone(p);}
 let declaration;
-export async function prepare(args){declaration=lifecycleDeclaration(args.recipe.sourceRecording?.lifecycle);return{...await prepareSource(args),plan:declaration};}
+export async function prepare(args){declaration=lifecycleDeclaration(args.recipe.sourceRecording?.lifecycle);if(declaration.protocol==='explicit-partner-1')return{actor:await args.recipe.joinActor(),partner:await args.recipe.joinActor('gesture-partner'),plan:declaration};return{...await prepareSource(args),plan:declaration};}
 export function beforeNavigation(args){if(!declaration)throw Error('follow-lifecycle-not-prepared');const stop=observeNavigation(args),goto=args.page.goto.bind(args.page);args.page.goto=async(url,...rest)=>{if(declaration.protocol==='lifecycle-transitions-1')await resizeViewport(args.page,390,844);const u=new URL(url);if(declaration.protocol==='eyes-ownership-1')u.searchParams.set('eyes','1');u.searchParams.set('camera-follow','experimental');u.searchParams.set('camera-follow-test','1');return goto(u.href,...rest);};return stop;}
 export function poseDelta(a,b){const distance=(x,y)=>Math.hypot(...x.map((v,i)=>v-y[i])),radius=p=>distance(p.eye,p.target),yaw=p=>Math.atan2(p.eye[0]-p.target[0],p.eye[2]-p.target[2]);return{eyeM:distance(a.eye,b.eye),yawDegrees:Math.atan2(Math.sin(yaw(b)-yaw(a)),Math.cos(yaw(b)-yaw(a)))*180/Math.PI,radiusRatio:radius(b)/radius(a),subjectM:a.subject&&b.subject?distance(a.subject.transform.positionM,b.subject.transform.positionM):null};}
 export default async function({page,paths,fixture,signal,check}){
+ if(declaration.protocol==='explicit-partner-1')return explicitPartner({page,paths,fixture,signal,check});
  let n=0;const save=(file,value)=>writeFileSync(join(paths.dir,file),JSON.stringify(value,null,2)+'\n',{flag:'wx'}),snapshot=async label=>save(`phase-handover-ui-${String(++n).padStart(3,'0')}-${label}.json`,{accessibility:await page.locator('body').ariaSnapshot()}),ids=depictedBodyIds(fixture.actor.body),events=[];
  const read=async label=>{const state=await readFollow(page,ids);events.push({label,...state});save(`phase-handover-${label}.json`,state);return state;};
  if(declaration.protocol==='eyes-ownership-1'){
@@ -48,3 +50,66 @@ async function transitions({page,paths,fixture,signal,check},save,snapshot,ids,r
 /** Existing public capture API request, derived only from the actually exposed Soul pose. */
 export function eyesJob(where){const matches=where?.souls?.filter(s=>s.name==='Camera Subject')??[];if(matches.length!==1)throw Error('eyes-subject-ambiguous');const s=matches[0];if(!s.entityId||!Array.isArray(s.p)||s.p.length!==3||![...s.p,s.yaw].every(Number.isFinite))throw Error('eyes-subject-pose');return{mode:'eyes',w:390,h:844,quality:.9,pose:{p:[s.p[0],s.p[1]+1.6,s.p[2]],yaw:s.yaw,pitch:0,vfov:Math.PI/3},self:s.entityId,show:[]};}
 export function eyesPoseMatches(row,job){const m=row.cameraWorld,p=row.projection;if(!Array.isArray(m)||m.length!==16||!Array.isArray(p)||p.length!==16||![...m,...p].every(Number.isFinite))return false;const direction=[Math.cos(job.pose.yaw)*Math.cos(job.pose.pitch),Math.sin(job.pose.pitch),Math.sin(job.pose.yaw)*Math.cos(job.pose.pitch)];return Math.hypot(...job.pose.p.map((v,i)=>m[12+i]-v))<1e-6&&Math.hypot(...direction.map((v,i)=>-m[8+i]-v))<1e-6&&Math.abs(p[5]-1/Math.tan(job.pose.vfov/2))<1e-6&&Math.abs(p[5]/p[0]-job.w/job.h)<1e-6;}
+
+
+export const PARTNER_CASE=Object.freeze({durationMs:25000,offerAtMs:5000,sampleMs:50,approachMs:15000,offerWaitMs:5000});
+/** Only the actual targeted native invitation authorizes this single acceptance. */
+export function handshakeOffer(reply,from){
+ const matches=(reply?.events??[]).filter(e=>e.kind==='together'&&e.what==='offered'&&e.touch==='handshake'&&(e.from_id??e.from)===from);
+ const ids=[...new Set(matches.map(e=>e.offer))];
+ if(ids.length!==1||!/^[0-9a-f]{32}-\d+$/.test(ids[0]))throw Error('partner-offer-missing-or-ambiguous');return ids[0];
+}
+export function partnerSampleValid(s,ids){
+ const f=s?.observation?.frame;if(f?.status!=='observed'||f.value.depicted.tick!==s.observation.drawn?.tick||f.value.depicted.seconds!==s.observation.drawn?.seconds||s.mode!=='follow'||s.presentation!=='live'||!f.value.version.epoch.includes('live'))return false;
+ if(s.follow?.tick!==f.value.depicted.tick||s.follow?.subject?.id!==ids[0]||s.follow?.enabled!==true||s.follow?.mode!=='follow'||s.follow.cameraWorld?.some((n,i)=>Math.abs(n-s.cameraWorld?.[i])>1e-9)||s.follow.projection?.some((n,i)=>Math.abs(n-s.projection?.[i])>1e-9))return false;
+ if(![s.cameraWorld,s.projection].every(m=>Array.isArray(m)&&m.length===16&&m.every(Number.isFinite)))return false;
+ return ids.every(id=>{const body=f.value.subjects.find(b=>b.id===id&&b.state==='present'),alignment=s.observation.alignment?.find(a=>a.id===id)?.matrixPosition;return body&&alignment&&body.transform.positionM.every((n,i)=>Math.abs(n-alignment[i])<1e-9);});
+}
+/** Geometry availability is reported separately from actual reciprocal explicit relation/expiry. */
+export function partnerEvidence(samples,commands,ids){
+ const accept=commands.find(c=>c.kind==='accept'),valid=samples.filter(s=>partnerSampleValid(s,ids));
+ const roles=s=>ids.map(id=>s.observation.frame.value.subjects.find(b=>b.id===id).activity);
+ const relation=s=>roles(s).every((a,i)=>a?.kind==='handshake'&&a.roles?.some(r=>r.role==='partner'&&r.subject===ids[1-i]));
+ const clear=s=>roles(s).every(a=>a&&!a.roles?.some(r=>r.role==='partner'));
+ const ordered=valid.every((s,i)=>!i||s.at>valid[i-1].at&&s.observation.drawn.tick>=valid[i-1].observation.drawn.tick&&s.observation.drawn.seconds>=valid[i-1].observation.drawn.seconds);
+ const active=valid.filter(relation),start=active[0],end=active.at(-1),before=valid.filter(s=>accept&&s.at<accept.before.at),after=valid.filter(s=>end&&s.at>end.at&&s.observation.drawn.tick>end.observation.drawn.tick&&clear(s));
+ const distinct=rows=>new Set(rows.map(s=>s.observation.drawn.tick)).size;
+ const gaps=valid.slice(1).map((s,i)=>({browserMs:s.at-valid[i].at,nativeSeconds:s.observation.drawn.seconds-valid[i].observation.drawn.seconds}));
+ return{samples:samples.length,valid:valid.length,ids,ordered,distinctActiveTicks:distinct(active),activeSamples:active.length,firstActive:start?{at:start.at,tick:start.observation.drawn.tick,seconds:start.observation.drawn.seconds}:null,lastActive:end?{at:end.at,tick:end.observation.drawn.tick,seconds:end.observation.drawn.seconds}:null,firstClearAfter:after[0]?{at:after[0].at,tick:after[0].observation.drawn.tick,seconds:after[0].observation.drawn.seconds}:null,observedActiveSpanSeconds:start&&end?end.observation.drawn.seconds-start.observation.drawn.seconds:null,beforeSamples:before.length,afterSamples:after.length,oneSidedOrUnknownSamples:valid.filter(s=>!relation(s)&&!clear(s)).length,maxBrowserGapMs:Math.max(0,...gaps.map(g=>g.browserMs)),maxNativeGapSeconds:Math.max(0,...gaps.map(g=>g.nativeSeconds)),preAcceptanceRelation:before.some(relation),activeWithBothBounds:active.filter(s=>ids.every(id=>!!s.observation.frame.value.subjects.find(b=>b.id===id).bounds)).length,qualified:!!accept&&ordered&&distinct(active)>=2&&distinct(before)>=2&&distinct(after)>=2&&!before.some(relation)&&gaps.every(g=>g.browserMs<=400&&g.nativeSeconds<=.5),scope:'50ms public same-draw observations; not every rendered frame, anatomy sight, or exact native run duration. Expiry bracket is last observed reciprocal and first observed both-clear; gaps retained. No framing PASS is inferred.'};
+}
+async function explicitPartner({page,paths,fixture,signal,check}){
+ const samples=[],commands=[];let n=0,worker,error,diagnostics;
+ const save=(name,value)=>writeFileSync(join(paths.dir,name),JSON.stringify(value,null,2)+'\n',{flag:'wx'}),snapshot=async label=>save(`phase-partner-ui-${String(++n).padStart(3,'0')}-${label}.json`,{accessibility:await page.locator('body').ariaSnapshot()});
+ const actorIds=depictedBodyIds(fixture.actor.body),partnerIds=depictedBodyIds(fixture.partner.body);
+ const read=()=>page.evaluate(()=>{const r=window.__cameraObservation,w=window.__soulsEntity,v=document.querySelector('.viewer-history'),follow=window.__followExperiment?.().rows.at(-1);return{at:performance.now(),follow,mode:v?.getAttribute('data-viewer-mode'),presentation:v?.getAttribute('data-viewer-presentation'),observation:r,eye:w?.camera?.position.toArray(),target:w?.controls?.target.toArray(),cameraWorld:follow?.cameraWorld,projection:follow?.projection,viewport:follow?.viewport,currentCameraWorld:w?.camera?.matrixWorld.toArray(),currentProjection:w?.camera?.projectionMatrix.toArray()};});
+ const command=async(kind,actor,words)=>{const entry={kind,words,before:await read()};commands.push(entry);try{entry.result=await actor.cli(...words);return entry.result;}finally{entry.after=await read();}};
+ try{
+  await page.waitForFunction(()=>document.querySelector('.viewer-history')?.getAttribute('data-viewer-ready')==='true'&&!document.querySelector('.viewer-arrival'),null,{timeout:30000});
+  const approach=await command('approach',fixture.actor,['act',fixture.partner.body]);if(!approach.ok||!Number.isSafeInteger(approach.sequence))throw Error('partner-approach-not-admitted');
+  const until=performance.now()+PARTNER_CASE.approachMs;let done=false;
+  while(performance.now()<until){signal.throwIfAborted();const reply=await command('approach-receipt',fixture.actor,['receipt',String(approach.sequence)]),state=receiptState(reply);if(state==='refused')throw Error('partner-approach-refused');if(state==='done'){done=true;break;}await delay(200,null,{signal});}if(!done)throw Error('partner-approach-timeout');
+  await chooseFollow(page,snapshot);await page.waitForFunction(()=>typeof window.__followExperiment==='function',null,{timeout:10000});await resetFollow(page,snapshot);
+  const initial=await read(),subjects=initial.observation?.frame?.value?.subjects??[],choose=options=>{const matches=subjects.filter(s=>options.includes(s.id)&&s.state==='present');if(matches.length!==1)throw Error('partner-depicted-identity');return matches[0].id;},ids=[choose(actorIds),choose(partnerIds)];
+  if(ids[0]===ids[1]||!partnerSampleValid(initial,ids))throw Error('partner-initial-observation');
+  const prior=await page.evaluate(()=>window.__followExperiment());if(!prior.enabled||prior.rows.at(-1)?.subject?.id!==ids[0])throw Error('partner-selected-follow-identity');
+  save('phase-partner-identities.json',{actor:fixture.actor.body,partner:fixture.partner.body,actorIds,partnerIds,ids,initial});
+  const start=performance.now();let started=false,workerError;
+  while(performance.now()-start<PARTNER_CASE.durationMs){signal.throwIfAborted();samples.push(await read());
+   if(!started&&performance.now()-start>=PARTNER_CASE.offerAtMs){started=true;worker=(async()=>{const offered=await command('offer',fixture.actor,['together','offer','handshake',fixture.partner.body]);if(!offered.ok||!Number.isSafeInteger(offered.sequence))throw Error('partner-offer-not-admitted');
+    const until=performance.now()+PARTNER_CASE.offerWaitMs;let offer;
+    while(performance.now()<until){const reply=await command('offer-events',fixture.partner,['events','--since','0']);try{offer=handshakeOffer(reply,fixture.actor.body);break;}catch(e){if((reply.events??[]).filter(e=>e.kind==='together'&&e.what==='offered'&&e.touch==='handshake').length>1)throw e;}await delay(100,null,{signal});}
+    if(!offer)throw Error('partner-invitation-not-observed');const accepted=await command('accept',fixture.partner,['together','accept',offer]);if(!accepted.ok||!Number.isSafeInteger(accepted.sequence))throw Error('partner-accept-not-admitted');
+    for(const [actor,sequence,kind]of[[fixture.actor,offered.sequence,'offer-receipt'],[fixture.partner,accepted.sequence,'accept-receipt']])await command(kind,actor,['receipt',String(sequence)]);
+   })().catch(e=>{workerError=e;});}
+   if(workerError)throw workerError;await delay(PARTNER_CASE.sampleMs,null,{signal});
+  }
+  await worker;if(workerError)throw workerError;samples.push(await read());
+  const evidence=partnerEvidence(samples,commands,ids);save('phase-partner-evidence.json',evidence);check('partner-actual-finite-reciprocal-gesture',evidence.qualified);check('partner-bounds-during-gesture',evidence.activeWithBothBounds>=2);
+  await page.screenshot({path:join(paths.dir,'partner-final.png')});
+ }catch(e){error=e;}finally{
+  if(worker)await worker;
+  try{const start=performance.now();diagnostics=await page.evaluate(()=>window.__followExperiment?.());save('phase-partner-diagnostics.json',{data:diagnostics,exportMs:performance.now()-start});}catch(e){error??=e;}
+  save('phase-partner-samples.json',samples);save('phase-partner-commands.json',commands);
+ }
+ if(error)throw error;check('partner-follow-lossless-enabled',diagnostics?.enabled===true&&diagnostics?.dropped===0);check('partner-live-follow-throughout',samples.every(s=>s.mode==='follow'&&s.presentation==='live'));
+}
