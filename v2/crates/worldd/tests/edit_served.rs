@@ -7690,7 +7690,7 @@ fn bay_holds(w: &Seeded, bay: Id) -> (usize, usize) {
 async fn a4_two_teams_build_three_bays_and_take_them_down() {
     let d = scratch("a4bays");
     let (facts, slots) = three_bays_world(&d);
-    let w = seed_entries(&d, &facts, 6, (59, -34), Some(&d.join("entries")));
+    let w = seed_entries(&d, &facts, 6, (59, -20), Some(&d.join("entries")));
     let socket = d.join("s");
     let served = serve_with(&w, &socket, None);
     served.line("listening ", 120);
