@@ -264,6 +264,10 @@ export class V2Bridge {
       // a move at a book in its own hand is reading it (the book's read form), drawn as the old read pose to the run's end
       const heldProp = m.target && this.heldBy.get(m.target) === m.body ? propOf(this.nodes.get(m.target)?.kind ?? '') : null;
       const g = readingFrom(m, heldProp) ?? gestureFrom(m, m.target === m.body ? null : this.toward(m.target));
+      // A later target/ancestor pose in this part cannot supply a point's earlier arm bearing.
+      if (g?.point) for (let n = this.nodes.get(m.target!), depth = 0; n && depth <= 32; n = this.nodes.get(n.parent ?? ''), depth++) {
+        if (n.at !== null && n.at > m.start) { delete g.point; break; }
+      }
       if (g) t.gestures.push(g);
     }
     for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at, e.run); }

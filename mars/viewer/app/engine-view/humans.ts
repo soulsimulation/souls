@@ -79,6 +79,17 @@ import {PLAY_MOTION, playSeatAt, rideSeat} from './play-motion.ts';
 import {BIKE_SADDLE, crankAngle, makeBicycle, pedalLocal, poseBicycle} from './bicycle.ts';
 
 type Hands = { left?: Vec3; right?: Vec3 };
+/** Cosmetic point bearing, never a native hand endpoint. Coordinates are world metres; times are world µs. */
+export type PointAim = { target: string; at: [number, number]; hand: 'left' | 'right'; start: number; ends: number[]; cut?: number; contact?: string; run?: string };
+export function pointAimOf(value: unknown): PointAim | undefined {
+  const p = value as PointAim | null;
+  if (!p || typeof p.target !== 'string' || !p.target || !['left','right'].includes(p.hand)
+    || !Array.isArray(p.at) || p.at.length !== 2 || !p.at.every(Number.isFinite) || !Number.isFinite(p.start)
+    || !Array.isArray(p.ends) || !p.ends.length || !p.ends.every((n,i) => Number.isFinite(n) && n > (i ? p.ends[i-1] : p.start))
+    || p.cut !== undefined && (!Number.isFinite(p.cut) || p.cut < p.start || p.cut > p.ends.at(-1)!)) return undefined;
+  return { target:p.target, at:[...p.at], hand:p.hand, start:p.start, ends:[...p.ends], ...(p.cut === undefined ? {} : {cut:p.cut}),
+    ...(typeof p.contact === 'string' ? {contact:p.contact} : {}), ...(typeof p.run === 'string' ? {run:p.run} : {}) };
+}
 type Snap = { p: [number, number, number]; yaw: number; walkW: number; walkT: number; idleT: number; sitW: number; warmW: number; expressionT: number; pose: Posture; hands: Hands; pr: ProneState | null };
 const POSTURE_ORIGINS = new Set(['idle','pushups','situps','stargaze','lie','jumping-jacks','stretch','yoga']);
 export type ClipOrigin = {
@@ -219,6 +230,8 @@ type View = {
    *  and base before it (crossfade), the paired-gesture partner and where it is, metres walked, speaking now. */
   since?: number;
   formPress?: readonly FormPress[];
+  pointAim?: PointAim;
+  pointAimTime?: number;
   prevAct?: string;
   /** posture-transition.ts: the latest change of posture (activity before it, its base, the activity after) and its age. */
   postureChange?: PostureChange;
@@ -359,6 +372,8 @@ export type SampledHuman = {
   clipOrigin?: ClipOrigin;
   /** Existing v2 press record, including its native hand and phase clock. */
   formPress?: readonly FormPress[];
+  pointAim?: PointAim;
+  pointAimTime?: number;
   /** The latest change of posture in the recorded history (posture-transition.ts): the activity and base before it,
    *  the activity it went into and its age (s); absent when there was none in the last second or so. */
   postureChange?: PostureChange;
@@ -702,6 +717,7 @@ export class HumanViews {
         v.prevAct = v.activity; v.prevBase = v.base; v.prevDuration=(v.age+1)*DT;v.prevInstrument=v.instrument;
       }
       v.age = act === v.activity ? v.age + 1 : 0;
+      v.pointAim = undefined; v.pointAimTime = undefined;
       v.since = v.age * DT;
       if(v.waveEvents){
         const human=e.human,owner=human.hands?.left||human.hands?.right||human.grip||human.handHold||human.rps||human.heldItemsV1?.left||human.heldItemsV1?.right||human.on;
@@ -961,7 +977,7 @@ export class HumanViews {
       v.activity = act;
       if(v.handActuator&&!f.handActuator)v.lastHandActuator=v.handActuator;else if(f.handActuator)v.lastHandActuator=undefined;
       v.handActuator=f.handActuator;v.handActuatorTime=f.handActuatorTime;v.watering=f.watering;v.wateringTime=f.wateringTime;v.letGo=f.letGo;v.letGoTime=f.letGoTime;v.cup=f.cup;v.cupTime=f.cupTime;v.transfer=f.transfer;v.transferTime=f.transferTime;
-      v.itemPose=f.itemPose; v.formPress=formPresses(f.formPress);
+      v.itemPose=f.itemPose; v.formPress=formPresses(f.formPress); v.pointAim=pointAimOf(f.pointAim); v.pointAimTime=f.pointAimTime;
       v.sleepPose = f.sleepPose;
       v.shore = f.shore;
       v.shoreTime = f.shoreTime;
@@ -1062,8 +1078,9 @@ export class HumanViews {
     // Transition layouts change the lowest torso vertex; a prior-pose shortlist is not a valid contact sample.
     if(v.postureChange)v.restCache=undefined;
     const nativeHandOwner=!!(a.hands.left||a.hands.right||b.hands.left||b.hands.right||v.itemPose||v.handActuator);
+    const pointFree=!!v.pointAim&&!nativeHandOwner&&!v.formPress?.length&&!v.itemPose&&!v.handActuator&&!v.lastHandActuator&&!v.transfer&&!v.watering&&!v.cup&&!v.letGo&&!v.handHold&&!v.rps&&!v.propWanted&&!v.prop?.obj.visible&&!v.instrument&&!v.grip&&!v.on;
     const clipHistoryReset=!!v.clipOrigin&&!v.speaking&&!v.instrument&&!v.propWanted&&!v.prop?.obj.visible&&!v.itemPose&&!v.handActuator&&!v.transfer&&!v.watering&&!v.cup&&!v.letGo&&!v.lastHandActuator&&!v.handHold&&!v.rps&&!v.grip&&!v.on&&!v.formPress?.length&&v.cur.walkW<.01&&v.cur.sitW===0&&postureKind(v.activity,v.base)==='stand'&&postureKind(v.clipOrigin.sample.activity??'idle',v.clipOrigin.sample.baseActivity)==='stand';
-    const plainIdle=v.activity==='idle'&&!v.postureChange&&!clipHistoryReset;
+    const plainIdle=v.activity==='idle'&&!pointFree&&!v.postureChange&&!clipHistoryReset;
     if(!nativeHandOwner && !plainIdle){
       v.rig.mixer.stopAllAction();
       for(const s of v.clipReference??[]){s.o.position.copy(s.p);s.o.quaternion.copy(s.q);s.o.scale.copy(s.s);}
@@ -1120,12 +1137,18 @@ export class HumanViews {
     const g0=v.gesture,gestureAge=!RETURNS.has(v.activity)?undefined:v.since??(g0?.act===v.activity&&tSec>=g0.at&&tSec-g0.at<1?g0.age+tSec-g0.at:0);
     if(gestureAge!==undefined)v.gesture={act:v.activity,age:gestureAge,at:tSec};
     const back=v.activity==='idle'&&g0?tSec-g0.at:-1, gestureBack=back>=0&&back<GESTURE_RETURN;
+    const point = v.pointAim, pointNow = v.pointAimTime;
+    const pointEnd = point ? Math.min(point.ends.at(-1)!, point.cut ?? Infinity) : 0;
+    const pointOwned = pointFree && point && pointNow !== undefined && Number.isFinite(pointNow) && pointNow >= point.start && pointNow < pointEnd + GESTURE_RETURN * 1e6
+      && ['point','idle','sit'].includes(v.activity);
+    const pointFrame = pointOwned ? activityFrame('point',v.base,tSec,h.name,{since:(pointNow-point.start)/1e6,
+      ...(pointNow >= pointEnd ? {released:(pointNow-pointEnd)/1e6,priorAge:(pointEnd-point.start)/1e6} : {})}) : null;
     const act0: ActivityFrame | null = !(recordedPress && v.activity === 'operate') && freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep && lib.rise === undefined
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
       : fluteRelease ? activityFrame('play-music','idle',tSec-v.since!,pairPhase,{instrument:'flute',actorId:h.name,released:v.since,priorAge:v.prevDuration})
-      : gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
+      : pointFrame ?? (gestureBack ? activityFrame(g0!.act,v.base,tSec,pairPhase,{released:back,priorAge:g0!.age})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
-      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
+      : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: gestureAge ?? v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) })) : null;
     // posture-transition.ts: over a change of posture a face-down plank tilts up from (down to) the feet; after getting up
     // the standing activity's own frame eases in; between two standing activities their frames crossfade (ACT_BLEND)
     const pn = lib.posture;
@@ -1565,7 +1588,8 @@ export class HumanViews {
       source = 'expression';
       const floor = (act.lying ? (act.lying.face === 'back' ? lieFloor : h.position.y - 0.1) : h.position.y - act.hop) + 0.06;
       v.arms.forEach((arm, i) => {
-        const left = armSide(v, i) === 'left', q = act.hands![left ? 0 : 1], r = act.rootHands?.[left ? 0 : 1], wgt = act.handW?.[left ? 0 : 1] ?? 1;
+        const left = armSide(v, i) === 'left', aimedPoint = !!pointFrame && !act.pairedContact;
+        const q = aimedPoint ? (armSide(v,i) === point!.hand ? act.hands![1] : null) : act.hands![left ? 0 : 1], r = act.rootHands?.[left ? 0 : 1], wgt = act.handW?.[left ? 0 : 1] ?? 1;
         if (!q && !r) { if (sitW > 0 && !seatClip) handOnThigh(v, i, sitW); return; }
         const weight=act.handWeights?.[left?0:1]??1;
         const saved=weight<1?[arm.upper,arm.lower,arm.hand].map(o=>({o,p:o.position.clone(),q:o.quaternion.clone()})):[];
@@ -1573,6 +1597,10 @@ export class HumanViews {
         // entry 36: a goal on a fixed thing (the mic's grip) is placed from the body root at its own height above the floor
         const t = r ? V().copy(h.position).addScaledVector(_fwd, r[0]).addScaledVector(_right, (left ? -1 : 1) * r[1]).addScaledVector(UP, r[2])
           : V().copy(_s).addScaledVector(_fwd, q![0]).addScaledVector(_right, (left ? -1 : 1) * q![1]).addScaledVector(UP, q![2]);
+        if (aimedPoint && q) {
+          const direction = V().set(point!.at[0]-_s.x,0,point!.at[1]-_s.z);
+          if (direction.lengthSq() > 1e-12) t.copy(_s).addScaledVector(direction.normalize(),Math.hypot(q[0],q[1])).addScaledVector(UP,q[2]);
+        }
         if(act.flute){
           const head=v.spine?.head?.getWorldPosition(V())??V().copy(h.position).addScaledVector(UP,1.525);
           t.copy(head).addScaledVector(_fwd,.125).addScaledVector(UP,.005).addScaledVector(_right,left?.14:.36);

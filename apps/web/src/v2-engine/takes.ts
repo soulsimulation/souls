@@ -8,7 +8,7 @@
 // extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
 
 import { heldAt, postureOf, type Held, type Seat } from './take-bodies.ts';
-import { LOOPS, SEATED_GESTURES, gestureNow, pressAt, type Gesture } from './take-gestures.ts';
+import { LOOPS, SEATED_GESTURES, gestureNow, pressAt, pointAimAt, type Gesture } from './take-gestures.ts';
 import { markOf, type Talk } from './take-speech.ts';
 
 /** Seconds a tick, as the old engine's takes. */
@@ -220,7 +220,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
     const track: number[][] = [];
     let baseActivity: string | null | undefined;
     let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
-    let pressKey: string | undefined;
+    let pressKey: string | undefined, pointKey: string | undefined;
     let seatH: number | null | undefined, prop: string | null | undefined, partner: string | null | undefined, hold: string | null | undefined;
     for (let k = 0; k <= ticks; k++) {
       const t = (fromTick + k) * TICK_US;
@@ -246,6 +246,8 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       const nextPartner = lead ?? (g && !g.hold && other ? other.entity : null);
       if (k < ticks && nextPartner !== (partner ?? null)) { changes.push([k, b.entity, 'partner', nextPartner]); partner = nextPartner; }
       const press = pressAt(b.gestures, t), nextPress = JSON.stringify(press);
+      const point = pointAimAt(b.gestures, t), nextPoint = JSON.stringify(point);
+      if (k < ticks && nextPoint !== pointKey) { changes.push([k, b.entity, 'pointAim', point]); pointKey = nextPoint; }
       if (k < ticks && nextPress !== pressKey) { changes.push([k, b.entity, 'formPress', press]); pressKey = nextPress; }
       const held = holdState(b, byNode, t), nextHold = held ? JSON.stringify(held) : null;
       if (k < ticks && nextHold !== (hold ?? null)) { changes.push([k, b.entity, 'handHold', held]); hold = nextHold; }
