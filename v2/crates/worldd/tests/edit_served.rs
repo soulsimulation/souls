@@ -9958,14 +9958,35 @@ fn a_holder_who_retires_leaves_its_crew_and_the_part_is_laid_down_and_the_crew_e
         let got = socket_end(&mut hands[k].s);
         assert_eq!(got.kind, 1, "Soul {} retires: {got:?}", k + 1);
         left_the_world(&w, body, "a retire");
+        got
     };
 
     let c = seat(&mut hands, (0, 1), fa, "upright_a");
     assert_eq!(tree_members(&w, c), Some(2), "two hold frame A");
-    retire(&mut hands, 0);
+    let got = retire(&mut hands, 0);
     wait("frame A laid down beside the bay", &|| {
         where_is(&w, fa).0 == Some(g)
     });
+    let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
+    assert!(
+        why.contains(&(fa, "souls:holder-retired".into())),
+        "the set-down names the retire as its reason: {why:?}"
+    );
+    let kept = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        t.handle(c)
+            .and_then(|h| t.node(h))
+            .and_then(|n| match n.fields().get(&sim::structure::F_KEPT) {
+                Some(Value::Uint(k)) => Some(*k),
+                _ => None,
+            })
+            .unwrap_or(0)
+    };
+    assert_eq!(
+        kept, 0,
+        "the retired share is given back once frame A is laid down"
+    );
     println!(
         "Soul 1 retired: frame A lies at {:?}; its crew has {:?} members in the tree",
         where_is(&w, fa).2,
@@ -9975,7 +9996,7 @@ fn a_holder_who_retires_leaves_its_crew_and_the_part_is_laid_down_and_the_crew_e
     // The bay takes frame B: no hold is left counted for a member who is gone.
     seat(&mut hands, (2, 3), fb, "upright_b");
     assert_eq!(where_is(&w, fb).0, Some(bay), "frame B in upright_b");
-    retire(&mut hands, 1);
+    let _ = retire(&mut hands, 1);
     wait("frame A's crew ends", &|| tree_members(&w, c).is_none());
     drop(s);
     // Started again from its log.
