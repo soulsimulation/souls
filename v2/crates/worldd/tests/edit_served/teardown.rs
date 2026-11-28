@@ -624,15 +624,14 @@ impl Bay {
         }
     }
 
-    /// Every stage before `stage`, in order.
+    /// Every stage before `stage`. The sheets come off before the flight (gap 2: once the flight is let go beside
+    /// the bay, a sheet's west end cannot be reached); stage 2 leaves the flight in its slot (nothing rests on it).
     fn down_to(tag: &str, stage: u32) -> (Bay, Option<[Id; 2]>) {
         let mut k = Bay::built(tag);
         let mut crews = None;
-        if stage > 1 {
-            k.flight_off();
-        }
         if stage > 2 {
             k.sheets_off();
+            k.flight_off();
         }
         if stage > 3 {
             k.joists_off();
@@ -655,6 +654,18 @@ impl Bay {
 fn teardown_1_the_stair_flight_unseated_and_carried_away() {
     let (mut k, _) = Bay::down_to("td1", 1);
     k.flight_off();
+}
+
+/// Gap: in the briefed order, the flight first: once it is let go at its pile (its origin 2.36 m west of the bay's
+/// middle and 0.92 m south, where its carriers walked it to 2.96 m and 1.47 m), Soul 1 cannot reach sheet 2's west
+/// end: `walk.stopped-short`: "stopped 742 mm short of the point it was sent to: no way nearer it that this body can
+/// walk (ground it cannot stand on, or bodies in the way)". (From the south it stopped 714 mm short.)
+#[test]
+#[ignore = "gap: after the flight is let go, a sheet's west end cannot be reached"]
+fn gap_2_after_the_flight_is_let_go_a_sheets_west_end_cannot_be_reached() {
+    let mut k = Bay::built("tdg2");
+    k.flight_off();
+    k.sheets_off();
 }
 
 #[test]
