@@ -1,7 +1,35 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { completed, discoverConference, performConference, rehearsalTemplate } from './rehearse.mjs';
+import { completed, discoverConference, performConference, rehearsalTemplate, conferenceMemberships, performSlotPointComponent } from './rehearse.mjs';
+
+import { brief } from '../../../v2/client/src/brief/brief.mjs';
+import { doingLines } from '../../../v2/client/src/together/members.mjs';
+
+// The same current client projection that the daemon uses for ordinary `look`.
+function projectedLook(words = []) {
+  const rows = new Map([
+    ['world', { id: 'world', name: 'World', kind: 'souls:place', parent: null, path: [], children: 1 }],
+    ['room', { id: 'room', name: 'Room', kind: 'souls:room', parent: 'world', path: ['World'], children: 2 }],
+    ['body', { id: 'body', name: 'Reader', kind: 'souls:body', soul: 'reader', parent: 'room', path: ['World', 'Room'], children: 0 }],
+    ['other', { id: 'other', name: 'Partner', kind: 'souls:body', parent: 'room', path: ['World', 'Room'], children: 0 }],
+  ]);
+  for (const [i, word] of words.entries()) rows.set(`group${i}`, { id: `group${i}`, name: word,
+    kind: `eden:${word.replaceAll('-', '_')}_activity`, parent: 'room', path: ['World', 'Room'], children: 0, started: true,
+    members: [{ body: 'body', soul: 'reader', role: 'eden:first' }, { body: 'other', role: 'eden:second' }] });
+  return { ok: true, ...brief(rows, { me: 'body', now: 'standing', doing: doingLines(rows, ['reader', 'body']) }) };
+}
+
+test('current client look separates standing body state from active native memberships and omits cleared memberships', () => {
+  const active = projectedLook(['speaker-introduction']);
+  assert.equal(active.doing, 'standing'); assert(Array.isArray(active.in));
+  assert(conferenceMemberships(active).some(line => line.includes('speaker-introduction')), 'standing does not mean introduction ended');
+  const clear = projectedLook(); assert.equal(clear.doing, 'standing'); assert.equal(Object.hasOwn(clear, 'in'), false);
+  assert.deepEqual(conferenceMemberships(clear), []);
+  assert(conferenceMemberships(projectedLook(['round-of-applause'])).some(line => line.includes('round-of-applause')));
+  for (const bad of [{ ...clear, ok: false }, { ...clear, room: null }, { ...clear, in: 'speaker-introduction' }, { ...clear, in: [null] }])
+    assert.throws(() => conferenceMemberships(bad), /activity/);
+});
 
 const receipt = () => ({ ok: true, phase: 'done', receipt: { answers: [{ answer: 'receipt' }] } });
 
@@ -70,7 +98,7 @@ function meetingCast({ refusal = 'already_linked', can = 'unknown', current = tr
       if (verb === 'inspect') return form === 'question'
         ? { ok: true, id: wrongReadID ? 'another-stand' : form, kind: 'eden:conference_question', state: { ...question } }
         : { ok: true, parent: parents[index] };
-      if (verb === 'look') return { ok: true, doing: stuckActivity ? ['round-of-applause'] : [] };
+      if (verb === 'look') return projectedLook(stuckActivity ? ['round-of-applause'] : []);
       if (verb === 'can') return { ok: true, can, current, ...(can === 'unknown' ? { why: 'not-seen:already_linked' } : can === 'no' ? { reason: refusal } : {}) };
       if (verb === 'receipt') {
         const replaced = interrupted.get(Number(form));
@@ -157,7 +185,7 @@ test('question proof rejects missing native refusal, overwritten original, wrong
 test('cleanup cannot pass when an ordinary look still reports the activity', async () => {
   const cast = meetingCast(); let looks = 0;
   // The introduction's first look ends it; subsequent final cleanup read must reject a lingering activity.
-  for (const seat of cast.seats) { const cli = seat.cli; seat.cli = async (...words) => words[0] === 'look' && ++looks > 1 ? { ok: true, doing: ['round-of-applause'] } : cli(...words); }
+  for (const seat of cast.seats) { const cli = seat.cli; seat.cli = async (...words) => words[0] === 'look' && ++looks > 1 ? projectedLook(['round-of-applause']) : cli(...words); }
   await assert.rejects(performConference({ ...cast, lecture: 'lectern', question: 'question', benches: ['left', 'right'] }), /activities must end/);
   assert(!cast.events.some(e => e.endsWith(':conference-clean')));
 });
@@ -209,4 +237,85 @@ test('authored speaker faces the actual audience and listeners face the stage in
   assert(current.listeners.every(dot=>dot>.9),'each listener must face the speaker on stage');
   const old=structuredClone(scene);old.batches.flatMap(b=>b.ops).find(o=>o.name==='presentation-lectern').r=0;
   assert(facing(old).speaker<-.99,'the prior backwards-facing arrangement must fail the geometric condition');
+});
+
+
+test('separate slot-point component uses one assembly and the same presenter through real interruption, exit and reentry', async () => {
+  const cast = meetingCast({ leaveRises: true });
+  const members = new Set();
+  for (const [index, seat] of cast.seats.entries()) {
+    const cli = seat.cli;
+    seat.cli = async (...words) => {
+      if (words[0] === 'together' && words[1] === 'offer') for (let i = 0; i < 5; i++) members.add(i);
+      if (words[0] === 'together' && words[1] === 'leave') {
+        assert(members.delete(index), 'standing-slot reentry has no activity offer to leave');
+      }
+      return cli(...words);
+    };
+  }
+  const rows = []; const result = await performSlotPointComponent({ ...cast, lecture: 'lectern', question: 'question', benches: ['left','right'],
+    record: row => rows.push({ ...row, at: performance.now() }) });
+  assert.deepEqual(result, { concern: 'conference-slot-point-component', people: 5, presentations: 1, slotEntries: 2,
+    interruptedStories: 1, fullMeetingComplete: false });
+  const acts = cast.calls.filter(c => c.words[0] === 'act');
+  assert.deepEqual(acts.filter(c => c.words[1] === 'take_the_lectern:lectern').map(c => c.index), [0,0]);
+  assert.deepEqual(acts.filter(c => c.words[1] === 'step_down:lectern').map(c => c.index), [0,0]);
+  assert.equal(acts.filter(c => c.words[1] === 'attend:lectern').length, 4);
+  assert.equal(acts.filter(c => c.words[1] === 'tell_story').length, 2);
+  const started = rows.find(row => row.words[0] === 'receipt' && row.answer.receipt.going);
+  const point = rows.find(row => row.words[0] === 'act' && row.words[1] === 'point');
+  assert(started && point && point.at - started.at >= 249, 'the actual started story retains the real 250ms early-interruption interval');
+  assert(point.words.includes('toward=question'));
+  assert(acts.some(c => c.words[1] === 'clap' && c.words.includes('for=1')));
+  assert.equal(cast.calls.filter(c => c.words[0] === 'together' && c.words[1] === 'offer').length, 1);
+  assert.equal(cast.calls.filter(c => c.words[0] === 'together' && c.words[1] === 'leave').length, 5);
+  assert.equal(members.size, 0);
+  assert(!acts.some(c => c.words[1]?.startsWith('post_question:')));
+  const observed = cast.events.filter(e => e.startsWith('observe:'));
+  assert.equal(observed.filter(e => e.endsWith(':assembly-start')).length, 1);
+  for (const stage of ['component-exited','component-reentry-start','component-reentry-ready']) assert(observed.includes(`observe:Person0:${stage}`));
+  assert.equal(observed.at(-1), 'observe:undefined:component-clean');
+  assert(!observed.some(e => e.endsWith(':conference-clean') || e.endsWith(':introduction-start')));
+});
+
+test('component refuses a failed original-presenter reentry and uncleared native membership', async () => {
+  const cast = meetingCast(); let entries = 0;
+  const cli = cast.seats[0].cli; cast.seats[0].cli = async (...words) => {
+    const answer = await cli(...words);
+    if (words[1] === 'take_the_lectern:lectern') entries++;
+    return words[0] === 'inspect' && entries === 2 ? { ...answer, parent: 'ground' } : answer;
+  };
+  await assert.rejects(performSlotPointComponent({ ...cast, lecture:'lectern',question:'question',benches:['left','right'] }), /reentry reaches/);
+  assert(!cast.events.some(e => e.endsWith(':component-clean')));
+  const stuck = meetingCast({ stuckActivity: true });
+  await assert.rejects(performSlotPointComponent({ ...stuck, lecture:'lectern',question:'question',benches:['left','right'] }), /activities must end/);
+});
+
+
+test('component does not count a failed or absent public parent read as a successful slot exit', async () => {
+  for (const answer of [{ok:false,code:'not_found'}, {ok:true}, {ok:true,parent:17}]) {
+    const cast=meetingCast();const cli=cast.seats[0].cli;let stepped=false;
+    cast.seats[0].cli=async(...words)=>{
+      const result=await cli(...words);
+      if(words[1]==='step_down:lectern') stepped=true;
+      return stepped&&words[0]==='inspect'?answer:result;
+    };
+    await assert.rejects(performSlotPointComponent({...cast,lecture:'lectern',question:'question',benches:['left','right']}),/authoritative parent read/);
+    assert(!cast.events.some(e=>e.endsWith(':component-reentry-ready')||e.endsWith(':component-clean')));
+  }
+});
+
+
+test('component final ordinary step-down refusal propagates without declaring completion', async () => {
+  const cast = meetingCast({ leaveRises: true });
+  const cli = cast.seats[0].cli; let departures = 0;
+  cast.seats[0].cli = async (...words) => {
+    if (words[0] === 'act' && words[1] === 'step_down:lectern' && ++departures === 2) {
+      return { ok: false, code: 'still-linked', phase: 'refused' };
+    }
+    return cli(...words);
+  };
+  await assert.rejects(performSlotPointComponent({ ...cast, lecture: 'lectern', question: 'question', benches: ['left','right'] }), /step_down.*still-linked/);
+  assert.equal(departures, 2);
+  assert(!cast.events.some(e => e.endsWith(':component-clean')));
 });

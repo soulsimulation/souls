@@ -3,14 +3,95 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { decode, idText } from '../../../v2/client/src/brief/copy.mjs';
 import { nativeCameraMode } from './camera-native-page.mjs';
-import { discoverConference, performConference } from '../../playtest/conference/rehearse.mjs';
+import { discoverConference, performConference, performSlotPointComponent } from '../../playtest/conference/rehearse.mjs';
 import { conferenceWorldPage, downloadConferenceClient, pairConferenceSeat, pairConferenceCreator, requireConferenceRecipe } from '../../playtest/conference/owned-seats.mjs';
 
 const states = new Map();
 const names = ['Presenter', 'Cedar', 'Maple', 'Willow', 'Birch'];
 const save = (paths, file, value) => writeFileSync(join(paths.dir, file), JSON.stringify(value, null, 2), { flag: 'wx', mode: 0o600 });
+
+// Read only the fixture's already published public view with the same validated player as the page.
+export async function conferencePublicLecture({ paths, recipe, nativeLecture }) {
+  const root = join(paths.data, 'world', 'world'), publicRoot = join(root, 'views'), inputs = [];
+  const read = file => {
+    const rel = relative(publicRoot, file);
+    assert(rel && rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel), 'conference public view path escapes');
+    const bytes = readFileSync(file); inputs.push({ file: rel, sha256: createHash('sha256').update(bytes).digest('hex') }); return bytes;
+  };
+  const manifest = JSON.parse(read(join(publicRoot, 'world.json'))), stream = resolve(root, manifest.stream);
+  const { initSync, readPointer, StreamPlayer } = await import(pathToFileURL(join(recipe.pkg, 'replica.js')).href);
+  initSync({ module: readFileSync(join(recipe.pkg, 'replica_bg.wasm')) });
+  const pointer = JSON.parse(readPointer(read(join(stream, 'pointer'))));
+  assert(typeof pointer.header === 'string' && pointer.header, 'conference public header missing');
+  const header = read(resolve(stream, '../../../headers', pointer.header));
+  assert(!pointer.generation || /^[a-f0-9]{64}$/.test(pointer.generation) && pointer.baseline === pointer.generation, 'conference public generation differs');
+  const file = name => join(stream, ...(pointer.generation ? ['g', pointer.generation] : []), name);
+  let player;
+  if (pointer.generation) {
+    const baseline = read(file('baseline'));
+    assert.equal(createHash('sha256').update(baseline).digest('hex'), pointer.baseline, 'conference public baseline hash differs');
+    player = StreamPlayer.fromBaseline(header, baseline);
+  } else player = new StreamPlayer(header);
+  try {
+    let parts = 0;
+    while (Number(player.next()) <= pointer.newest) {
+      assert(++parts <= 2048, 'conference identity public catch-up bound exceeded');
+      player.play(read(file(String(player.next()))));
+    }
+    player.verify();
+    const records = decode(player.snapshot()).filter(n => idText(n.get(1)) === nativeLecture);
+    assert.equal(records.length, 1, 'conference native lectern public record missing or ambiguous');
+    const record = records[0], fields = record.get(6), text = new TextDecoder();
+    return { id: nativeLecture, kind: record.get(2),
+      ...(fields.get(1) instanceof Uint8Array ? { origin: text.decode(fields.get(1)) } : {}),
+      ...(fields.get(2) instanceof Uint8Array ? { def: text.decode(fields.get(2)) } : {}), inputs, parts };
+  } finally { player.free(); }
+}
+
+export async function conferenceNativeLectureBinding({ checkout, nativeLecture, node, name }) {
+  assert(typeof checkout === 'string' && nativeLecture && node?.id === nativeLecture, 'conference native lectern binding missing');
+  assert.equal(name, 'presentation-lectern', 'conference native lectern name differs');
+  assert.equal(node.kind.split('@')[0], 'eden:hall_lecture', 'conference native lectern kind differs');
+  const file = join(checkout, 'apps/web/src/v2-engine/layer-draws.ts');
+  const { OLD_ENTITY, layerDraws } = await import(pathToFileURL(file).href);
+  let entity, mapping;
+  if (layerDraws(node)) {
+    assert(OLD_ENTITY.test(node.origin) && node.def, 'conference imported lectern origin/def unavailable');
+    entity = node.origin; mapping = 'layerDraws: imported NodeRec.origin';
+  } else {
+    const { entityId } = await import(pathToFileURL(join(checkout, 'apps/web/src/v2-engine/creator-kinds.ts')).href);
+    entity = entityId(nativeLecture); mapping = 'CreatorKinds: entityId for non-imported node';
+  }
+  return { nativeLecture, nativeKind: node.kind, nativeName: name, ...(node.origin ? { origin: node.origin } : {}),
+    ...(node.def ? { def: node.def } : {}), entity, mapping,
+    mappingSha256: createHash('sha256').update(readFileSync(file)).digest('hex') };
+}
+
+// Serialized unchanged into the browser. Diagnostic candidates never select the target.
+export function conferenceLecternIdentity(world, binding, drawnLoad) {
+  const witness = { ...binding, candidateLimit: 16, candidates: [], candidateCount: 0, matched: null };
+  try {
+    if (!binding?.nativeLecture || !binding.entity || !world?.layer?.model) throw Error('conference native lectern binding unavailable');
+    const model = world.layer.model, entities = [...model.entities.values()];
+    const candidates = entities.filter(e => e.name === 'presentation-lectern' || e.id === binding.entity);
+    witness.candidateCount = candidates.length;
+    witness.candidates = candidates.slice(0, witness.candidateLimit).map(e => ({ id: e.id, name: e.name, def: e.def,
+      resolvedDef: model.resolvedDef(e.def)?.name ?? null, drawn: world.layer.drawn.has(e.id) }));
+    const matches = entities.filter(e => e.id === binding.entity);
+    if (matches.length !== 1) throw Error('conference mapped lectern identity missing or ambiguous');
+    const entity = matches[0];
+    if (entity.name !== undefined && entity.name !== binding.nativeName || binding.def && entity.def !== binding.def || model.resolvedDef(entity.def)?.name !== 'core-hall_lecture') throw Error('conference mapped lectern name or kind differs');
+    const load = drawnLoad(world.layer, world.scene, entity.id);
+    if (load.entity !== entity.id || !Number.isInteger(load.parts) || load.parts < 1) throw Error('conference mapped lectern geometry unavailable');
+    witness.matched = { id: entity.id, name: entity.name, def: entity.def, resolvedDef: 'core-hall_lecture',
+      source: load.source, parts: load.parts, root: load.matrix.toArray() };
+    return { ok: true, witness };
+  } catch (error) { return { ok: false, witness, error: String(error) }; }
+}
 
 // Self-contained, served only by this proof driver. Reads submitted geometry; never poses or moves it.
 export function conferenceClearanceTools({ vector, drawnLoad, bodyGeometry, maxVertices = 100000, maxTriangles = 2048, maxTests = 250000, uncertaintyM = .001 }) {
@@ -273,6 +354,68 @@ export function conferenceMeetingJourney(frames, stages, seats) {
     firstTick: frames[0].tick, lastTick: frames.at(-1).tick };
 }
 
+/** Actual last-render bone readout; no intended target substitutes for the drawn shoulder or palm. */
+export function conferenceRenderedArms(diagnostic) {
+  const arms = diagnostic?.arms, finite = p => Array.isArray(p) && p.length === 3 && p.every(Number.isFinite);
+  if (!Array.isArray(arms) || arms.length !== 2 || ['left','right'].some(side => arms.filter(a => a.side === side).length !== 1) ||
+      arms.some(a => !finite(a.shoulder) || !finite(a.palm))) throw Error('component actual rendered arms unavailable');
+  return arms.map(a => ({ side: a.side, shoulder: [...a.shoulder], palm: [...a.palm],
+    basis: 'actual last-render bone diagnostics rounded to 0.1mm; not native contact or index-finger direction' }));
+}
+
+export const SLOT_POINT_COMPONENT = 'conference-slot-point-component';
+
+export function conferenceComponentStage(frames, stages, event) {
+  if (!event.stage.startsWith('component-')) return conferenceMeetingStage(frames, stages, event);
+  assert(['component-exited','component-reentry-ready','component-clean'].includes(event.stage), 'unknown component observation stage');
+  const before = stages.slice(0, stages.indexOf(event));
+  const startName = event.stage === 'component-reentry-ready' ? 'component-reentry-start' : 'departure-start';
+  const start = before.findLast(s => s.stage === startName);
+  assert(start, `component ${event.stage} has no command-start marker`);
+  const window = frames.slice(start.frameIndex, event.endFrameIndex === undefined ? undefined : event.endFrameIndex + 1);
+  assert(window.length >= 2 && window.at(-1).tick > window[0].tick && window.at(-1).renderFrame > window[0].renderFrame,
+    'component endpoint depicted clock stale or missing');
+  const souls = event.seats ?? [event.soul];
+  for (const soul of souls) {
+    const tail = window.slice(-2).map(f => conferenceObservation(f, soul));
+    assert(tail.every(s => s.activity === 'idle' && !s.seated), 'component standing endpoint not depicted');
+  }
+  return { stage: event.stage, firstTick: window[0].tick, lastTick: window.at(-1).tick };
+}
+
+export function conferenceComponentJourney(frames, stages, seats) {
+  assert.equal(seats.length, 5, 'component requires five participants');
+  const counts = { 'assembly-start': 1, 'lectern-ready': 1, 'attend-done': 4, 'lecture-ready': 1,
+    'story-complete': 1, 'tell-story': 1, point: 1, settled: 1, 'rise-done': 4, 'departure-start': 2,
+    'component-exited': 1, 'component-reentry-start': 1, 'component-reentry-ready': 1, 'component-clean': 1 };
+  for (const [stage, count] of Object.entries(counts)) assert.equal(stages.filter(e => e.stage === stage).length, count,
+    `component ${stage} stage coverage incomplete`);
+  const assembly = stages.find(e => e.stage === 'assembly-start');
+  assert.equal(assembly.soul, seats[0].soul, 'component must keep the original presenter');
+  assert.deepEqual(stages.filter(e => e.stage === 'attend-done').map(e => e.soul).sort(),
+    seats.slice(1).map(s => s.soul).sort(), 'component must observe every listener entry');
+  const ordered = ['story-complete', 'tell-story', 'point', 'settled', 'component-exited', 'component-reentry-start', 'component-reentry-ready', 'component-clean'];
+  assert(ordered.every((name, i) => !i || stages.findIndex(e => e.stage === name) > stages.findIndex(e => e.stage === ordered[i-1])),
+    'component gesture, exit and reentry order changed');
+  const departures = stages.map((e,i) => e.stage === 'departure-start' ? i : -1).filter(i => i >= 0);
+  assert(departures[0] < stages.findIndex(e => e.stage === 'component-exited') &&
+    departures[1] > stages.findIndex(e => e.stage === 'component-reentry-ready') &&
+    departures[1] < stages.findIndex(e => e.stage === 'component-clean'), 'component ordinary departure order changed');
+  for (const stage of ['component-exited', 'component-reentry-ready'])
+    assert.equal(stages.find(e => e.stage === stage).soul, seats[0].soul, 'component reentry must use the original presenter');
+  for (const event of stages) if (event.observed) conferenceComponentStage(frames, stages, event);
+  assert(stages.filter(e => counts[e.stage] && !['assembly-start', 'component-reentry-start', 'departure-start'].includes(e.stage)).every(e => e.observed),
+    'component depicted stage unfinished');
+  return { concern: SLOT_POINT_COMPONENT, people: 5, presentations: 1, slotEntries: 2, fullMeetingComplete: false,
+    firstTick: frames[0].tick, lastTick: frames.at(-1).tick };
+}
+
+export function conferenceExecution(mode = 'full-meeting') {
+  if (mode === 'full-meeting') return { perform: performConference, stage: conferenceMeetingStage, journey: conferenceMeetingJourney };
+  assert.equal(mode, SLOT_POINT_COMPONENT, 'unknown conference proof concern');
+  return { perform: performSlotPointComponent, stage: conferenceComponentStage, journey: conferenceComponentJourney };
+}
+
 /** Ordinary creator proof: the edit's returned name is the only identity used for readback. */
 export async function proveConferenceCreator({ creator, record = () => {}, signal }) {
   const cli = async (...words) => {
@@ -293,6 +436,8 @@ export async function proveConferenceCreator({ creator, record = () => {}, signa
   assert.equal(kinds.length, 1, 'conference creator family revision must be unambiguous');
   assert.equal(grounds.length, 1, 'conference creator ground must be unambiguous');
   const kind = kinds[0], ground = grounds[0].id;
+  const kindName = /^(eden:conference_question)@[^@]+$/.exec(kind)?.[1];
+  assert(kindName, 'conference creator catalogue must expose a qualified kind revision');
   // Declared once: flat, unused ground outside the demonstration area. Never retry a refused placement elsewhere.
   const place = await cli('place', kind, '--in', String(ground), '--at', '12,0,12');
   assert(Number.isSafeInteger(place.sequence) && place.sequence > 0, 'conference creator terminal edit sequence missing');
@@ -300,11 +445,13 @@ export async function proveConferenceCreator({ creator, record = () => {}, signa
   const id = place.names['1']; assert(typeof id === 'string' && id, 'conference creator returned no placed identity');
   const readback = await cli('describe', id);
   assert.equal(readback.id, id, 'conference creator readback changed the returned identity');
-  assert.equal(readback.kind, kind, 'conference creator readback changed the selected kind revision');
+  // Ordinary describe <id> exposes the plain name; the qualified catalogue and
+  // accepted place request retain the selected revision separately.
+  assert.equal(readback.kind, kindName, 'conference creator readback changed the selected kind name');
   assert.equal(String(readback.in?.[0]?.id), String(ground), 'conference creator readback is in another parent');
   assert.deepEqual(readback.at, [12, 0, 12], 'conference creator readback differs from the declared placement');
-  return { kind, id, parent: ground, at: readback.at, sequence: place.sequence,
-    qualification: 'ordinary describe/place/readback receipt; boot furniture supplies the clip, post-boot drawing is not claimed' };
+  return { kind, readbackKind: readback.kind, readbackRevision: 'unproved: public describe exposes no revision', id, parent: ground, at: readback.at, sequence: place.sequence,
+    qualification: 'ordinary describe/place/readback receipt; selected revision evidenced by catalogue and accepted place, not independently exposed by node readback; boot furniture supplies the clip, post-boot drawing is not claimed' };
 }
 
 export async function prepare({ base, paths, recipe, signal }) {
@@ -328,6 +475,9 @@ export async function prepare({ base, paths, recipe, signal }) {
     find('presentation-lectern', 'eden:hall_lecture'), find('question-stand', 'eden:conference_question'), find('audience', 'eden:bench'),
   ]);
   state.fixtures = conferenceFixtures({ lecterns, questions, benches });
+  const nativeLecture = await conferencePublicLecture({ paths, recipe, nativeLecture: state.fixtures.lecture });
+  save(paths, 'command-conference-native-lectern.json', nativeLecture);
+  state.lecternBinding = await conferenceNativeLectureBinding({ checkout: recipe.checkout, nativeLecture: state.fixtures.lecture, node: nativeLecture, name: lecterns[0].name });
   state.discovery = await discoverConference({ seat: state.seats[0], ...state.fixtures, record: state.record });
   state.creator = await pairConferenceCreator({ recipe, paths, bundle, signal });
   state.creatorProof = await proveConferenceCreator({ creator: state.creator, record: state.record, signal });
@@ -365,7 +515,7 @@ export function conferenceFinalization(page, paths, state) {
   state.persistSequence = () => {
     if (state.sequenceSaved) return;
     save(paths, 'command-conference-sequence.json', {
-      qualification: 'ordinary fixed-sequence conference diagnostic; independent-agent, creator and actual visual/contact acceptance remain separate',
+      qualification: state.component ? 'separate standing-slot/point component diagnostic; full meeting remains unproved; natural limbs/contact remain actual visual acceptance' : 'ordinary fixed-sequence conference diagnostic; independent-agent, creator and actual visual/contact acceptance remain separate',
       stage: 'before-observer-collection',
       result: state.result ?? null, failure: state.failure ?? null, rows: state.rows,
       depictedJourney: state.depictedJourney ?? null, stages: state.stages ?? [],
@@ -399,7 +549,7 @@ export async function beforeNavigation({ paths, page, base }) {
   await page.route(oracleURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: oracle }));
   state.oracleURL = oracleURL;
   const geometryURL = new URL('/__proof/conference-clearance.mjs', base).href;
-  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `export ${conferenceClearanceTools.toString()}` }));
+  await page.route(geometryURL, route => route.fulfill({ status: 200, contentType: 'text/javascript', body: `export ${conferenceClearanceTools.toString()}\nexport ${conferenceLecternIdentity.toString()}\nexport ${conferenceRenderedArms.toString()}` }));
   state.geometryURL = geometryURL;
   const entryBytes = readFileSync(new URL('../../../content/kinds/hall/lecture.json', import.meta.url));
   state.lecternEntry = { kind: JSON.parse(entryBytes).kind, sha256: createHash('sha256').update(entryBytes).digest('hex') };
@@ -416,8 +566,12 @@ export async function beforeNavigation({ paths, page, base }) {
   };
 }
 
-export default async function ({ page, paths, check, expectHttp, signal }) {
+export default context => runConferencePage(context);
+
+export async function runConferencePage({ page, paths, check, expectHttp, signal }, mode = 'full-meeting') {
+  const execution = conferenceExecution(mode), component = mode === SLOT_POINT_COMPONENT;
   const state = states.get(paths.dir); assert(state, 'conference-proof preparation missing');
+  state.component = component;
   expectHttp('/safety.md', 404, 'The old-page fixture does not route this optional standalone client document.');
   const url = new URL(page.url()); url.search = 'post=0&hour=12:00&eye=6,3.5,6&at=0,1,2';
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
@@ -430,15 +584,23 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   await page.screenshot({ path: join(paths.dir, 'conference-setup.png') });
   signal.throwIfAborted();
   assert(state.kitURL, 'conference production people kit not observed');
-  await page.evaluate(async ({ oracleURL, geometryURL, kitURL, souls, entry, nativeLecture }) => {
+  const identity = await page.evaluate(async ({ oracleURL, geometryURL, binding }) => {
+    const { drawnLoad } = await import(oracleURL);
+    const { conferenceLecternIdentity } = await import(geometryURL);
+    return conferenceLecternIdentity(window.__soulsEntity, binding, drawnLoad);
+  }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, binding: state.lecternBinding });
+  save(paths, 'command-conference-lectern-identity.json', identity);
+  assert(identity.ok, identity.error);
+  await page.evaluate(async ({ oracleURL, geometryURL, kitURL, souls, entry, binding, component }) => {
     const { observeRender, bodyGeometry, drawnLoad } = await import(oracleURL);
-    const { conferenceClearanceTools } = await import(geometryURL);
+    const { conferenceClearanceTools, conferenceRenderedArms } = await import(geometryURL);
     const { TakePeople } = await import(kitURL), prototype = TakePeople.prototype;
     const world = window.__soulsEntity, original = prototype.show;
     if (!world || !original || window.__conferenceDrawObserver) throw Error('conference final-draw observer unavailable');
-    const lecterns = [...world.layer.model.entities.values()].filter(e => e.name === 'presentation-lectern');
-    if (lecterns.length !== 1 || world.layer.model.resolvedDef(lecterns[0].def)?.name !== 'core-hall_lecture') throw Error('conference drawn lectern identity ambiguous');
-    const lecternEntity = lecterns[0].id;
+    const { conferenceLecternIdentity } = await import(geometryURL);
+    const identity = conferenceLecternIdentity(world, binding, drawnLoad);
+    if (!identity.ok) throw Error(identity.error);
+    const lecternEntity = identity.witness.matched.id;
     const geometry = conferenceClearanceTools({ vector: () => world.camera.position.clone(), drawnLoad, bodyGeometry });
     let people, previous = -Infinity;
     function show(...args) { const result = original.apply(this, args); people = this; return result; }
@@ -474,7 +636,8 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
           const distance = anchor => q.p.reduce((sum, n, i) => sum + (n - anchor[i]) ** 2, 0);
           sides[distance(anchors[0]) <= distance(anchors[1]) ? 0 : 1].push(q);
         }
-        return { soul, entity, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
+        const arms = component ? conferenceRenderedArms(diagnostics?.[entity]) : undefined;
+        return { ...(component ? { arms, pointAim: frame.entities[entity]?.state?.pointAim ?? null } : {}), soul, entity, root: root.matrixWorld.toArray(), bounds: bounds(points), legs: bounds(legs), feet: bounds(feet),
           lecternClearance: geometry.clearance(points, lectern),
           // Inferred nearest-rendered-ankle clusters; these are not native contact/rig vertex-side identities.
           footClusters: sides.map((group, index) => ({ inferred: true, nearestRenderedAnkleIndex: index, anchor: anchors[index], ...bounds(group) })),
@@ -487,10 +650,10 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
     }, error => { if (failures.length < 30) failures.push(String(error)); });
     window.__conferenceDrawObserver = { samples, failures, sampleLimit, stopRender, prototype, show, original,
       measurementLimits: geometry.limits,
-      lecternEntry: { ...entry, nativeLecture, entity: lecternEntity, association: 'unique ordinary fixture name/kind and boot scene definition; canonical bytes are provenance, drawn triangles own the measurement' },
+      lecternEntry: { ...entry, ...binding, entity: lecternEntity, identity: identity.witness, association: 'validated public native node, actual product layerDraws/NodeRec.origin or CreatorKinds entityId; exact scene id/def and visibly attached drawn geometry; native name is checked separately, streamSnapshot Entity.name is optional; canonical entry bytes are provenance, drawn triangles own the measurement' },
       qualification: 'actual visible indexed bodyDraw vertices measured; bounded extrema/lectern vertex-inside witnesses every250ms, not every-frame or complete triangle-intersection proof; inferred skin/foot groups are not native identities; no native contact certification; original full-body video remains required. Historical story clips used hidden-source primitive extrema and did not measure actual lectern clearance.' };
   }, { oracleURL: state.oracleURL, geometryURL: state.geometryURL, kitURL: state.kitURL, souls: state.seats.map(s => s.soul),
-    entry: state.lecternEntry, nativeLecture: state.fixtures.lecture });
+    entry: state.lecternEntry, binding: state.lecternBinding, component });
   state.observerInstalled = true;
   state.frameReads = []; state.frameReadErrors = []; state.stages = [];
   let reading = true;
@@ -512,7 +675,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
   })();
   try {
     const immediate = new Set(['assembly-start', 'attend-start', 'story-start', 'seated-wave-start', 'rise-start',
-      'question-start', 'question-refused', 'question-recovered', 'departure-start', 'introduction-start', 'applause-start']);
+      'question-start', 'question-refused', 'question-recovered', 'departure-start', 'introduction-start', 'applause-start', 'component-reentry-start']);
     const observe = async (stage, details = {}) => {
       const event = { stage, at: Date.now(), frameIndex: Math.max(0, state.frameReads.length - 1),
         soul: details.seat?.soul, body: details.seat?.body, person: details.seat?.label,
@@ -526,7 +689,7 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
         const last = state.frameReads.at(-1);
         try {
           assert(last && Date.now() - last.receivedAt < 500, 'conference page observation stale');
-          conferenceMeetingStage(state.frameReads, state.stages, event);
+          execution.stage(state.frameReads, state.stages, event);
           event.observed = true; event.endFrameIndex = state.frameReads.length - 1; return;
         } catch (error) {
           assert(Date.now() < until, `conference ${stage} not observed on advancing page: ${error.message}`);
@@ -534,13 +697,15 @@ export default async function ({ page, paths, check, expectHttp, signal }) {
         signal.throwIfAborted(); await new Promise(ok => setTimeout(ok, 50));
       }
     };
-    state.result = await performConference({ seats: state.seats, ...state.fixtures, record: state.record,
+    state.result = await execution.perform({ seats: state.seats, ...state.fixtures, record: state.record,
       storyRepeats: 1, interruptStory: true, interruptFirstOnly: true, observe });
-    state.depictedJourney = conferenceMeetingJourney(state.frameReads, state.stages, state.seats);
+    state.depictedJourney = execution.journey(state.frameReads, state.stages, state.seats);
     const draw = await page.evaluate(() => ({ samples: window.__conferenceDrawObserver?.samples.length, failures: window.__conferenceDrawObserver?.failures }));
     assert(draw.samples >= 2 && draw.failures?.length === 0, 'conference final-draw measurement missing or failed');
     signal.throwIfAborted();
-    check('conference-meeting-depicted', state.result.presentations === 2 && state.result.interruptedStories === 1 && state.result.handover,
+    if (component) check(SLOT_POINT_COMPONENT + '-depicted', state.result.presentations === 1 && state.result.slotEntries === 2 && state.result.interruptedStories === 1 && state.result.fullMeetingComplete === false,
+      'Separate ordinary slot-front/point/interruption/exit/reentry component; full meeting and natural limbs/contact remain unproved.');
+    else check('conference-meeting-depicted', state.result.presentations === 2 && state.result.interruptedStories === 1 && state.result.handover,
       'Ordinary receipts and advancing depicted entry, seated gesture/return, rise, questions/recovery, handover and cleanup; natural limbs/contact remain visual acceptance.');
     await page.screenshot({ path: join(paths.dir, 'conference-completion.png') });
   } catch (error) { state.failure = String(error.stack ?? error); throw error; }
