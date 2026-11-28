@@ -1325,10 +1325,16 @@ impl Engine {
             }
             Verb::Take | Verb::Unseat | Verb::Put => {
                 // A lone holder of a seated part lays it down beside its bay (0.135 A2): it cannot carry it alone, and
-                // B18 would keep it holding the part for good.
+                // B18 would keep it holding the part for good. Alone counts the members whose bodies are in the world:
+                // one who retired leaves its place in the crew as the kept hold (N4 item 5), and no body to stand.
                 if a.verb == Verb::Unseat
                     && let Some(activity) = a.target
-                    && let Some([m]) = self.activities.members(activity)
+                    && let Some(members) = self.activities.members(activity)
+                    && let [m] = members
+                        .iter()
+                        .filter(|m| c.body(m.body).is_some())
+                        .collect::<Vec<_>>()
+                        .as_slice()
                     && m.body == a.body
                 {
                     let part = param_id(&a.params, 1, "take-needs-a-part")?;
