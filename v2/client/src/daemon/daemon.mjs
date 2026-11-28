@@ -150,7 +150,7 @@
 //   replica's WASM build (`wire*`).
 // - **Holds a copy of its scope** (R5's `sync::Copy`, in WASM memory). On a fresh stream, when the gateway answers
 //   `stream.cannot-resume`, or when it holds nothing yet, it compares and descends through the gateway (R5b, #3164),
-//   one request at a time, then takes the hashes' version as its cursor and carries on with the stream. It counts as
+//   up to SYNC_WINDOW requests in flight (N12), then takes the hashes' version as its cursor and carries on with the stream. It counts as
 //   connected, and sends intents, only once its copy is current.
 // - **Each intent is sent at most once**: its sequence is written to disk before it goes out, and nothing resends
 //   it. An intent sent and not answered by the next sign-in stays `unanswered` in `status`.
@@ -352,9 +352,14 @@ function markRead(ids) {
   tellRead();
 }
 const copy = new wire.Copy(); // its scope, by hash (R5b)
-// A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
-// Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
+// A sync whose socket received nothing for this long is given up and the socket started again (`awaitAnswer`): it is
+// per answer, not per sync, as an Eden-sized scope (10,000 records, 64 a request) is about 160 requests (#3424).
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
+// N12: records requests a sync keeps in flight. One at a time, Eden's first sync was about 156 round trips (22 s at
+// soul.game's 140 ms); with 16 out, the rounds overlap. 16 of the largest (64 hashes, about 2.6 KB charged each) is
+// 42 KB of the gateway's 64 KiB per agent (`world_link::SYNCS_MOST`), with room for public names beside them; the
+// gateway keeps 2 of them in the world's sync line (`SYNC_TURN`) and the rest in order.
+const SYNC_WINDOW = 16;
 // A subscription not granted by then no longer holds the follow back (a gateway that sends no grant).
 const GRANT_WITHIN = 2_000;
 const syncs = []; // the last syncs: kind, time and R5's counts
@@ -717,7 +722,7 @@ function closeMail(id, state, outcome) {
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
   // settledAt: once what was on its way when the sync began has been heard (`awaitAnswer`).
-  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), settledAt: Infinity, version: null, waiters: carried.splice(0) };
+  syncing = { n: ++asked, step: 'hashes', out: new Map(), kind, t0: performance.now(), settledAt: Infinity, version: null, waiters: carried.splice(0) };
   forgetTaken(copy); // records an earlier sync took and never finished
   if (cutAt !== null && cutWhy !== 'behind') cutWhy = 'syncing'; // #4979: behind says why until it is current
   awaitAnswer(sock);
@@ -768,13 +773,19 @@ function awaitAnswer(sock) {
 
 function syncAnswer(sock, n, refused, bytes) {
   if (publicNames.answer(sock, n, refused, bytes)) return;
-  if (!syncing || n !== syncing.n) return; // an answer to a request since given up
+  // An answer to a request since given up is not this sync's.
+  if (!syncing || (syncing.step === 'hashes' ? n !== syncing.n : !syncing.out.has(n))) return;
   if (refused !== '-') throw new Error(`sync refused: ${refused}`);
-  if (syncing.step === 'hashes') syncing.version = copy.onHashes(bytes);
-  else { copy.onRecords(bytes); takeRecords(copy, bytes, syncing.asking); } // decoded a round at a time, not at its end
-  syncing.n = ++asked;
-  const next = copy.next(BigInt(syncing.n));
-  if (next.length > 0) { syncing.step = 'records'; syncing.asking = next; awaitAnswer(sock); sock.send(next); return; }
+  if (syncing.step === 'hashes') { syncing.version = copy.onHashes(bytes); syncing.step = 'records'; }
+  else { copy.onRecords(bytes); takeRecords(copy, bytes, syncing.out.get(n)); syncing.out.delete(n); } // decoded a round at a time
+  // N12: up to SYNC_WINDOW records requests in flight; what an answer names below is asked for at once.
+  while (syncing.out.size < SYNC_WINDOW) {
+    const m = ++asked, next = copy.next(BigInt(m));
+    if (next.length === 0) break;
+    syncing.out.set(m, next);
+    sock.send(next);
+  }
+  if (syncing.out.size > 0) { awaitAnswer(sock); return; } // each answer moves the deadline, not only a send
   const done = { kind: syncing.kind, ms: Math.round(performance.now() - syncing.t0), ...JSON.parse(copy.finish()) };
   clearTimeout(syncing.timer);
   const t = performance.now();

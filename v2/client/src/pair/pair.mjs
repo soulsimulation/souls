@@ -12,9 +12,10 @@
 //
 //   node v2/client/src/pair/pair.mjs --directory <origin> --world <key> --gateway <ws url> --device <name>
 //        --label <agent label> [--soul <grant> | --creator <creator grant>] [--force] [--advert <url of world.json>]
-//        [--name <the Soul's name>] [--start]
+//        [--name <the Soul's name>]
 //   --name is what the new Soul is called: kept in config.json and on its owner's page, and carried by the daemon's own
-//   first `life:join`, so it is born named. --start starts the Soul's daemon once approved, so it joins the world then.
+//   first `life:join`, so it is born named. It never starts the Soul's daemon (N13): the agent's `start` does, after
+//   telling its person. `souls.mjs pair` runs `pair` in the foreground (`here.mjs`); this program is the creator's.
 //   With --creator (G7, #2796) it asks for the world's creator scope: `creator-<scope hex>-<n>`, kept as `c_<...>`.
 //   Prints one JSON line with the link and code, then one with the outcome: `{ok, soul, history}` or `{ok: false, code}`.
 //   The home is SOULS_HOME, else the nearest .souls, else ./.souls.
@@ -173,10 +174,14 @@ export const localId = (grant) => grant.startsWith('creator-') ? `c_${grant.slic
 
 /**
  * Asks, waits for the owner's approval, and keeps the token. `onAsk({link, code})` is called once the directory has
- * given the code; `unit` is the milliseconds in a second of polling interval (tests shorten it). Resolves to
- * `{soul, grant}`; rejects with a `Refused` naming why (and the device, for `soul-connected`).
+ * given the code, after `onAsked({secret, link, code, interval, polled})`, which a caller that may wait again keeps
+ * (N13); `unit` is the milliseconds in a second of polling interval (tests shorten it). `resume` (what `onAsked` gave,
+ * with the last `polled`) waits for that request again instead of asking anew, its first poll a full interval after
+ * the last. `until` (a time of `now()`) bounds the wait: a poll that would fall after it is not made, and the wait
+ * resolves to `{pending: true, interval, polled}`. Resolves to `{soul, grant}`; rejects with a `Refused` naming why
+ * (and the device, for `soul-connected`).
  */
-export async function pair({ home, directory, world, gateway, device, label, soul, creator, force = false, onAsk, unit = 1000, sleep, onPoll, advert, name }) {
+export async function pair({ home, directory, world, gateway, device, label, soul, creator, force = false, onAsk, onAsked, unit = 1000, sleep, onPoll, advert, name, resume, until, now = Date.now }) {
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   // The token comes back in the poll's answer: over https, or plain http to this machine only.
   const at = new URL(directory);
@@ -186,8 +191,8 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     const r = await fetch(new URL(path, directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     return r.json();
   };
-  const secret = randomBytes(32).toString('hex');
-  const asked = await post('/v1/pair/request', {
+  const secret = resume?.secret ?? randomBytes(32).toString('hex');
+  const asked = resume ? { link: resume.link, code: resume.code, interval: resume.interval } : await post('/v1/pair/request', {
     secret_hash: createHash('sha256').update(secret).digest('hex'),
     // A creator (G7) names the world's creator grant its account holds; the directory never makes one. Each request
     // names the world it is paired for (W11): a creator's grant is its account's, the same in every world it made, so
@@ -196,13 +201,19 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     device, label, force, world, ...(creator ? { scope: 'creator', soul: creator } : { scope: 'soul', ...(soul ? { soul } : { new: true, ...(name ? { name } : {}) }) }),
   });
   if (asked.refused) throw new Refused(asked.refused, 'the directory refused the request');
+  let interval = asked.interval ?? 5, polled = resume?.polled ?? now();
+  if (!resume) onAsked?.({ secret, link: asked.link, code: asked.code, interval, polled });
   onAsk?.({ link: asked.link, code: asked.code });
-  let interval = asked.interval ?? 5;
+  // A resumed request's first poll keeps the directory's interval from its last (sooner is answered slow_down).
+  let next = resume ? Math.max(0, polled + interval * unit - now()) : interval * unit;
   for (;;) {
-    await wait(interval * unit);
+    if (until !== undefined && now() + next > until) return { pending: true, interval, polled };
+    await wait(next);
+    next = interval * unit;
     const got = await post('/v1/pair/poll', { secret });
-    onPoll?.({ interval, pending: got.pending });
-    if (got.pending === 'slow_down') { interval = Math.max(got.interval ?? 0, interval + SLOW_DOWN); continue; }
+    polled = now();
+    onPoll?.({ interval, pending: got.pending, polled });
+    if (got.pending === 'slow_down') { interval = Math.max(got.interval ?? 0, interval + SLOW_DOWN); next = interval * unit; continue; }
     if (got.pending) continue;
     if (got.refused) throw Object.assign(new Refused(got.refused, got.device ? `connected to ${got.device}` : 'refused'), { device: got.device ?? null });
     if (typeof got.token !== 'string' || typeof got.grant !== 'string') throw new Refused('pair-answer', 'no token in the answer');
@@ -258,12 +269,6 @@ if (isMain(import.meta.url)) {
       onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: `Open the link while signed in to ${new URL(link, opt('--directory')).host}, check the code matches, and approve. The card also appears on the world page if it is open.` }),
     });
     say({ ok: true, ...out });
-    // Approved: the Soul's daemon starts now, syncs and joins the world by itself, with no command from its agent.
-    if (args.includes('--start')) {
-      const { call, DEFAULT_PKG } = await import('../daemon/client.mjs');
-      const s = await call(home, out.soul, { op: 'status' }, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }).catch((e) => ({ ok: false, code: e.code ?? 'daemon-not-started' }));
-      say({ ok: s.ok !== false, step: 'started', soul: out.soul, ...(s.ok === false ? { code: s.code } : {}) });
-    }
   } catch (e) {
     say({ ok: false, code: e.code ?? 'failed', ...(e.device ? { device: e.device } : {}), detail: String(e.message ?? e).slice(0, 200) });
     process.exitCode = 1;

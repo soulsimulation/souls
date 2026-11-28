@@ -8,12 +8,14 @@ import {audioSettings,loadAudioSettings,setAudioSettings,subscribeAudioSettings}
 import {AudioMenu} from './AudioMenu.tsx';
 import {PLAYLIST} from './score/playlist/order.mjs';
 
-test('0–3 available owned Souls stay inline with creation; four collapse the entire group into a pile',()=>{
- for(const n of [0,1,2,3,4,7]){
+test('0–3 available owned Souls stay inline; four or more fold the chips into a pile, New Soul stays in the bar',()=>{
+ for(const n of [0,1,2,3,4,5,7]){
   const ids=Array.from({length:n},(_,i)=>`s_${i}`),souls=new Map(ids.map(id=>[id,{id,name:id,entityId:id}]));
   const html=renderToStaticMarkup(<MySouls ids={ids} souls={souls as never} select={()=>{}} newSoul={<button>New Soul</button>}/>);
   if(n<4){assert.equal((html.match(/aria-label="Open /g)??[]).length,n);assert.match(html,/New Soul/);assert.doesNotMatch(html,/Your Souls|soul-avatar-pile/);}
-  else{assert.match(html,/aria-label="Your Souls"/);assert.equal((html.match(/data-soul-id=/g)??[]).length,3);assert.doesNotMatch(html,/New Soul|aria-label="Open |\+[0-9]|away/);}
+  else{assert.match(html,/aria-label="Your Souls"/);assert.equal((html.match(/data-soul-id=/g)??[]).length,3);assert.doesNotMatch(html,/aria-label="Open |\+[0-9]|away/);
+   // the New Soul button is in the bar beside the pile, not inside its menu
+   assert.match(html,/<span class="new-soul-control"><button>New Soul<\/button><\/span>/);}
  }
  const html=renderToStaticMarkup(<MySouls ids={['missing','a']} souls={new Map([['a',{id:'a',name:'Here',entityId:'e'}]]) as never} select={()=>{}} newSoul={<button>New Soul</button>}/>);
  assert.match(html,/Open Here/);assert.doesNotMatch(html,/missing|away|soul-avatar-pile/);

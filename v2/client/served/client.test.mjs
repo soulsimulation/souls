@@ -139,13 +139,12 @@ test('A1: the one line, in an empty folder, ends with a running client', async (
 
   const approve = await fetch(`${directory}/v1/pair/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: asked.code, confirm: true, test_person: 'owner' }) });
   assert.equal(approve.status, 200);
-  soul = await waitFor(() => { try { return Object.keys(JSON.parse(readFileSync(join(home, 'credentials.json'), 'utf8')).souls)[0]; } catch { return null; } });
   ({ p: gw } = await run(bin('gatewayd'), ['--listen', `127.0.0.1:${gwPort}`, '--world', world, '--tokens', tokensFile, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/));
+  // N13: nothing runs until the agent's `start`, which waits for the approval, keeps the token and starts the client.
+  const started = await eden('start');
+  assert.deepEqual([started.step, started.approved, started.started], ['started', true, true], JSON.stringify(started));
+  soul = started.soul;
   rt = runtimeOf(home, soul);
-
-  const status = await eden('status');
-  // #4766: once approved, the pairing starts the daemon itself, so `status` may find it running already.
-  assert.ok(status.started === true || status.pid > 0, JSON.stringify(status));
   assert.match(commandOf(daemonPid(soul)), /bin\/client\/1\.0\.0-[0-9a-f]{16}\/v2\/client\/src\/daemon\/daemon\.mjs/, 'the daemon runs from the served client');
   assert.match(commandOf(daemonPid(soul)), /bin\/lib\/[0-9a-f]{16}/, 'with the library fetched by hash');
   await waitFor(async () => (await request(rt.socket, { op: 'status' })).connected);
@@ -227,7 +226,9 @@ test('0.133 Q2: the one line, in an empty folder below a Souls home, pairs into 
   assert.equal(readFileSync(join(below, '.souls', '.gitignore'), 'utf8').split('\n').filter((l) => l && !l.startsWith('#')).join(), '*', 'a new home keeps itself out of git');
   const approve = await fetch(`${directory}/v1/pair/approve`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: asked.code, confirm: true, test_person: 'owner' }) });
   assert.equal(approve.status, 200);
-  await waitFor(() => existsSync(join(below, '.souls', 'credentials.json')));
+  await ran(process.execPath, ['eden.mjs', 'start'], { cwd: below, env: { PATH: process.env.PATH, HOME: dir } });
+  assert.ok(existsSync(join(below, '.souls', 'credentials.json')));
+  await ran(process.execPath, ['eden.mjs', 'quit'], { cwd: below, env: { PATH: process.env.PATH, HOME: dir } });
   assert.ok(existsSync(join(below, '.souls', 'bin', 'eden.mjs')), 'the client installed in the new home');
   assert.deepEqual(snapshot(), before, 'the home above is byte-identical');
 

@@ -17,6 +17,7 @@ import { closeApproval, closedApprovals, WINDOW_POLL_MS } from './window-approva
 import { countPairing } from '../visitor-counts.ts';
 import { v2Approved, v2WorldName } from '../v2-engine/owner-mailbox.ts';
 import { v2Creator } from './god-api.ts';
+import { nameRefusedLine } from './pair-name.ts';
 import './approval-card.css';
 
 /** `name`: the name a new Soul's agent asked for (`souls.mjs pair --name`), when it asked for one. */
@@ -126,13 +127,15 @@ export function V2PairDialog({ place, request, onDone }: { place: Directory; req
       if (r?.ok && body?.approved === true && creator) setBuilt(true);   // no Soul to wait for: the agent builds
       else if (r?.ok && body?.approved === true && typeof body.soul === 'string') {
         countPairing('pair:' + request.code);
-        const given = name.trim();
-        if (given && !request.soul && !request.former) {
-          const n = await directoryPost(place, '/v1/account/souls/profile', { soul: body.soul, name: given }).catch(() => null);
-          if (!n?.ok) setSaid('The name was not kept; its agent can set one.');
-        }
         setSoul(soulIdOf(body.soul));
         v2Approved(soulIdOf(body.soul));   // the navbar lists it as arriving at once; its card's box starts now
+        // the name the person gave: written beside the arrival, never before it (first day, 28 Nov)
+        const given = name.trim();
+        if (given && !request.soul && !request.former) {
+          void directoryPost(place, '/v1/account/souls/profile', { soul: body.soul, name: given })
+            .then(async (n) => { if (n?.ok) return; const why = await n?.json().catch(() => null) as { refused?: string } | null | undefined; setSaid(nameRefusedLine(why?.refused)); })
+            .catch(() => setSaid(nameRefusedLine(null)));
+        }
       } else setSaid(!r ? 'Sign in first.' : `Not approved: ${body?.refused ?? r.status}${body?.device ? ` (connected to ${clip(body.device, 'a device')})` : ''}`);
     } catch { setSaid('The directory could not be reached. Try again.'); } finally { setBusy(false); }
   };

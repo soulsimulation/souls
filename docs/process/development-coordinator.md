@@ -25,6 +25,29 @@ bind everyone.
 - Anything that needs Gene is one inbox item of kind decision or action, with the choice and a recommendation. Carry
   on with everything that does not depend on it.
 
+## Release cadence
+
+Release only for one of two reasons:
+
+1. **A significant upgrade:** a set of merged work that changes what people see or can do.
+2. **A critical fix:** a core path broken on the live site. That means one of:
+   - a world won't draw;
+   - sign-in fails;
+   - a new person can't get a Soul at all;
+   - data is lost or corrupted.
+
+Everything else (first-day polish, timing, wording, tests) merges to main and waits for the next real release,
+about once a day, in the morning EST.
+
+Before releasing for a fix, prove it works on the real address, or on a production-like setup, first.
+
+Why: each release costs about two hours. That's about 50 minutes of build and deploy, about 20 minutes of checks on
+soul.game, and a 45-minute first-day walk that uses real usage. Never release just because a lane finished. Release
+at most once a night unless the live site is broken on a core path, and say why in the morning report.
+
+On 28 Nov three releases went out in one morning (0.149, 0.150, 0.151). 0.149 and 0.150 were live barely an hour
+each, none of the three met the critical bar, and one was rolled back on a misread result and rolled forward again.
+
 ## The master view's data
 
 The page reads five collections. Write them with the artifact data tool; never republish the page to change them.

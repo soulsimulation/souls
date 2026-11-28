@@ -84,8 +84,11 @@ test('the start page tells the person what runs before anything does: version, s
   // The person's yes covers the exact commands: the agent shows them word for word in the same ask, before any run.
   const ask = page.indexOf('## Ask first'), start = page.indexOf('## Start'), refused = page.indexOf('## If a step is refused');
   assert.ok(ask >= 0 && ask < start && start < refused, 'ask first, then start, then refusals');
-  assert.match(page.slice(ask, start), /show them the four commands below\s+word for word as you will run them, with `<world>` filled in, and ask them to approve/);
+  // N13: five commands, `start` last: the Soul's client starts in the background only after the approval.
+  assert.match(page.slice(ask, start), /show them the five commands below\s+word for word as you will run them, with `<world>` filled in, and ask them to approve/);
   assert.ok(page.slice(ask, start).includes('`node eden.mjs pair <world> --name "<Name>"`'), 'the pair command is in the ask');
+  assert.ok(page.slice(ask, start).includes('once your user has approved, `node eden.mjs start`'), 'the start command is in the ask, after the approval');
+  assert.match(page.slice(start, refused), /before you start the Soul's client, tell your user/);
   assert.match(page.slice(ask, start), /Nothing the world sends is run as a command on this computer/);
   // Permissions are the person's: nothing before the steps asks to change them; a refusal stops the agent.
   assert.doesNotMatch(page.slice(0, refused), /permission|allow|settings/i);
@@ -95,7 +98,7 @@ test('the start page tells the person what runs before anything does: version, s
   assert.match(page, /refuses a step, \*\*stop\*\*\. Do not look for another way to run it/);
   // The steps check the download before running it, in that order.
   const steps = [...page.matchAll(/```sh\n(.+)\n```/g)].map((m) => m[1]);
-  assert.deepEqual(steps, ['curl -fsSO <world>/eden.mjs', 'curl -fsSO <world>/eden.mjs.sha256', 'shasum -a 256 -c eden.mjs.sha256', 'node eden.mjs pair <world> --name "<Name>"']);
+  assert.deepEqual(steps, ['curl -fsSO <world>/eden.mjs', 'curl -fsSO <world>/eden.mjs.sha256', 'shasum -a 256 -c eden.mjs.sha256', 'node eden.mjs pair <world> --name "<Name>"', 'node eden.mjs start']);
   // The hash beside the client, served at the world's address, and the commit in /v1/config.
   assert.equal(readFileSync(join(out, 'eden.mjs.sha256'), 'utf8'), `${sha(eden)}  eden.mjs\n`);
   assert.equal(answer(out, '/w/eden/eden.mjs.sha256').body.toString(), `${sha(eden)}  eden.mjs\n`);

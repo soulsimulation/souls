@@ -142,7 +142,14 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
 - **First day comes first.** A release is not done until the `first-day` skill passes on the real address: a fresh
   agent that knows nothing of this repository takes a new person from New Soul to a named Soul they can see and
   instruct, approved on the page. Judge by the screen, never by a client's or another agent's report.
-- No freeze, no gate receipt, no rehearsal. The coordinator releases when a release's tasks are done.
+- No freeze, no gate receipt, no rehearsal.
+- **When to release:** only for a significant upgrade, or a critical fix: a core path broken on the live site (a world
+  won't draw, sign-in fails, a new person can't get a Soul at all, data is lost or corrupted). Everything else
+  (first-day polish, timing, wording, tests) merges to main and waits for the next real release, about once a day,
+  in the morning EST. Prove a fix works on the real address or a production-like setup before releasing it. A
+  release costs about two hours and real usage, so never release because a lane finished; at most one a night
+  unless a core path is broken, and say why in the morning report.
+  [Release cadence](docs/process/development-coordinator.md#release-cadence)
 - Never touch services, users, DNS or proxies on the host that aren't Soul's. [docs/operations.md](docs/operations.md)
 
 ## Visitor analytics
