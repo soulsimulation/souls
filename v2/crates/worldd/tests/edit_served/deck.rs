@@ -964,7 +964,11 @@ fn deck_bay_two_sheets_seated_at_1_8_m_a_soul_walks_up_the_stair_and_across_both
         println!("{what}: the body on {} at {:?}", show(at.0), at.1);
         at
     };
-    k.restart();
+    for l in k._s.lines.try_iter() {
+        if l.contains("planner") || l.contains("stale") || l.contains("not installed") || l.contains("map") {
+            println!("SERVER {l}");
+        }
+    }
     let (on, at) = up(&mut k, decks[0], v3(0, 19_000, 0), "Soul 5 up onto the first sheet");
     assert_eq!((on, at.y), (decks[0], 19_000), "on the first sheet's top");
     let (on, at) = up(&mut k, decks[1], v3(0, 19_000, 200_000), "Soul 5 across to the second sheet");
