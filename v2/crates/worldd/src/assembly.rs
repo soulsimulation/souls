@@ -66,7 +66,22 @@
 //!     does, to where it started, which every carrier could reach; there its carry goes on, or breaks off when its
 //!     carriers have gone (`crate::engine`).
 //!
-//! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay.
+//! - **Fed over what it rests on (FOR-FABLE 6, [`Feed`]).** A long part that rests on others (a joist on two beams)
+//!   cannot be set in from between its carriers once the bay is closed: they would stand on either side of it, and no
+//!   way takes it there but through a frame or a beam. So when the straight set-in is not admitted, a put of a resting
+//!   part tries the feed: the crew stands in line beside the bay, the part pointing at its slot; the set-in first
+//!   raises it straight up to the slot's height, then slides it level to the slot along its track, over the top of
+//!   what it will rest on. Both legs are swept against the ground's fixed geometry at the part's own height
+//!   (`sim::activity::carry::node_way`: touching the top of a bearer is not meeting it), so a fed part passes through
+//!   nothing. A carrier behind the part walks beside it as on any set-in. A carrier whose hold the slide takes out of
+//!   its reach (the one nearest the bay: the part goes on over the beam, it cannot follow) **lets go there**, which is
+//!   admitted only when from then on the part rests on a fixed part under it and another carrier holds it to the end:
+//!   it is held, or borne and held, at every sample. Refused, the put says why and where it would be fed from
+//!   ([`FED_FROM`]). A fed set-in that is stopped goes back the way it came, at the pace it came, and a carrier who
+//!   let go takes its hold again where it left it.
+//!
+//! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay; a straight
+//! set-in is not swept (a sheet raised from under its joists passes through them: it waits for the hand-up).
 
 use std::collections::BTreeMap;
 
@@ -198,6 +213,13 @@ pub struct Setting {
     pub end: (Vec3, Quat),
     /// Between its carriers along the ground when the put was asked, µm: the carry's span when it starts again.
     pub span: i64,
+    /// A fed set-in's turn ([`Feed`]): the node raised to here, at this time, before it slides to `end`. None for a
+    /// straight set-in.
+    pub via: Option<((Vec3, Quat), Micros)>,
+    /// The carriers a fed set-in's slide takes out of reach, and when each lets go (the part borne from then on).
+    pub fed: Vec<(Id, Micros)>,
+    /// Whether the walks beside a fed part's slide have been started ([`Assembly::slides`]).
+    walked: bool,
     /// Its carriers where its track started, every one within reach of its hold there (#5067): they stay within reach.
     pub holding: Vec<Id>,
     /// Its carriers who walk beside the part on the track, each from where it stood to where it stands at the end.
@@ -587,15 +609,204 @@ impl Crew<'_> {
     }
 }
 
+impl Setting {
+    /// Where its node is on its way in at `at`: on the straight track, or a fed part's two legs.
+    fn on(&self, at: Micros) -> (Vec3, Quat) {
+        let way = match self.via {
+            Some((via, tm)) if at <= tm => between(self.start, via, (self.t0, tm), at),
+            Some((via, tm)) => between(via, self.end, (tm, self.due), at),
+            None => between(self.start, self.end, (self.t0, self.due), at),
+        };
+        way.unwrap_or(self.end)
+    }
+
+    /// The carriers of a fed part who have let go by `at` on its way in.
+    fn let_go(&self, at: Micros) -> Vec<Id> {
+        self.fed
+            .iter()
+            .filter(|(_, t)| *t <= at)
+            .map(|(b, _)| *b)
+            .collect()
+    }
+}
+
 /// A crew's node on its set-in track or its way back (#5067 item 3, [`Assembly::tracks`]): its crew, where the node is
 /// on its ground (µm), when the track ends, whether it is the way back, and its carriers, held to their reach on it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct OnTrack<'a> {
     pub activity: Id,
     pub node: (Vec3, Quat),
     pub until: Micros,
     pub back: bool,
     pub holding: &'a [Id],
+    /// The intent and the Soul that asked the put.
+    pub by: (Id, Id),
+    /// The carriers of a fed set-in who have let go where the node is now ([`Setting::fed`]): not held to their reach,
+    /// their holds not said.
+    pub let_go: Vec<Id>,
+}
+
+/// The words a put's refusal ends with, then `x=<mm> z=<mm> mm` and which end goes first, when the part would be
+/// admitted fed from there ([`Feed`]).
+pub const FED_FROM: &str = "it would be fed with the crew's node at";
+
+/// What a put needs to feed its part over what it rests on (FOR-FABLE 6; the engine's, from the crew's carry and its
+/// ground's fixed geometry).
+pub struct Feed<'a> {
+    /// How far on the plan a feed may slide its part, µm: its own length and a put's reach.
+    pub most: i64,
+    /// Half the part's length and how far beyond its middle its leading carrier stands, µm: for where it would be fed
+    /// from.
+    pub half_length: i64,
+    pub place: i64,
+    /// Whether the part's node may go from one pose to another without meeting anything (`part.way-blocked`).
+    pub clear: &'a dyn Fn((Vec3, Quat), (Vec3, Quat)) -> R<()>,
+    /// Whether the part, its node there, rests on a fixed part under it.
+    pub bears: &'a dyn Fn((Vec3, Quat)) -> bool,
+}
+
+/// A fed set-in, admitted: its turn (the node raised, and how long that takes), how long its slide takes, who walks
+/// beside the slide and who lets go when (µs after the slide starts).
+#[derive(Clone, Debug)]
+pub struct Fed {
+    pub via: (Vec3, Quat),
+    pub rise: Micros,
+    pub slide: Micros,
+    pub walks: Vec<Walk>,
+    pub lets: Vec<(Id, Micros)>,
+}
+
+/// How far beyond the seated part's end its leading carrier stands where [`fed_from`] names a place, µm.
+const FEED_CLEAR: i64 = 200_000;
+/// How near the turn a fed part is held at must be to the one it is seated at, as the thousandths of the cosine
+/// between them (15 degrees): it is slid, not swung.
+const FEED_COS: i128 = 966;
+
+/// The feed of a part from its crew's node at `from` to `to` (see the module's notes): raised straight up to `to`'s
+/// height, then slid level. Each leg swept by `feed.clear`; every carrier reaches its hold through the rise; on the
+/// slide each stands within reach, or walks beside the part (`walkable`), or lets go where its reach ends, the part
+/// borne from then on (`feed.bears`) and another carrier holding it to the end. Else refused by name, saying why.
+pub fn fed(
+    carriers: &[Carrier],
+    from: (Vec3, Quat),
+    to: (Vec3, Quat),
+    feed: &Feed,
+    walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
+) -> R<Fed> {
+    let (dx, dz) = (to.0.x - from.0.x, to.0.z - from.0.z);
+    let far = (i128::from(dx).pow(2) + i128::from(dz).pow(2)).isqrt();
+    if far > i128::from(feed.most) {
+        return Err(refusal(
+            "part.out-of-reach",
+            format!(
+                "{} mm from where it would go; a feed slides it at most {} mm",
+                far / 1000,
+                feed.most / 1000
+            ),
+        ));
+    }
+    let pose = |e| refusal("part-pose", format!("{e:?}"));
+    let ax = |q: Quat| q.rotate(Vec3::new(1 << 20, 0, 0)).map_err(pose);
+    let (a, b) = (ax(from.1)?, ax(to.1)?);
+    let dot = i128::from(a.x) * i128::from(b.x) + i128::from(a.z) * i128::from(b.z);
+    if dot * 1000 < FEED_COS << 40 {
+        return Err(refusal(
+            "part.feed-turned",
+            "the part is not held as it is seated: a feed slides it without turning it",
+        ));
+    }
+    let via = (Vec3::new(from.0.x, to.0.y, from.0.z), from.1);
+    out_of_reach(carriers, from)?;
+    out_of_reach(carriers, via)?;
+    (feed.clear)(from, via)?;
+    (feed.clear)(via, to)?;
+    let rise = match (via.0.y - from.0.y).abs() {
+        0 => 0,
+        up => set_in_time(up),
+    };
+    let slide = set_in_time(i64::try_from(far).unwrap_or(i64::MAX));
+    let tick = sim::activity::carry::HOIST_TICK;
+    let n = slide / tick;
+    let at = |k: i64| between(via, to, (0, slide), k * tick);
+    let (mut walks, mut lets, mut held) = (Vec::new(), Vec::new(), false);
+    for c in carriers {
+        let mut out = None;
+        for k in 0..=n {
+            if out_of_reach(&[*c], at(k)?).is_err() {
+                out = Some(k);
+                break;
+            }
+        }
+        let Some(k) = out else {
+            held = true;
+            continue;
+        };
+        let beside = Vec3::new(c.feet.x + dx, c.feet.y, c.feet.z + dz);
+        if walkable(c.body, c.feet, beside) {
+            walks.push(Walk {
+                body: c.body,
+                from: c.feet,
+                to: beside,
+                speed: pace(c.feet, beside, slide),
+            });
+            held = true;
+            continue;
+        }
+        for j in k..=n {
+            if !(feed.bears)(at(j)?) {
+                let p = at(j)?.0;
+                return Err(refusal(
+                    "part.feed-unborne",
+                    format!(
+                        "{} would lose its hold with the part at ({}, {}) mm, resting on nothing there",
+                        show(c.body),
+                        p.x / 1000,
+                        p.z / 1000
+                    ),
+                ));
+            }
+        }
+        lets.push((c.body, k * tick));
+    }
+    if !held {
+        return Err(refusal(
+            "part.feed-unheld",
+            "no carrier would hold the part to its slot: one stands behind it and walks it in",
+        ));
+    }
+    Ok(Fed {
+        via,
+        rise,
+        slide,
+        walks,
+        lets,
+    })
+}
+
+/// Where the part would be fed from, nearest its slot, on the line of its length as it is seated (the crew's node at
+/// `to` then, at height `y` as it is carried): from either end, every [`ADMIT_STEP`] out to `feed.most`, the first
+/// place both legs are clear from, with its leading carrier's place clear of where the part goes. With it, whether
+/// the crew's front is toward the slot there.
+pub fn fed_from(to: (Vec3, Quat), y: i64, feed: &Feed) -> Option<(Vec3, bool)> {
+    let u = to.1.rotate(Vec3::new(1 << 20, 0, 0)).ok()?;
+    let l = (i128::from(u.x).pow(2) + i128::from(u.z).pow(2))
+        .isqrt()
+        .max(1);
+    let least = feed.half_length + feed.place + FEED_CLEAR;
+    let mut d = least;
+    while d <= feed.most {
+        for side in [1i128, -1] {
+            let k = |v: i64| (side * i128::from(v) * i128::from(d) / l) as i64;
+            let p = Vec3::new(to.0.x + k(u.x), y, to.0.z + k(u.z));
+            let via = (Vec3::new(p.x, to.0.y, p.z), to.1);
+            if (feed.clear)((p, to.1), via).is_ok() && (feed.clear)(via, to).is_ok() {
+                // The node's +x runs from the crew's back to its front: on the + side the back is toward the slot.
+                return Some((p, side < 0));
+            }
+        }
+        d += ADMIT_STEP;
+    }
+    None
 }
 
 /// The conjugate of a unit quaternion: its inverse turn. A half turn (w 0) is written with its other sign, its one
@@ -1179,6 +1390,7 @@ impl Assembly {
         apart: i64,
         carriers: &[Carrier],
         walkable: &dyn Fn(Id, Vec3, Vec3) -> bool,
+        feed: Option<&Feed>,
     ) -> R<(Vec<Effect>, Vec<Walk>)> {
         let part = *self
             .held
@@ -1213,15 +1425,16 @@ impl Assembly {
             (None, None) => return Err(refusal("part-needs-a-place", "parameter 2 or 3")),
         };
         let (dx, dz) = (i128::from(at.x - from.0.x), i128::from(at.z - from.0.z));
-        if dx * dx + dz * dz > i128::from(PUT_REACH).pow(2) {
-            return Err(refusal(
+        // Beyond a put's reach only a feed takes it (below).
+        let far_off = (dx * dx + dz * dz > i128::from(PUT_REACH).pow(2)).then(|| {
+            refusal(
                 "part.out-of-reach",
                 format!(
                     "{} mm from where it would go",
                     (dx * dx + dz * dz).isqrt() / 1000
                 ),
-            ));
-        }
+            )
+        });
         // #5067: where the set-in's track ends, the crew's node posed so the part, in its slot as it is held, is
         // exactly where it is seated (at `at`, turned as `to` is): it is never moved or turned at the commit.
         let pose = |e| refusal("part-pose", format!("{e:?}"));
@@ -1274,12 +1487,47 @@ impl Assembly {
             Some([f, b, ..]) => [f.body, b.body],
             _ => return Err(refusal("crew.size", show(activity))),
         };
-        let mut walks = match ways_turning(carriers, ends, from.0, end.0, (from.1, end.1), walkable)
-        {
-            Ok(w) => w,
+        // Joins named by the put are its own (`--joins`): never filtered. Else the default ([`default_joins`]).
+        let joins = match (joins, slot) {
+            (Some(j), _) => j,
+            (None, Some(k)) if bay => default_joins(tree, s, th, pk.as_str(), k, &|_| true),
+            (None, _) => Vec::new(),
+        };
+        let straight = match far_off {
+            Some(r) => Err(r),
+            None => ways_turning(carriers, ends, from.0, end.0, (from.1, end.1), walkable),
+        };
+        // FOR-FABLE 6: a part that rests on others, its straight set-in not admitted, is fed over them when it can be.
+        let rests = bay && !s.stands(pk.as_str()) && !joins.is_empty();
+        let mut feeding = None;
+        let mut walks = match (straight, feed.filter(|_| rests)) {
+            (Ok(w), _) => w,
+            (Err(mut r), Some(feed)) => match fed(carriers, from, end, feed, walkable) {
+                Ok(f) => {
+                    let w = f.walks.clone();
+                    feeding = Some(f);
+                    w
+                }
+                Err(why) => {
+                    let whence = match fed_from(end, from.0.y, feed) {
+                        Some((p, front)) => format!(
+                            "{FED_FROM} x={} z={} mm, the part along its slot, its crew's {} toward it",
+                            p.x / 1000,
+                            p.z / 1000,
+                            if front { "front" } else { "back" }
+                        ),
+                        None => "no place beside it is clear to feed it from".to_owned(),
+                    };
+                    r.detail = format!(
+                        "{}; fed over what it rests on: {} ({}); {whence}",
+                        r.detail, why.name, why.detail
+                    );
+                    return Err(r);
+                }
+            },
             // #5067: refused, it says where the crew's node would be admitted from, nearest where it is: the same
             // admission (`ways`) with the whole crew there, so a client carries it there and asks again.
-            Err(mut r) if r.name == "part.grip-out-of-reach" => {
+            (Err(mut r), None) if r.name == "part.grip-out-of-reach" => {
                 if let Some(p) = admitted_from(carriers, ends, from, end, walkable) {
                     r.detail = format!(
                         "{}; {ADMITTED_AT} x={} z={} mm",
@@ -1290,13 +1538,7 @@ impl Assembly {
                 }
                 return Err(r);
             }
-            Err(r) => return Err(r),
-        };
-        // Joins named by the put are its own (`--joins`): never filtered. Else the default ([`default_joins`]).
-        let joins = match (joins, slot) {
-            (Some(j), _) => j,
-            (None, Some(k)) if bay => default_joins(tree, s, th, pk.as_str(), k, &|_| true),
-            (None, _) => Vec::new(),
+            (Err(r), None) => return Err(r),
         };
         let mut joined = Vec::new();
         for other in joins {
@@ -1343,11 +1585,26 @@ impl Assembly {
         self.seating.parts.clear();
         // #5067: a track as a lift's is, its node's samples written a tick at a time ([`Assembly::step`]) from here,
         // where the carry's last sample has it.
-        let span = set_in_time(dist(from.0, end.0));
+        let span = match &feeding {
+            Some(f) => f.rise + f.slide,
+            None => set_in_time(dist(from.0, end.0)),
+        };
         let effects = Vec::new();
-        for w in &mut walks {
-            w.speed = pace(w.from, w.to, span);
+        if feeding.is_none() {
+            for w in &mut walks {
+                w.speed = pace(w.from, w.to, span);
+            }
         }
+        let via = feeding.as_ref().map(|f| (f.via, now + f.rise));
+        let lets = feeding
+            .as_ref()
+            .map(|f| f.lets.iter().map(|(b, t)| (*b, now + f.rise + t)).collect())
+            .unwrap_or_default();
+        // A fed part's walkers set off when its slide does ([`Assembly::slides`]), not while it is raised.
+        let (now_walks, walked) = match &feeding {
+            Some(f) if f.rise > 0 => (Vec::new(), false),
+            _ => (walks.clone(), true),
+        };
         self.setting.insert(
             activity,
             Setting {
@@ -1363,9 +1620,41 @@ impl Assembly {
                 span: apart,
                 holding: holding.iter().map(|c| c.body).collect(),
                 walks: walks.clone(),
+                via,
+                fed: lets,
+                walked,
             },
         );
-        Ok((effects, walks))
+        Ok((effects, now_walks))
+    }
+
+    /// The walks beside fed parts whose slide starts by `now`, each once: the caller's to start, on the ground given.
+    pub fn slides(&mut self, now: Micros) -> Vec<(Id, Vec<Walk>)> {
+        self.setting
+            .values_mut()
+            .filter(|s| !s.walked && s.via.is_some_and(|(_, t)| t <= now))
+            .map(|s| {
+                s.walked = true;
+                (s.ground, s.walks.clone())
+            })
+            .collect()
+    }
+
+    /// Whether crew `activity`'s part is being fed in, or is on its way back from a feed.
+    pub fn feeding(&self, activity: Id) -> bool {
+        let fed = |s: &Setting| s.via.is_some();
+        self.setting.get(&activity).is_some_and(fed)
+            || self.committing.get(&activity).is_some_and(fed)
+            || self.returning.get(&activity).is_some_and(|r| fed(&r.0))
+    }
+
+    /// How long from `now` crew `activity`'s fed part, on its way back, is still on its slide: its walkers walk back
+    /// in that time. None for a part not fed, or not on its way back.
+    pub fn slide_back(&self, activity: Id, now: Micros) -> Option<Micros> {
+        let (s, end, _, _) = self.returning.get(&activity)?;
+        let (_, tm) = s.via?;
+        // The way back replays the way in: at `now` it is where the way in was at `s.t0 + (end - now)`.
+        Some((s.t0 + (end - now) - tm).max(0))
     }
 
     /// Where each crew's node is on its set-in track or its way back at `now` (#5067 item 3).
@@ -1373,20 +1662,31 @@ impl Assembly {
         let on = |from, to, times| between(from, to, times, now).unwrap_or(to);
         let going = self.setting.iter().map(|(a, s)| OnTrack {
             activity: *a,
-            node: on(s.start, s.end, (s.t0, s.due)),
+            node: s.on(now),
             until: s.due,
             back: false,
             holding: &s.holding,
+            by: s.by,
+            let_go: s.let_go(now),
         });
         let back = self
             .returning
             .iter()
             .map(|(a, (s, end, from, t0))| OnTrack {
                 activity: *a,
-                node: on(*from, s.start, (*t0, *end)),
+                // A fed part goes back the way it came, at the pace it came.
+                node: match s.via {
+                    Some(_) => s.on(s.t0 + (*end - now).max(0)),
+                    None => on(*from, s.start, (*t0, *end)),
+                },
                 until: *end,
                 back: true,
                 holding: &s.holding,
+                by: s.by,
+                let_go: match s.via {
+                    Some(_) => s.let_go(s.t0 + (*end - now).max(0)),
+                    None => Vec::new(),
+                },
             });
         going.chain(back).collect()
     }
@@ -1589,8 +1889,12 @@ impl Assembly {
         s: Setting,
     ) -> R<Vec<Effect>> {
         // From where its track has it now, back to where it started, a sample a tick (#5067: blended as the set-in is).
-        let here = between(s.start, s.end, (s.t0, s.due), now.min(s.due))?;
-        let span = set_in_time(dist(here.0, s.start.0));
+        let here = s.on(now.min(s.due));
+        let span = match s.via {
+            // A fed part goes back the way it came, at the pace it came.
+            Some(_) => now.min(s.due) - s.t0,
+            None => set_in_time(dist(here.0, s.start.0)),
+        };
         let effects = self.hand_off(
             tree,
             now,
